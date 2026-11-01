@@ -23,6 +23,11 @@ describe('ActivityHub', () => {
       ['completed', 'mac:turn-1'], ['started', 'mac:turn-2'], ['failed', 'mac:turn-2'], ['needsInput', 'mac:req-2'], ['resolved', 'mac:req-2']
     ]);
   });
+  it('projects interrupted into the failed event lifecycle', () => {
+    const hub = new ActivityHub(), events: ActivityEvent[] = []; hub.onEvent(e => events.push(e));
+    hub.sync(snapshot([item({ state: 'interrupted', unread: true })]));
+    expect(events[0]).toMatchObject({ type: 'failed', item: { state: 'interrupted' } });
+  });
   it('persists alert deduplication across restarts and expires after seven days', () => {
     const dir = mkdtempSync(join(tmpdir(), 'rc-alerts-'));
     try {

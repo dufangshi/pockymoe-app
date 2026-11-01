@@ -1,5 +1,5 @@
-appId: com.remotecodex.desktop
-productName: Remote Codex
+appId: com.pockymoe.desktop
+productName: Pockymoe
 directories:
   buildResources: build
   output: release
@@ -33,9 +33,9 @@ nsis:
   perMachine: false
   allowToChangeInstallationDirectory: true
 protocols:
-  name: Remote Codex
-  schemes: [remotecodex]
+  name: Pockymoe
+  schemes: [pockymoe, remotecodex]
 publish:
   provider: github
   owner: dufangshi
-  repo: remote-codex-app
+  repo: pockymoe-app

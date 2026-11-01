@@ -1,7 +1,7 @@
 import type { ActivityEvent, ActivityHubLike, ActivityItem, ActivitySnapshot } from '../shared/contract';
 import { readJson, writeJson } from './store';
 
-const states = new Set(['needsInput', 'failed', 'completed', 'running', 'idle']);
+const states = new Set(['needsInput', 'failed', 'interrupted', 'completed', 'running', 'idle']);
 const text = (value: unknown, max: number): value is string => typeof value === 'string' && value.length <= max;
 const date = (value: unknown): value is string => text(value, 40) && Number.isFinite(Date.parse(value));
 export function validateSnapshot(value: unknown): ActivitySnapshot {
@@ -67,7 +67,7 @@ export class ActivityHub implements ActivityHubLike {
       const old = previous.get(item.key);
       if (item.state === 'idle') continue;
       if (old?.state === item.state && alertId(old) === alertId(item)) continue;
-      const type = item.state === 'running' ? 'started' : item.state;
+      const type = item.state === 'running' ? 'started' : item.state === 'interrupted' ? 'failed' : item.state;
       const event: ActivityEvent = { type, alertId: alertId(item), item, at: next.generatedAt };
       if (type !== 'started') {
         if ((type === 'completed' || type === 'failed') && !item.unread) continue;

@@ -1,24 +1,25 @@
 import { describe, expect, it } from 'vitest';
-import { deepLinkPath, externalUrl, isRelayFrame, relayOrigin, threadPath } from '../src/main/security';
+import { deepLinkPath, externalUrl, isWebFrame, relayOrigin, threadPath } from '../src/main/security';
 import { validateSettings } from '../src/main/store';
 describe('origin and navigation guard', () => {
   it('allows exact origins only in the top frame', () => {
     const origin = 'https://remote.lnz-study.com';
-    expect(isRelayFrame(`${origin}/devices`, origin, true)).toBe(true);
-    for (const url of ['https://remote.lnz-study.com.attacker.test', 'http://remote.lnz-study.com', 'https://remote.lnz-study.com:444', 'file:///tmp/test', 'not a url']) expect(isRelayFrame(url, origin, true)).toBe(false);
-    expect(isRelayFrame(origin, origin, false)).toBe(false);
+    expect(isWebFrame(`${origin}/devices`, origin, true)).toBe(true);
+    for (const url of ['https://remote.lnz-study.com.attacker.test', 'http://remote.lnz-study.com', 'https://remote.lnz-study.com:444', 'file:///tmp/test', 'not a url']) expect(isWebFrame(url, origin, true)).toBe(false);
+    expect(isWebFrame(origin, origin, false)).toBe(false);
   });
   it('accepts HTTPS or loopback HTTP origins without credentials, paths or queries', () => {
     expect(relayOrigin('https://remote.lnz-study.com/')).toBe('https://remote.lnz-study.com');
     expect(relayOrigin('http://127.0.0.1:43210')).toBe('http://127.0.0.1:43210');
     expect(relayOrigin('http://localhost:43210')).toBe('http://localhost:43210');
+    expect(relayOrigin('http://[::1]:43210')).toBe('http://[::1]:43210');
     for (const url of ['http://example.com', 'https://user:secret@example.com', 'https://example.com/path', 'https://example.com?x=1', 'https://example.com#x', 'file:///tmp/a']) expect(() => relayOrigin(url)).toThrow();
   });
   it('restricts external protocols and internal paths', () => {
     expect(externalUrl('mailto:hello@example.com')).toBe('mailto:hello@example.com');
     for (const url of ['javascript:alert(1)', 'file:///etc/passwd', 'remotecodex://devices', 'https://a:b@example.com']) expect(externalUrl(url)).toBeNull();
     for (const path of ['//attacker.test', '/\\attacker.test', 'https://example.com', '/a\n']) expect(() => threadPath(path)).toThrow();
-    expect(deepLinkPath('remotecodex://devices/mac/threads/thread-1')).toBe('/devices/mac/threads/thread-1');
+    expect(deepLinkPath('pockymoe://devices/mac/threads/thread-1')).toBe('/devices/mac/threads/thread-1');
     expect(deepLinkPath('remotecodex:///devices/mac')).toBe('/devices/mac');
   });
   it('strictly validates settings patches', () => {

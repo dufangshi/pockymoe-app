@@ -1,42 +1,44 @@
 import { app, Menu, nativeImage, nativeTheme, Tray, type MenuItemConstructorOptions } from 'electron';
 import { join } from 'node:path';
-import type { ActivityItem, ActivitySnapshot, DesktopSettings } from '../shared/contract';
+import type { ActivityItem, ActivitySnapshot, Appearance, DesktopSettings } from '../shared/contract';
 import { alertId, type ActivityHub } from './activity';
 import { itemPath } from './notifications';
 import type { SettingsStore } from './store';
 import type { Windows } from './windows';
 
 export function activityCounts(snapshot: ActivitySnapshot | null): { attention: number; running: number } {
-  return { attention: snapshot?.items.filter(i => i.state === 'needsInput' || i.state === 'failed' && i.unread).length || 0,
+  return { attention: snapshot?.items.filter(i => i.state === 'needsInput' || ['failed', 'interrupted'].includes(i.state) && i.unread).length || 0,
     running: snapshot?.items.filter(i => i.state === 'running').length || 0 };
 }
-export function trayTemplate(snapshot: ActivitySnapshot | null, settings: DesktopSettings, open: (i: ActivityItem) => void, actions: { pet: () => void; snooze: () => void; main: () => void; settings: () => void; quit: () => void }): MenuItemConstructorOptions[] {
-  const needs = snapshot?.items.filter(i => i.state === 'needsInput' || i.state === 'failed' && i.unread).slice(0, 5) || [];
+export function trayTemplate(snapshot: ActivitySnapshot | null, settings: DesktopSettings, open: (i: ActivityItem) => void, actions: { pet: () => void; snooze: () => void; main: () => void; settings: () => void; quit: () => void; map: () => void; reveal: (item: ActivityItem) => void }): MenuItemConstructorOptions[] {
+  const needs = snapshot?.items.filter(i => i.state === 'needsInput' || ['failed', 'interrupted'].includes(i.state) && i.unread).slice(0, 5) || [];
   const running = snapshot?.items.filter(i => i.state === 'running').slice(0, 5) || [];
   const items: MenuItemConstructorOptions[] = [];
   for (const [title, group] of [['需要你', needs], ['进行中', running]] as const) {
     items.push({ label: `${title} · ${group.length}`, enabled: false });
-    for (const item of group) items.push({ label: `${item.title.slice(0, 48)} — ${item.deviceName}`, click: () => open(item) });
+    for (const item of group) items.push({ label: `${item.title.slice(0, 48)} — ${item.deviceName}`, submenu: [{ label: '打开线程', click: () => open(item) }, { label: '在地图中显示', click: () => actions.reveal(item) }] });
   }
   items.push({ type: 'separator' }, { label: '显示桌宠', type: 'checkbox', checked: settings.petVisible, click: actions.pet },
     { label: Date.parse(settings.snoozeUntil || '') > Date.now() ? '恢复提醒' : '暂停提醒 1 小时', click: actions.snooze },
-    { type: 'separator' }, { label: '打开 Remote Codex', click: actions.main }, { label: '设置…', click: actions.settings },
-    { type: 'separator' }, { label: '退出 Remote Codex', accelerator: 'CommandOrControl+Q', click: actions.quit });
+    { type: 'separator' }, { label: '打开地图', click: actions.map }, { label: '打开 Pockymoe', click: actions.main }, { label: '设置…', click: actions.settings },
+    { type: 'separator' }, { label: '退出 Pockymoe', accelerator: 'CommandOrControl+Q', click: actions.quit });
   return items;
 }
 export class DesktopTray {
   readonly tray: Tray;
   menuLabels: string[] = [];
+  private appearance: Appearance | null = null;
+  setAppearance(appearance: Appearance): void { this.appearance = { ...appearance }; this.update(); }
   constructor(private hub: ActivityHub, private settings: SettingsStore, private windows: Windows) {
     this.tray = new Tray(this.icon('none'));
-    this.tray.setToolTip('Remote Codex');
+    this.tray.setToolTip('Pockymoe');
     this.tray.on('double-click', () => windows.focusMain());
     hub.onSnapshot(() => this.update()); settings.onChange(() => this.update());
     nativeTheme.on('updated', () => this.update());
     this.update();
   }
   private icon(state: string): Electron.NativeImage {
-    const suffix = process.platform === 'win32' ? nativeTheme.shouldUseDarkColors ? '-dark.ico' : '.ico' : 'Template.png';
+    const suffix = process.platform === 'win32' ? (this.appearance ? this.appearance.effective === 'dark' : nativeTheme.shouldUseDarkColors) ? '-dark.ico' : '.ico' : 'Template.png';
     const image = nativeImage.createFromPath(join(app.getAppPath(), 'build', `tray-${state}${suffix}`));
     if (process.platform === 'darwin') image.setTemplateImage(true);
     return image;
@@ -54,7 +56,7 @@ export class DesktopTray {
     const { attention, running } = activityCounts(snapshot);
     const state = attention ? 'attention' : running ? 'running' : 'none';
     this.tray.setImage(this.icon(state));
-    this.tray.setToolTip(`Remote Codex · ${attention} 需要你 · ${running} 进行中`);
+    this.tray.setToolTip(`Pockymoe · ${attention} 需要你 · ${running} 进行中`);
     this.setBadge(attention || running, state);
     const template = trayTemplate(snapshot, settings, item => {
       this.hub.acknowledge(alertId(item), 'tray');
@@ -62,6 +64,8 @@ export class DesktopTray {
     }, {
       pet: () => this.settings.set({ petVisible: !settings.petVisible }),
       snooze: () => this.settings.set({ snoozeUntil: Date.parse(settings.snoozeUntil || '') > Date.now() ? null : new Date(Date.now() + 3600_000).toISOString() }),
+      map: () => { void this.windows.dispatch({ type: 'openMap' }); },
+      reveal: item => { void this.windows.dispatch({ type: 'revealInMap', key: item.key }); },
       main: () => this.windows.focusMain(), settings: () => this.windows.createLocal('preferences'), quit: () => app.quit()
     });
     this.menuLabels = template.map(i => i.label || '');

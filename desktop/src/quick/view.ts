@@ -1,4 +1,8 @@
+// Approved local-UI exception: docs/ui-principles.md (Electron utility windows).
 import type { ActivityItem } from '../shared/contract';
+import { activityStatus, statusMarkSvg } from '../shared/statusMarks';
+import { showError } from '../local/errorMark';
+import { enhanceScrollbars } from '../local/scrollbars';
 import { localBridge, type LocalState } from '../shared/local';
 // This renderer only consumes sanitized activity summaries; replies return to the
 // relay page through the main process, which owns the command acknowledgement.
@@ -6,14 +10,17 @@ export function mountQuick(root: HTMLElement, initial: LocalState): void {
   let state = initial, selected: string | null = null, query = '';
   let visible: ActivityItem[] = [];
   root.className = 'quick';
-  root.innerHTML = `<div class="quick-search"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4 4"/></svg><input id="search" placeholder="搜索活动线程…" aria-label="搜索活动线程" autocomplete="off"/><kbd>esc</kbd></div><div id="quick-list" role="listbox" aria-label="活动线程"></div><form id="reply-form"><span class="reply-arrow" aria-hidden="true">↳</span><input id="reply" placeholder="给选中的线程快速回复…" aria-label="快速回复" autocomplete="off"/><button id="send" type="submit" title="发送回复" aria-label="发送回复">↑</button></form><footer class="quick-footer"><span><span class="brand-mark">›_</span> Remote Codex</span><span><kbd>↑</kbd><kbd>↓</kbd> 选择 <kbd>↵</kbd> 打开</span></footer>`;
+  root.innerHTML = `<div class="quick-search"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4 4"/></svg><input id="search" placeholder="搜索活动线程…" aria-label="搜索活动线程" autocomplete="off"/><kbd>esc</kbd></div><div id="quick-list" data-scroll role="listbox" aria-label="活动线程"></div><form id="reply-form"><span class="reply-arrow" aria-hidden="true">↳</span><input id="reply" placeholder="给选中的线程快速回复…" aria-label="快速回复" autocomplete="off"/><button id="send" type="submit" title="发送回复" aria-label="发送回复">↑</button></form><footer class="quick-footer"><span><span class="brand-mark">›_</span> Pockymoe</span><span><kbd>↑</kbd><kbd>↓</kbd> 选择 <kbd>↵</kbd> 打开</span></footer>`;
+  enhanceScrollbars(root);
   const list = root.querySelector<HTMLDivElement>('#quick-list')!;
   const search = root.querySelector<HTMLInputElement>('#search')!;
   const reply = root.querySelector<HTMLInputElement>('#reply')!;
   const send = root.querySelector<HTMLButtonElement>('#send')!;
   const status = (message: string, error = false): void => {
     const footer = root.querySelector<HTMLElement>('.quick-footer')!;
-    footer.dataset.error = String(error); footer.firstElementChild!.textContent = message;
+    footer.dataset.error = String(error);
+    if (error) showError(footer.firstElementChild as HTMLElement, message, () => { void run('reply'); });
+    else footer.firstElementChild!.textContent = message;
   };
   const run = async (type: 'open' | 'reply'): Promise<void> => {
     if (!selected) return;
@@ -32,7 +39,7 @@ export function mountQuick(root: HTMLElement, initial: LocalState): void {
   };
   const render = (): void => {
     const groups: [string, ActivityItem[]][] = [
-      ['需要你', state.snapshot?.items.filter(i => i.state === 'needsInput' || i.state === 'failed' && i.unread) || []],
+      ['需要你', state.snapshot?.items.filter(i => i.state === 'needsInput' || ['failed', 'interrupted'].includes(i.state) && i.unread) || []],
       ['进行中', state.snapshot?.items.filter(i => i.state === 'running') || []],
       ['刚完成', state.snapshot?.items.filter(i => i.state === 'completed' && i.unread) || []]
     ];
@@ -54,12 +61,14 @@ export function mountQuick(root: HTMLElement, initial: LocalState): void {
       for (const item of items) {
         const row = document.createElement('div'); row.className = 'quick-row'; row.role = 'option'; row.tabIndex = -1; row.dataset.key = item.key;
         row.title = `${item.title}\n${item.deviceName} · ${item.workspaceLabel}`;
-        const dot = document.createElement('span'); dot.className = `state-dot ${item.state}`; dot.setAttribute('aria-label', item.state);
+        const dot = document.createElement('span'); dot.className = 'row-status'; dot.innerHTML = statusMarkSvg(activityStatus(item));
         const copy = document.createElement('div'); copy.className = 'row-copy';
         const name = document.createElement('strong'); name.textContent = item.title;
         const meta = document.createElement('span'); meta.textContent = `${item.deviceName} · ${item.workspaceLabel}`;
         copy.append(name, meta);
-        const detail = document.createElement('span'); detail.className = 'row-detail'; detail.textContent = item.request ? item.request.kind === 'approval' ? '审批' : '输入' : item.state === 'running' ? '进行中' : item.resultSummary || '已完成';
+        const detail = document.createElement('span'); detail.className = 'row-detail'; detail.textContent = item.request ? item.request.kind === 'approval' ? '审批' : '输入' : item.state === 'running' ? elapsed(item.since) : item.resultSummary || '已完成';
+        if (item.state === 'running') { detail.classList.add('elapsed'); detail.dataset.since = item.since; }
+        if (item.state === 'interrupted') detail.textContent = '已中断';
         row.append(dot, copy, detail);
         row.onclick = () => { select(item.key); void run('open'); };
         row.onmousemove = () => select(item.key);
@@ -80,5 +89,16 @@ export function mountQuick(root: HTMLElement, initial: LocalState): void {
   });
   root.querySelector<HTMLFormElement>('#reply-form')!.onsubmit = e => { e.preventDefault(); if (reply.value.trim()) void run('reply'); };
   localBridge().onState(next => { state = next; render(); });
+  const tick = setInterval(() => {
+    if (document.hidden) return;
+    if (!root.isConnected) { clearInterval(tick); return; }
+    for (const timer of list.querySelectorAll<HTMLElement>('[data-since]')) timer.textContent = elapsed(timer.dataset.since!);
+  }, 1000);
   render(); search.focus();
+}
+
+export function elapsed(since: string, now = Date.now()): string {
+  const seconds = Math.max(0, Math.floor((now - Date.parse(since)) / 1000)) || 0;
+  const minutes = Math.floor(seconds / 60);
+  return `${minutes.toString().padStart(2, '0')}:${(seconds % 60).toString().padStart(2, '0')}`;
 }

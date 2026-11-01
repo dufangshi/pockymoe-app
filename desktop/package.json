@@ -1,9 +1,9 @@
 {
-  "name": "@remote-codex/desktop",
+  "name": "@pockymoe/desktop",
   "version": "0.1.0",
   "private": true,
-  "description": "Remote Codex desktop client",
-  "author": "Remote Codex",
+  "description": "Pockymoe desktop client",
+  "author": "Pockymoe",
   "license": "MIT",
   "main": "out/main/index.js",
   "scripts": {

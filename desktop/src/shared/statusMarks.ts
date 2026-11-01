@@ -1,6 +1,7 @@
 import type { ActivityItem } from './contract';
 
 // Mirrors upstream StatusMark / docs/ui-principles.md §6 and desktop design v2.
+// Approved local-UI exception: docs/ui-principles.md (Electron utility windows).
 // Local sandboxed windows cannot import the relay's React component or CSS.
 export type StatusMark = 'running' | 'unread' | 'failed' | 'interrupted' | 'waiting' | 'idle' | 'agents-running' | 'unknown';
 const labels: Record<StatusMark, string> = {
@@ -18,7 +19,7 @@ export function activityStatus(item: Pick<ActivityItem, 'state' | 'unread'>): St
 }
 export function statusMarkSvg(status: StatusMark, label?: string): string {
   const kind = Object.hasOwn(labels, status) ? status : 'unknown';
-  const ring = '<circle cx="8" cy="8" r="5.25" fill="none" stroke="currentColor" stroke-width="1.8" opacity=".22"/><circle class="status-mark-orbit" cx="8" cy="8" r="5.25" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-dasharray="12 21" transform="rotate(-90 8 8)"/>';
+  const ring = '<circle cx="8" cy="8" r="5.25" fill="none" stroke="currentColor" stroke-width="1.8" opacity=".22"/><circle class="status-mark-orbit" cx="8" cy="8" r="5.25" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-dasharray="12 21"/>';
   const shapes: Record<StatusMark, string> = {
     running: ring,
     unread: '<circle cx="8" cy="8" r="3.5" fill="currentColor"/>',
@@ -39,7 +40,7 @@ export const statusMarkStyles = `
 .pockymoe-status-mark[data-status=unknown]{opacity:.55}
 .pockymoe-status-mark[data-status=agents-running]{color:var(--theme-agent-running,#9870cb);animation:pockymoe-status-breathe 2.4s ease-in-out infinite}
 .status-mark-orbit{transform-origin:8px 8px;animation:pockymoe-status-spin 1.1s linear infinite}
-@keyframes pockymoe-status-spin{to{transform:rotate(270deg)}}
+@keyframes pockymoe-status-spin{to{transform:rotate(360deg)}}
 @keyframes pockymoe-status-breathe{50%{opacity:.5}}
 @media(prefers-reduced-motion:reduce){.status-mark-orbit,.pockymoe-status-mark{animation:none!important}}
 `;

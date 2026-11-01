@@ -1,12 +1,14 @@
 import { app, BrowserWindow, dialog, globalShortcut, ipcMain, nativeTheme, Notification, session, shell, type IpcMainEvent, type IpcMainInvokeEvent } from 'electron';
 import { basename, join } from 'node:path';
-import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, writeFileSync, existsSync, copyFileSync } from 'node:fs';
 import type { HostCapabilities, PetController, PetControllerDeps } from '../shared/contract';
 import type { LocalAction, LocalState } from '../shared/local';
 import { channels as c } from '../shared/channels';
 import { ActivityHub, alertId, validateSnapshot } from './activity';
 import { SettingsStore, validateSettings } from './store';
-import { externalUrl, isRelayFrame, relayOrigin, threadPath } from './security';
+import { externalUrl, isWebFrame, relayOrigin, threadPath } from './security';
+import { AppearanceStore } from './appearance';
+import { discoverOrigins } from './discovery';
 import { Windows, type CommandInput } from './windows';
 import { Notifications, itemPath } from './notifications';
 import { DesktopTray } from './tray';
@@ -14,22 +16,33 @@ import { installMenu } from './menu';
 import { apnsEnabled, registerApns } from './apns';
 import { checkUpdate, configureUpdates } from './updates';
 
-if (process.env.RC_DESKTOP_USER_DATA) app.setPath('userData', process.env.RC_DESKTOP_USER_DATA);
-app.setName('Remote Codex');
+app.setName('Pockymoe');
+app.setPath('userData', process.env.POCKYMOE_DESKTOP_USER_DATA || join(app.getPath('appData'), 'Pockymoe'));
+// Only migrate the old JSON settings, never inspect or copy credentials/keys.
+const settingsPath = join(app.getPath('userData'), 'settings.json');
+const oldSettingsPath = join(app.getPath('appData'), 'Remote Codex', 'settings.json');
+if (!process.env.POCKYMOE_DESKTOP_USER_DATA && !existsSync(settingsPath) && existsSync(oldSettingsPath)) {
+  mkdirSync(app.getPath('userData'), { recursive: true }); copyFileSync(oldSettingsPath, settingsPath);
+}
 if (!app.requestSingleInstanceLock()) app.quit();
 else {
   let windows: Windows | undefined;
   const deepLinks: string[] = [];
   app.on('open-url', (event, url) => { event.preventDefault(); if (windows) windows.openDeepLink(url); else deepLinks.push(url); });
-  app.on('second-instance', (_event, argv) => { windows?.focusMain(); for (const arg of argv) if (arg.startsWith('remotecodex:')) windows?.openDeepLink(arg); });
+  app.on('second-instance', (_event, argv) => { windows?.focusMain(); for (const arg of argv) if (/^(pockymoe|remotecodex):/.test(arg)) windows?.openDeepLink(arg); });
   app.on('window-all-closed', () => { /* Tray presence keeps the app running. */ });
   void app.whenReady().then(async () => {
-    if (process.platform === 'win32') app.setAppUserModelId('com.remotecodex.desktop');
-    if (process.env.RC_DESKTOP_THEME === 'dark' || process.env.RC_DESKTOP_THEME === 'light') nativeTheme.themeSource = process.env.RC_DESKTOP_THEME;
+    if (process.platform === 'win32') app.setAppUserModelId('com.pockymoe.desktop');
+    if (process.env.POCKYMOE_DESKTOP_THEME === 'dark' || process.env.POCKYMOE_DESKTOP_THEME === 'light') nativeTheme.themeSource = process.env.POCKYMOE_DESKTOP_THEME;
     const dataDir = app.getPath('userData');
-    const settings = new SettingsStore(join(dataDir, 'settings.json'), process.env.RC_DESKTOP_RELAY_ORIGIN);
+    const settings = new SettingsStore(join(dataDir, 'settings.json'), {
+      ...(process.env.POCKYMOE_DESKTOP_WEB_ORIGIN ? { webOrigin: process.env.POCKYMOE_DESKTOP_WEB_ORIGIN } : {}),
+      ...(process.env.POCKYMOE_DESKTOP_RELAY_ORIGIN ? { relayOrigin: process.env.POCKYMOE_DESKTOP_RELAY_ORIGIN } : {})
+    });
     const hub = new ActivityHub(join(dataDir, 'delivered-alerts.json'));
     const manager = new Windows(settings, dataDir); windows = manager;
+    const appearance = new AppearanceStore();
+    let preferencesSection: LocalState['preferencesSection'] = 'general';
     const focusedThreads = new Map<number, string | null>();
     let pet: PetController | undefined;
     const notifications = new Notifications(hub, settings, manager, () => pet, () => {
@@ -40,19 +53,19 @@ else {
     const petModules = import.meta.glob('../pet/controller.ts', { eager: true }) as Record<string, { createPetController(deps: PetControllerDeps): PetController }>;
     const petModule = Object.values(petModules)[0];
     if (petModule) {
-      try { pet = petModule.createPetController({ hub, settings, dispatch: command => manager.dispatch(command as CommandInput), shouldSpeak: event => notifications.shouldSpeak(event), petDirectories }); }
+      try { pet = petModule.createPetController({ hub, settings, dispatch: command => manager.dispatch(command as CommandInput), shouldSpeak: event => notifications.shouldSpeak(event), petDirectories, appearance: appearance.get, onAppearance: appearance.onChange }); }
       catch { /* Shell remains usable if a pet pack cannot load. */ }
     }
     const tray = new DesktopTray(hub, settings, manager);
     const capabilities = (): HostCapabilities => ({
-      surface: 'desktop', bridgeVersion: 1, platform: process.platform as HostCapabilities['platform'], shellVersion: app.getVersion(),
+      surface: 'desktop', bridgeVersion: 2, platform: process.platform as HostCapabilities['platform'], shellVersion: app.getVersion(),
       notifications: apnsEnabled() ? 'local+apns' : 'local',
       windowChrome: { kind: process.platform === 'darwin' ? 'hiddenInset' : 'titleBarOverlay', trafficLightsWidth: process.platform === 'darwin' ? 78 : 138, toolbarHeight: 38, controlsSide: process.platform === 'darwin' ? 'left' : 'right' },
       features: { pet: !!pet, quickWindow: true, multiWindow: true, nativeSave: true, badge: true }
     });
     const guardRelay = (e: IpcMainEvent | IpcMainInvokeEvent): void => {
       const w = BrowserWindow.fromWebContents(e.sender);
-      if (!w || !manager.relay.has(w) || !e.senderFrame || e.senderFrame !== e.sender.mainFrame || !isRelayFrame(e.senderFrame.url, settings.get().relayOrigin, true)) throw new Error('Untrusted desktop IPC sender');
+      if (!w || !manager.relay.has(w) || !e.senderFrame || e.senderFrame !== e.sender.mainFrame || !isWebFrame(e.senderFrame.url, settings.get().webOrigin, true)) throw new Error('Untrusted desktop IPC sender');
     };
     const guardLocal = (e: IpcMainInvokeEvent): BrowserWindow => {
       const w = BrowserWindow.fromWebContents(e.sender);
@@ -64,6 +77,7 @@ else {
     };
     const handle = (channel: string, fn: (e: IpcMainInvokeEvent, ...args: unknown[]) => unknown): void => { ipcMain.handle(channel, (e, ...args) => { guardRelay(e); return fn(e, ...args); }); };
     const listen = (channel: string, fn: (e: IpcMainEvent, ...args: unknown[]) => void): void => { ipcMain.on(channel, (e, ...args) => { try { guardRelay(e); fn(e, ...args); } catch { /* Reject malformed or stale renderer messages. */ } }); };
+    listen(c.appearance, (_e, value) => appearance.sync(value));
     handle(c.capabilities, () => capabilities());
     listen(c.sync, (e, value) => {
       const snapshot = validateSnapshot(value);
@@ -73,6 +87,11 @@ else {
     listen('desktop.command.ready', e => manager.commandReady(e.sender.id));
     listen(c.commandResult, (e, id, result) => manager.commandResult(e.sender.id, id, result));
     listen(c.openThread, (_e, path, options) => { const safe = threadPath(path); if (options && typeof options === 'object' && (options as { newWindow?: boolean }).newWindow === true) manager.createMain(safe); else void manager.dispatch({ type: 'navigate', path: safe }); });
+    listen(c.preferences, (_e, section) => {
+      if (section !== undefined && !['general', 'pet', 'shortcuts'].includes(String(section))) return;
+      preferencesSection = (section || 'general') as LocalState['preferencesSection'];
+      manager.createLocal('preferences'); broadcast();
+    });
     listen(c.title, (e, title) => { if (typeof title === 'string') BrowserWindow.fromWebContents(e.sender)?.setTitle(title.slice(0, 256)); });
     listen(c.external, (_e, url) => { const safe = externalUrl(url); if (safe) void shell.openExternal(safe); });
     handle(c.settingsGet, () => settings.get());
@@ -98,8 +117,8 @@ else {
     });
     const relaySession = session.fromPartition('persist:remote-codex');
     const allowedPermission = (permission: string): boolean => ['notifications', 'clipboard-read', 'clipboard-sanitized-write', 'deprecated-sync-clipboard-read'].includes(permission);
-    relaySession.setPermissionCheckHandler((wc, permission, origin, details) => !!wc && allowedPermission(permission) && details.isMainFrame && origin === settings.get().relayOrigin && isRelayFrame(wc.getURL(), settings.get().relayOrigin, true));
-    relaySession.setPermissionRequestHandler((wc, permission, callback, details) => callback(allowedPermission(permission) && details.isMainFrame && isRelayFrame(details.requestingUrl, settings.get().relayOrigin, true) && isRelayFrame(wc.getURL(), settings.get().relayOrigin, true)));
+    relaySession.setPermissionCheckHandler((wc, permission, origin, details) => !!wc && allowedPermission(permission) && details.isMainFrame && origin === settings.get().webOrigin && isWebFrame(wc.getURL(), settings.get().webOrigin, true));
+    relaySession.setPermissionRequestHandler((wc, permission, callback, details) => callback(allowedPermission(permission) && details.isMainFrame && isWebFrame(details.requestingUrl, settings.get().webOrigin, true) && isWebFrame(wc.getURL(), settings.get().webOrigin, true)));
     relaySession.on('will-download', (event, item, wc) => {
       const w = BrowserWindow.fromWebContents(wc);
       if (!w || !manager.relay.has(w)) { event.preventDefault(); return; }
@@ -118,13 +137,14 @@ else {
       const entries = new Map<string, string>();
       for (const dir of petDirectories) {
         try { for (const entry of readdirSync(dir, { withFileTypes: true })) if (entry.isDirectory()) {
-          try { const json = JSON.parse(readFileSync(join(dir, entry.name, 'pet.json'), 'utf8')); entries.set(entry.name, typeof json.name === 'string' ? json.name : entry.name); } catch { /* Ignore incomplete packs. */ }
+          try { const json = JSON.parse(readFileSync(join(dir, entry.name, 'pet.json'), 'utf8')); entries.set(entry.name, typeof json.displayName === 'string' ? json.displayName : typeof json.name === 'string' ? json.name : entry.name); } catch { /* Ignore incomplete packs. */ }
         } } catch { /* No installed packs yet. */ }
       }
       return [...entries].map(([id, name]) => ({ id, name }));
     }
-    const localState = (): LocalState => ({ settings: settings.get(), snapshot: hub.snapshot(), petAvailable: !!pet, petPacks: packs(), version: app.getVersion() });
+    const localState = (): LocalState => ({ preferencesSection, settings: settings.get(), appearance: appearance.get(), snapshot: hub.snapshot(), petAvailable: !!pet, petPacks: packs(), version: app.getVersion() });
     const broadcast = (): void => { for (const w of manager.local.keys()) if (!w.isDestroyed()) w.webContents.send(c.localState, localState()); };
+    appearance.onChange(next => { manager.setAppearance(next); tray.setAppearance(next); broadcast(); });
     ipcMain.handle(c.localGet, e => { guardLocal(e); return localState(); });
     ipcMain.handle(c.localAction, async (e, value: unknown) => {
       try {
@@ -134,13 +154,16 @@ else {
         switch (action.type) {
           case 'settings': applySettings(action.patch); break;
           case 'connect': {
-            const origin = relayOrigin(action.origin);
-            const changed = origin !== settings.get().relayOrigin;
-            applySettings({ relayOrigin: origin });
+            const pair = action.webOrigin !== undefined || action.relayOrigin !== undefined
+              ? { webOrigin: relayOrigin(action.webOrigin), relayOrigin: relayOrigin(action.relayOrigin) }
+              : await discoverOrigins(action.origin);
+            const changed = pair.webOrigin !== settings.get().webOrigin || pair.relayOrigin !== settings.get().relayOrigin;
+            applySettings(pair);
             if (!changed) manager.focusMain();
-            if (process.env.RC_DESKTOP_E2E !== '1') void registerApns(settings, manager);
+            if (process.env.POCKYMOE_DESKTOP_E2E !== '1') void registerApns(settings, manager);
             w.close(); break;
           }
+          case 'changeConnection': manager.createLocal('relay'); break;
           case 'hide': w.hide(); break;
           case 'open': case 'reply': {
             const item = hub.snapshot()?.items.find(i => i.key === action.key);
@@ -172,13 +195,13 @@ else {
     let old = settings.get();
     settings.onChange(next => {
       pet?.setVisible(next.petVisible);
-      if (next.launchAtLogin !== old.launchAtLogin && process.env.RC_DESKTOP_E2E !== '1') app.setLoginItemSettings({ openAtLogin: next.launchAtLogin });
-      if (next.relayOrigin !== old.relayOrigin) {
+      if (next.launchAtLogin !== old.launchAtLogin && process.env.POCKYMOE_DESKTOP_E2E !== '1') app.setLoginItemSettings({ openAtLogin: next.launchAtLogin });
+      if (next.webOrigin !== old.webOrigin || next.relayOrigin !== old.relayOrigin) {
         for (const w of [...manager.relay]) w.destroy();
         focusedThreads.clear();
         hub.sync({ version: 1, generatedAt: new Date().toISOString(), accountId: 'relay-changed', focusedThreadKey: null, items: [] });
         manager.createMain();
-        if (process.env.RC_DESKTOP_E2E !== '1') void registerApns(settings, manager);
+        if (process.env.POCKYMOE_DESKTOP_E2E !== '1') void registerApns(settings, manager);
       }
       old = next; broadcast();
     });
@@ -186,18 +209,20 @@ else {
     globalShortcut.register(settings.get().quickWindowShortcut, () => manager.toggleQuick());
     installMenu(manager, settings);
     if (settings.firstRun) manager.createLocal('relay'); else manager.createMain();
-    if (process.env.RC_DESKTOP_E2E !== '1') {
-      if (app.isPackaged) app.setAsDefaultProtocolClient('remotecodex');
-      else app.setAsDefaultProtocolClient('remotecodex', process.execPath, [app.getAppPath()]);
+    if (process.env.POCKYMOE_DESKTOP_E2E !== '1') {
+      for (const protocol of ['pockymoe', 'remotecodex']) {
+        if (app.isPackaged) app.setAsDefaultProtocolClient(protocol);
+        else app.setAsDefaultProtocolClient(protocol, process.execPath, [app.getAppPath()]);
+      }
     }
-    for (const url of [...deepLinks, ...process.argv.filter(a => a.startsWith('remotecodex:'))]) manager.openDeepLink(url);
-    if (process.env.RC_DESKTOP_E2E !== '1') { configureUpdates(); void registerApns(settings, manager); }
+    for (const url of [...deepLinks, ...process.argv.filter(a => /^(pockymoe|remotecodex):/.test(a))]) manager.openDeepLink(url);
+    if (process.env.POCKYMOE_DESKTOP_E2E !== '1') { configureUpdates(); void registerApns(settings, manager); }
     app.on('activate', () => { if (manager.relay.size) manager.focusMain(); else manager.createLocal('relay'); });
     app.on('before-quit', () => { manager.quitting = true; manager.dispose(); notifications.dispose(); pet?.dispose(); tray.dispose(); globalShortcut.unregisterAll(); });
-    if (process.env.RC_DESKTOP_E2E === '1') Object.assign(globalThis, { __rcDesktopTest: { hub, settings, windows: manager, tray, notifications, capabilities } });
+    if (process.env.POCKYMOE_DESKTOP_E2E === '1') Object.assign(globalThis, { __pockymoeDesktopTest: { hub, settings, appearance, windows: manager, tray, notifications, capabilities } });
   }).catch(error => {
-    if (process.env.RC_DESKTOP_E2E === '1') console.error(error);
-    else dialog.showErrorBox('Remote Codex 无法启动', '请检查桌面应用的本地配置后重试。');
+    if (process.env.POCKYMOE_DESKTOP_E2E === '1') console.error(error);
+    else dialog.showErrorBox('Pockymoe 无法启动', '请检查桌面应用的本地配置后重试。');
     app.quit();
   });
 }

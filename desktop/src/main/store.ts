@@ -4,7 +4,7 @@ import type { DesktopSettings, SettingsStoreLike } from '../shared/contract';
 import { relayOrigin } from './security';
 
 export const defaults: DesktopSettings = {
-  relayOrigin: 'https://remote.lnz-study.com', alertMode: 'petFirst', petVisible: true,
+  webOrigin: 'https://app.lnz-study.com', relayOrigin: 'https://remote.lnz-study.com', alertMode: 'petFirst', petVisible: true,
   petId: 'moe', petSize: 'M', petMini: false, petSound: false, launchAtLogin: false,
   quickWindowShortcut: 'Alt+Space', snoozeUntil: null
 };
@@ -19,7 +19,7 @@ export function validateSettings(patch: unknown): Partial<DesktopSettings> {
   const out: Partial<DesktopSettings> = {};
   for (const [key, value] of Object.entries(patch)) {
     switch (key) {
-      case 'relayOrigin': out.relayOrigin = relayOrigin(value); break;
+      case 'webOrigin': case 'relayOrigin': out[key] = relayOrigin(value); break;
       case 'alertMode': if (!['petFirst', 'system', 'both'].includes(String(value))) throw new Error('Invalid alert mode'); out.alertMode = value as DesktopSettings['alertMode']; break;
       case 'petSize': if (!['S', 'M', 'L'].includes(String(value))) throw new Error('Invalid pet size'); out.petSize = value as DesktopSettings['petSize']; break;
       case 'petId': if (typeof value !== 'string' || !/^[\w.-]{1,100}$/.test(value)) throw new Error('Invalid pet id'); out.petId = value; break;
@@ -36,11 +36,12 @@ export class SettingsStore implements SettingsStoreLike {
   private value: DesktopSettings;
   private listeners = new Set<(settings: DesktopSettings) => void>();
   readonly firstRun: boolean;
-  constructor(private path: string, override?: string) {
-    const stored = readJson(path);
-    this.firstRun = !stored && !override;
+  constructor(private path: string, overrides: Partial<Pick<DesktopSettings, 'webOrigin' | 'relayOrigin'>> = {}) {
+    const stored = readJson(path) as Partial<DesktopSettings> | null;
+    if (stored?.relayOrigin && !stored.webOrigin) stored.webOrigin = stored.relayOrigin === defaults.relayOrigin ? defaults.webOrigin : stored.relayOrigin;
+    this.firstRun = !stored && !overrides.webOrigin;
     try { this.value = { ...defaults, ...validateSettings(stored || {}) }; } catch { this.value = { ...defaults }; }
-    if (override) this.value.relayOrigin = relayOrigin(override);
+    this.value = { ...this.value, ...validateSettings(overrides) };
   }
   get(): DesktopSettings { return { ...this.value }; }
   set(patch: Partial<DesktopSettings>): DesktopSettings {

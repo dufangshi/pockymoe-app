@@ -43,12 +43,15 @@ export class Notifications {
     const allComplete = events.every(e => e.type === 'completed');
     const notification = new Notification({
       id: first.alertId,
-      groupId: `remote-codex:${item.deviceId}`,
+      groupId: `pockymoe:${item.deviceId}`,
       title: multiple ? `${events.length} 个任务${allComplete ? '完成' : '有新进展'}` : item.title,
-      subtitle: multiple ? 'Remote Codex' : `${item.deviceName} · ${item.workspaceLabel}`,
-      body: multiple ? events.map(e => e.item.title).slice(0, 3).join('、') : item.request?.summary || item.resultSummary || (first.type === 'failed' ? '任务遇到了问题' : '任务已完成'),
+      subtitle: multiple ? 'Pockymoe' : `${item.deviceName} · ${item.workspaceLabel}`,
+      body: multiple ? events.map(e => e.item.title).slice(0, 3).join('、') : item.state === 'interrupted' ? `已中断${item.resultSummary ? ` · ${item.resultSummary}` : ''}` : item.request?.summary || item.resultSummary || (first.type === 'failed' ? '任务遇到了问题' : '任务已完成'),
       silent: !this.settings.get().petSound,
-      ...(['darwin', 'win32'].includes(process.platform) && !multiple && item.request?.kind === 'approval' ? { actions: [{ type: 'button' as const, text: '批准' }, { type: 'button' as const, text: '拒绝' }] } : {}),
+      ...(['darwin', 'win32'].includes(process.platform) && !multiple ? { actions: [
+        ...(item.request?.kind === 'approval' ? [{ type: 'button' as const, text: '批准' }, { type: 'button' as const, text: '拒绝' }] : []),
+        { type: 'button' as const, text: '在地图中显示' }
+      ] } : {}),
       // Map every underlying alert id so acknowledgement closes the batch.
       ...(process.platform === 'win32' ? { timeoutType: 'default' as const } : {})
     });
@@ -59,7 +62,9 @@ export class Notifications {
       void this.windows.dispatch({ type: 'navigate', path: itemPath(item) }).then(() => this.windows.dispatch({ type: 'markRead', key: item.key }, false));
     });
     notification.on('action', (_e, index) => {
-      if (item.request?.kind !== 'approval') return;
+      if (item.request?.kind !== 'approval' || index >= 2) {
+        acknowledge(); void this.windows.dispatch({ type: 'revealInMap', key: item.key }); return;
+      }
       void this.windows.dispatch({ type: 'resolveRequest', deviceId: item.deviceId, threadId: item.threadId, requestId: item.request.id, decision: index === 0 ? 'approve' : 'deny' }).then(result => { if (result.ok) acknowledge(); });
     });
     notification.on('close', () => { for (const event of events) if (this.active.get(event.alertId) === notification) this.active.delete(event.alertId); });

@@ -2,7 +2,7 @@ import { app, pushNotifications } from 'electron';
 import type { SettingsStore } from './store';
 import type { Windows } from './windows';
 import { threadPath } from './security';
-export const apnsEnabled = (): boolean => process.platform === 'darwin' && app.isPackaged && process.env.RC_DESKTOP_APNS === '1';
+export const apnsEnabled = (): boolean => process.platform === 'darwin' && app.isPackaged && process.env.POCKYMOE_DESKTOP_APNS === '1';
 let installed = false, registering = false;
 let token: Promise<string> | undefined;
 let retry: ReturnType<typeof setTimeout> | undefined;
@@ -32,7 +32,7 @@ export async function registerApns(settings: SettingsStore, windows: Windows): P
     const relayOrigin = settings.get().relayOrigin;
     await windows.main().webContents.session.fetch(`${relayOrigin}/relay/account/notifications/native`, {
       method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ nativePlatform: 'apns', deviceToken, relayOrigin, sandbox: process.env.RC_DESKTOP_APNS_SANDBOX === '1', appKind: 'macos-desktop' })
+      body: JSON.stringify({ nativePlatform: 'apns', deviceToken, relayOrigin, sandbox: process.env.POCKYMOE_DESKTOP_APNS_SANDBOX === '1', appKind: 'macos-desktop' })
     });
   } catch { /* Missing entitlements, auth and network failures stay quiet. */ }
   finally { registering = false; }

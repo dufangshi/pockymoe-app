@@ -1,9 +1,9 @@
 import { BrowserWindow, nativeTheme, screen, shell, type Rectangle } from 'electron';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import type { HostCommand, HostCommandResult } from '../shared/contract';
+import type { Appearance, HostCommand, HostCommandResult } from '../shared/contract';
 import { channels as c } from '../shared/channels';
-import { deepLinkPath, externalUrl, isRelayFrame, threadPath } from './security';
+import { deepLinkPath, externalUrl, isWebFrame, threadPath } from './security';
 import { readJson, writeJson, type SettingsStore } from './store';
 
 export type CommandInput = HostCommand extends infer T ? T extends HostCommand ? Omit<T, 'id'> : never : never;
@@ -17,13 +17,20 @@ export class Windows {
   private pending = new Map<number, (() => void)[]>();
   private positionTimer?: ReturnType<typeof setTimeout>;
   quitting = false;
+  private appearance: Appearance | null = null;
+  setAppearance(appearance: Appearance): void {
+    this.appearance = { ...appearance };
+    if (process.platform === 'win32') for (const w of this.relay) w.setTitleBarOverlay(this.overlay());
+    for (const w of this.local.keys()) w.setBackgroundColor(appearance.effective === 'dark' ? '#232325' : '#f8f8f7');
+  }
   constructor(private settings: SettingsStore, private dataDir: string) {
     const stored = readJson(join(dataDir, 'window-bounds.json'));
     this.bounds = stored && typeof stored === 'object' ? stored as Record<string, Rectangle> : {};
     nativeTheme.on('updated', () => { if (process.platform === 'win32') for (const w of this.relay) w.setTitleBarOverlay(this.overlay()); });
   }
   private overlay(): { color: string; symbolColor: string; height: number } {
-    return { color: nativeTheme.shouldUseDarkColors ? '#202022' : '#f4f4f3', symbolColor: nativeTheme.shouldUseDarkColors ? '#ededed' : '#252525', height: 38 };
+    const dark = this.appearance ? this.appearance.effective === 'dark' : nativeTheme.shouldUseDarkColors;
+    return { color: dark ? '#202022' : '#f4f4f3', symbolColor: dark ? '#ededed' : '#252525', height: 38 };
   }
   private currentBounds(): Rectangle {
     const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
@@ -37,10 +44,11 @@ export class Windows {
   }
   createMain(path = '/'): BrowserWindow {
     const w = new BrowserWindow({
-      ...this.currentBounds(), minWidth: 900, minHeight: 600, show: false, title: 'Remote Codex',
+      ...this.currentBounds(), minWidth: 900, minHeight: 600, show: false, title: 'Pockymoe',
       backgroundColor: process.platform === 'darwin' ? '#00000000' : '#202022',
       ...(process.platform === 'darwin' ? { titleBarStyle: 'hiddenInset' as const, trafficLightPosition: { x: 14, y: 13 }, vibrancy: 'sidebar' as const, visualEffectState: 'followWindow' as const, transparent: true } : { titleBarStyle: 'hidden' as const, titleBarOverlay: this.overlay(), backgroundMaterial: 'mica' as const }),
-      webPreferences: { preload: join(__dirname, '../preload/relay.js'), contextIsolation: true, sandbox: true, nodeIntegration: false, partition: 'persist:remote-codex', additionalArguments: [`--rc-relay-origin=${this.settings.get().relayOrigin}`] }
+      // Keep the persisted session partition name across the product rename.
+      webPreferences: { preload: join(__dirname, '../preload/relay.js'), contextIsolation: true, sandbox: true, nodeIntegration: false, partition: 'persist:remote-codex', additionalArguments: [`--pockymoe-web-origin=${this.settings.get().webOrigin}`] }
     });
     const webContentsId = w.webContents.id;
     this.relay.add(w);
@@ -49,7 +57,7 @@ export class Windows {
     w.on('closed', () => {
       this.relay.delete(w); this.ready.delete(webContentsId); this.pending.delete(webContentsId);
       for (const [id, pending] of this.waiters) if (pending.sender === webContentsId) {
-        clearTimeout(pending.timer); pending.resolve({ ok: false, error: 'Relay 窗口已关闭' }); this.waiters.delete(id);
+        clearTimeout(pending.timer); pending.resolve({ ok: false, error: 'Pockymoe 窗口已关闭' }); this.waiters.delete(id);
       }
     });
     w.webContents.on('did-start-navigation', (_e, _url, inPlace, isMain) => { if (isMain && !inPlace) this.ready.delete(w.webContents.id); });
@@ -63,7 +71,7 @@ export class Windows {
       }, 250);
     };
     w.on('move', savePosition); w.on('resize', savePosition);
-    void w.loadURL(`${this.settings.get().relayOrigin}${threadPath(path)}`).catch(() => {
+    void w.loadURL(`${this.settings.get().webOrigin}${threadPath(path)}`).catch(() => {
       if (!w.isDestroyed()) {
         w.show();
         this.createLocal('relay');
@@ -74,17 +82,17 @@ export class Windows {
   secure(w: BrowserWindow, remote: boolean): void {
     const external = (url: string): void => { const safe = externalUrl(url); if (safe) void shell.openExternal(safe); };
     w.webContents.setWindowOpenHandler(({ url }) => {
-      if (remote && isRelayFrame(url, this.settings.get().relayOrigin, true)) {
+      if (remote && isWebFrame(url, this.settings.get().webOrigin, true)) {
         const u = new URL(url); this.createMain(`${u.pathname}${u.search}${u.hash}`);
       } else external(url);
       return { action: 'deny' };
     });
     w.webContents.on('will-navigate', (e, url) => {
-      if (remote && isRelayFrame(url, this.settings.get().relayOrigin, true)) return;
+      if (remote && isWebFrame(url, this.settings.get().webOrigin, true)) return;
       e.preventDefault(); external(url);
     });
     w.webContents.on('will-redirect', (e, url) => {
-      if (remote && isRelayFrame(url, this.settings.get().relayOrigin, true)) return;
+      if (remote && isWebFrame(url, this.settings.get().webOrigin, true)) return;
       e.preventDefault(); external(url);
     });
     w.webContents.on('will-attach-webview', e => e.preventDefault());
@@ -93,18 +101,18 @@ export class Windows {
     const existing = [...this.local].find(([w, r]) => r === role && !w.isDestroyed())?.[0];
     if (existing) { existing.show(); existing.focus(); return existing; }
     const quick = role === 'quick';
-    const w = new BrowserWindow({ width: quick ? 640 : role === 'relay' ? 520 : 740, height: quick ? 420 : role === 'relay' ? 460 : 600,
+    const w = new BrowserWindow({ width: quick ? 640 : role === 'relay' ? 520 : 740, height: quick ? 420 : role === 'relay' ? 520 : 640,
       show: false, resizable: !quick && role !== 'relay', maximizable: false, minimizable: false, frame: !quick,
-      title: role === 'preferences' ? '设置 — Remote Codex' : role === 'relay' ? '连接 Relay — Remote Codex' : 'Remote Codex',
+      title: role === 'preferences' ? '设置 — Pockymoe' : role === 'relay' ? '连接 — Pockymoe' : 'Pockymoe',
       titleBarStyle: process.platform === 'darwin' && !quick ? 'hiddenInset' : undefined,
       vibrancy: process.platform === 'darwin' ? 'popover' : undefined, visualEffectState: 'active',
       backgroundColor: nativeTheme.shouldUseDarkColors ? '#202022' : '#f8f8f7',
       webPreferences: { preload: join(__dirname, '../preload/local.js'), contextIsolation: true, sandbox: true, nodeIntegration: false,
-        additionalArguments: process.env.ELECTRON_RENDERER_URL ? ['--rc-local-dev'] : [] }
+        additionalArguments: process.env.ELECTRON_RENDERER_URL ? ['--pockymoe-local-dev'] : [] }
     });
     this.local.set(w, role); this.secure(w, false);
     w.on('closed', () => this.local.delete(w));
-    if (quick) { w.setAlwaysOnTop(true, 'floating'); w.on('blur', () => { if (process.env.RC_DESKTOP_E2E !== '1') w.hide(); }); }
+    if (quick) { w.setAlwaysOnTop(true, 'floating'); w.on('blur', () => { if (process.env.POCKYMOE_DESKTOP_E2E !== '1') w.hide(); }); }
     w.once('ready-to-show', () => w.show());
     if (process.env.ELECTRON_RENDERER_URL) void w.loadURL(`${process.env.ELECTRON_RENDERER_URL}/local/index.html?view=${role}`);
     else void w.loadFile(join(__dirname, '../renderer/local/index.html'), { query: { view: role } });
@@ -126,7 +134,7 @@ export class Windows {
     const command = { ...input, id: randomUUID() } as HostCommand;
     return new Promise(resolve => {
       const id = w.webContents.id;
-      const timer = setTimeout(() => { this.waiters.delete(command.id); resolve({ ok: false, error: 'Relay 页面未响应，请确认已登录并重试' }); }, 15_000);
+      const timer = setTimeout(() => { this.waiters.delete(command.id); resolve({ ok: false, error: 'Pockymoe 页面未响应，请确认已登录并重试' }); }, 15_000);
       this.waiters.set(command.id, { sender: id, resolve, timer });
       const send = (): void => { if (!w.isDestroyed() && this.waiters.has(command.id)) w.webContents.send(c.command, command); };
       if (this.ready.has(id)) send();

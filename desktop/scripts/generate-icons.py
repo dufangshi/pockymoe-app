@@ -1,4 +1,4 @@
-"""Rebuild assets with Pillow. The app icon is the existing iOS artwork.
+"""Rebuild assets with Pillow. The app icon is the current Pockymoe Web artwork.
 Tray PNGs follow the original terminal vector geometry retained as SVG.
 """
 from pathlib import Path
