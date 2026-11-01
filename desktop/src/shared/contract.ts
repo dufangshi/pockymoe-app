@@ -1,9 +1,9 @@
 // Single source of truth for the desktop host bridge. supervisor-web mirrors the
-// relay-page half in apps/supervisor-web/src/desktop/host.ts; bump
+// page half in apps/supervisor-web/src/desktop/host.ts; bump
 // HOST_BRIDGE_VERSION on any breaking change and feature-detect, never assume.
 // Design: docs/desktop-design.zh.md §6.
 
-export const HOST_BRIDGE_VERSION = 1;
+export const HOST_BRIDGE_VERSION = 2;
 
 export interface HostCapabilities {
   surface: 'desktop';
@@ -80,7 +80,8 @@ export type HostCommand =
       decision: 'approve' | 'deny';
     }
   | { id: string; type: 'reply'; deviceId: string; threadId: string; text: string }
-  | { id: string; type: 'openPalette' }
+  | { id: string; type: 'revealInMap'; key: string }
+  | { id: string; type: 'openMap' }
   | { id: string; type: 'newThread' }
   | { id: string; type: 'openDevices' };
 
@@ -90,6 +91,9 @@ export interface HostCommandResult {
 }
 
 export interface DesktopSettings {
+  /** Origin of the Web UI the main window loads (GitHub Pages in production). */
+  webOrigin: string;
+  /** Origin of the relay API (APNs registration, health). Equal to webOrigin for same-origin relays. */
   relayOrigin: string;
   alertMode: 'petFirst' | 'system' | 'both';
   petVisible: boolean;
@@ -103,8 +107,17 @@ export interface DesktopSettings {
   snoozeUntil: string | null;
 }
 
-/** Exposed as window.remoteCodexHost to the configured relay origin's top frame only. */
-export interface RemoteCodexHost {
+export interface Appearance {
+  effective: 'light' | 'dark';
+  /** Theme pack id: 'classic' | 'plum-pocket' | 'terminal' | … */
+  pack: string;
+  /** Resolved accent color (any CSS color) so local windows can match the page. */
+  accent: string;
+  fontScale?: number;
+}
+
+/** Exposed as window.pockymoeHost to the configured webOrigin's top frame only. */
+export interface PockymoeHost {
   capabilities(): Promise<HostCapabilities>;
   activity: { sync(snapshot: ActivitySnapshot): void };
   onCommand(listener: (command: HostCommand) => void): () => void;
@@ -123,6 +136,7 @@ export interface RemoteCodexHost {
     set(patch: Partial<DesktopSettings>): Promise<DesktopSettings>;
   };
   badge: { set(count: number, style: 'attention' | 'running' | 'none'): void };
+  appearance: { sync(appearance: Appearance): void };
 }
 
 // ---- Main process: ActivityHub, shared by notifications, tray, badge and pet ----
@@ -172,6 +186,9 @@ export interface PetControllerDeps {
   shouldSpeak(event: ActivityEvent): boolean;
   /** Directory holding bundled and imported pet packs. */
   petDirectories: string[];
+  /** Latest page appearance, so the pet matches the selected theme. */
+  appearance(): Appearance | null;
+  onAppearance(listener: (appearance: Appearance) => void): () => void;
 }
 
 export interface PetController {
