@@ -1,7 +1,8 @@
 import type { ActivitySnapshot, Appearance, DesktopSettings, HostCommandResult } from './contract';
+import type { VoiceStatus } from './voice';
 export interface LocalState {
   locale: string; preferencesRequestId: number; preferencesSection: 'general' | 'pet' | 'shortcuts'; settings: DesktopSettings; appearance: Appearance | null; snapshot: ActivitySnapshot | null;
-  petAvailable: boolean; petPacks: { id: string; name: string; thumbnail?: string; rows?: number; author?: string; source?: string; license?: string; licenseUrl?: string }[]; version: string;
+  petAvailable: boolean; petPacks: { id: string; name: string; thumbnail?: string; rows?: number; author?: string; source?: string; license?: string; licenseUrl?: string }[]; version: string; voice: VoiceStatus;
 }
 export type LocalAction =
   | { type: 'settings'; patch: Partial<DesktopSettings> }
@@ -14,7 +15,11 @@ export type LocalAction =
   | { type: 'external'; url: string }
   | { type: 'quickSize'; height: number }
   | { type: 'connectionSize'; expanded: boolean }
-  | { type: 'checkUpdate' };
+  | { type: 'checkUpdate' }
+  | { type: 'voiceModel'; command: 'download' | 'cancel' | 'remove' }
+  | { type: 'voiceKey'; key: string | null }
+  | { type: 'voiceList' }
+  | { type: 'voicePreview' };
 export interface LocalBridge {
   getState(): Promise<LocalState>;
   onState(listener: (state: LocalState) => void): () => void;

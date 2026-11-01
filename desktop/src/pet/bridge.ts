@@ -35,7 +35,7 @@ export interface PetViewState {
   panelHeight: number;
   targetKey: string | null;
 }
-export interface PetCue { sound?: PetSound; speech?: string; locale: string }
+export interface PetCue { sound: PetSound }
 export type PetAction =
   | { type: 'open' | 'approve' | 'deny' | 'revealInMap'; key: string }
   | { type: 'reply'; key: string; text: string }
@@ -54,6 +54,7 @@ export type PetAction =
 export interface PetBridge {
   onState(listener: (state: PetViewState) => void): () => void;
   onCue(listener: (cue: PetCue) => void): () => void;
+  onSpeech(listener: (audio: Uint8Array) => void): () => void;
   ready(): void;
   hitTest(interactive: boolean): void;
   action(action: PetAction): Promise<HostCommandResult>;

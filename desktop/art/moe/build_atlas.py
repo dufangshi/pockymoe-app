@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Slice generated pose sheets and build a Codex-compatible pet atlas.
 
-Usage: build_atlas.py SHEET1 SHEET2 OUT_DIR
+Usage: build_atlas.py SHEET1 SHEET2 OUT_DIR [--id ID --name NAME --description TEXT --chroma]
+--chroma reads sheets drawn on flat #00FF00 and keys it out here: a character with white
+hair loses its edge in a matte produced by the image model.
 Atlas: 1536x1872, 8x9 cells of 192x208 (hatch-pet contract).
 """
-import json, math, sys
+import argparse, json, math
 from pathlib import Path
 import numpy as np
 from PIL import Image, ImageFilter
@@ -30,8 +32,23 @@ def clean(im):
     return Image.fromarray(a.astype(np.uint8), 'RGBA')
 
 
-def slice_sheet(path, cols=4, rows=3):
-    im = clean(Image.open(path))
+def chroma_key(path):
+    a = np.array(Image.open(path).convert('RGB')).astype(np.float32)
+    r, g, b = a[..., 0], a[..., 1], a[..., 2]
+    excess = g - np.maximum(r, b)
+    alpha = 1 - np.clip((excess - 40) / 90, 0, 1)
+    # An edge pixel is a blend with the green behind it, so take that green back out.
+    safe = np.maximum(alpha, 1e-3)
+    bg = np.array([0, 255, 0], dtype=np.float32)
+    fg = np.clip((a - (1 - alpha)[..., None] * bg) / safe[..., None], 0, 255)
+    fg[..., 1] = np.minimum(fg[..., 1], np.maximum(fg[..., 0], fg[..., 2]) + 2)
+    out = np.dstack([fg, alpha * 255])
+    out[alpha <= 0] = 0
+    return Image.fromarray(out.astype(np.uint8), 'RGBA')
+
+
+def slice_sheet(path, cols=4, rows=3, chroma=False):
+    im = clean(chroma_key(path) if chroma else Image.open(path))
     alpha = np.array(im)[..., 3] > 0
     lab, n = ndimage.label(ndimage.binary_dilation(alpha, iterations=3))
     w, h = im.size
@@ -47,7 +64,8 @@ def slice_sheet(path, cols=4, rows=3):
     poses = []
     for comps in cells:
         mask = np.zeros_like(alpha)
-        for sl, i, _ in comps:
+        # A keyed sheet has no effects outside the character, so anything apart from it is residue.
+        for sl, i, _ in ([max(comps, key=lambda c: c[2])] if chroma else comps):
             mask[sl] |= (lab[sl] == i)
         mask &= alpha
         ys, xs = np.nonzero(mask)
@@ -114,9 +132,15 @@ def finish(cell):
 
 
 def main():
-    s1, s2, out = sys.argv[1], sys.argv[2], Path(sys.argv[3])
-    A = slice_sheet(s1)   # idle, blink, content, look | walkA, walkB, wave1, wave2 | crouch, air, land, sleep
-    B = slice_sheet(s2)   # type1, type2, focus, think | mag1, mag2, ask, hope | sad, slump, dizzy, surprised
+    parser = argparse.ArgumentParser()
+    parser.add_argument('sheet1'); parser.add_argument('sheet2'); parser.add_argument('out', type=Path)
+    parser.add_argument('--id', default='moe'); parser.add_argument('--name', default='Moe')
+    parser.add_argument('--description', default='A cobalt axolotl who keeps an eye on your Remote Codex threads.')
+    parser.add_argument('--chroma', action='store_true')
+    args = parser.parse_args()
+    s1, s2, out = args.sheet1, args.sheet2, args.out
+    A = slice_sheet(s1, chroma=args.chroma)   # idle, blink, content, look | walkA, walkB, wave1, wave2 | crouch, air, land, sleep
+    B = slice_sheet(s2, chroma=args.chroma)   # type1, type2, focus, think | mag1, mag2, ask, hope | sad, slump, dizzy, surprised
     allp = A + B
     # One global scale: every pose (with props) must fit inside the cell with margin.
     scale = min(min((CW - 14) / p['img'].width, (BASELINE - 6) / p['img'].height) for p in allp)
@@ -159,8 +183,8 @@ def main():
         strip.alpha_composite(finish(f), (c * CW, 0))
     strip.save(out / 'sleeping.webp', 'WEBP', lossless=True, quality=100, method=6)
     (out / 'pet.json').write_text(json.dumps({
-        'id': 'moe', 'displayName': 'Moe',
-        'description': 'A cobalt axolotl who keeps an eye on your Remote Codex threads.',
+        'id': args.id, 'displayName': args.name,
+        'description': args.description,
         'spritesheetPath': 'spritesheet.webp',
         'remoteCodex': {'frameScale': 2.5, 'sleeping': {'path': 'sleeping.webp', 'frames': 4, 'durationsMs': [900, 700, 900, 700]}},
     }, indent=2, ensure_ascii=False) + '\n')

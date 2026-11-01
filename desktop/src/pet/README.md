@@ -50,9 +50,8 @@ frameScale are validated independently. Import validates dimensions, size caps,
 ZIP paths, symlinks and decoded pixels before atomic installation under userData.
 The shell may call `importPetPack({ settings, petDirectories, parent })`.
 
-The bundled `gpt-dragon` pack is GPT Dragon Girl by ouyang070125-cmyk, CC BY 4.0;
-its source/attribution/licence files ship alongside the unchanged atlas. Native
-Preferences/About display the credit via the shell's pet catalog.
+`moe` and `frost` are original bundled packs; their sources are in `desktop/art/`.
+Native Preferences/About display each pack's credit via the shell's pet catalog.
 
 Focused checks from `desktop/`:
 

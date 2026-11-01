@@ -10,7 +10,7 @@ export function clampRect(rect: Rect, area: Rect): Rect {
 }
 export function defaultPosition(display: PetDisplay, height: number): PetPosition {
   return { displayId: display.id, x: display.workArea.x + display.workArea.width - height - 32,
-    y: display.workArea.y + display.workArea.height - height - 24, edge: null };
+    y: display.workArea.y + display.workArea.height - height - CONTROLS_CLEARANCE - 8, edge: null };
 }
 export function restorePosition(position: PetPosition | undefined, displays: PetDisplay[], primary: PetDisplay, height: number): PetPosition {
   const display = displays.find((candidate) => candidate.id === position?.displayId);
@@ -27,7 +27,7 @@ export function dockPosition(position: PetPosition, area: Rect, height: number):
   distances.sort((a, b) => a[1] - b[1]);
   const edge = distances[0][1] <= 24 ? distances[0][0] : null;
   return { displayId: position.displayId, x: edge === 'left' ? area.x : edge === 'right' ? area.x + area.width - width : bounded.x,
-    y: edge === 'top' ? area.y : edge === 'bottom' ? area.y + area.height - height : bounded.y, edge };
+    y: edge === 'top' ? area.y : edge === 'bottom' ? area.y + area.height - height : Math.min(bounded.y, area.y + area.height - height - CONTROLS_CLEARANCE), edge };
 }
 /** Fixed sprite bounds: panel, menu, bubble and hover state never affect this window. */
 export function petLayout(position: PetPosition, area: Rect, height: number, options: { panel?: boolean; bubble?: boolean; chat?: boolean; mini?: boolean; peek?: boolean; menu?: boolean; dockAmount?: number; measured?: { tray: number; bubble: number; chat: number } } = {}) {
@@ -46,12 +46,10 @@ export function exposedRect(window: Rect, edge: DockEdge, visible = .25): Rect {
   if (edge === 'top') return { ...window, height };
   return { ...window, y: window.y + window.height - height, height };
 }
-/** Position the separate glass child against the body, entirely inside the work area. */
-export function surfaceLayout(sprite: Rect, area: Rect, width: number, height: number, edge: DockEdge | null): Rect {
-  const above = sprite.y - area.y >= area.y + area.height - sprite.y - sprite.height;
-  let x = sprite.x + sprite.width / 2 - width / 2;
-  let y = above ? sprite.y - height - 8 : sprite.y + sprite.height + 8;
-  if (edge === 'left') { x = sprite.x + sprite.width + 8; y = sprite.y + sprite.height / 2 - height / 2; }
-  if (edge === 'right') { x = sprite.x - width - 8; y = sprite.y + sprite.height / 2 - height / 2; }
-  return clampRect({ x: Math.round(x), y: Math.round(y), width, height }, area);
+/** Room kept under the pet so its controls fit there. */
+export const CONTROLS_CLEARANCE = 44;
+/** The glass child sits below the pet; only a surface with no room there goes above it. */
+export function surfaceLayout(sprite: Rect, area: Rect, width: number, height: number): Rect {
+  const below = sprite.y + sprite.height + 8, room = below + height <= area.y + area.height;
+  return clampRect({ x: Math.round(sprite.x + sprite.width / 2 - width / 2), y: Math.round(room ? below : sprite.y - height - 8), width, height }, area);
 }

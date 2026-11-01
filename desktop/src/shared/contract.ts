@@ -2,6 +2,7 @@
 // page half in apps/supervisor-web/src/desktop/host.ts; bump
 // HOST_BRIDGE_VERSION on any breaking change and feature-detect, never assume.
 // Design: docs/desktop-design.zh.md §6.
+import type { RemoteProvider, RemoteVoice, VoiceProvider } from './voice';
 
 export const HOST_BRIDGE_VERSION = 2;
 
@@ -124,8 +125,14 @@ export interface DesktopSettings {
   petSize: 'S' | 'M' | 'L';
   petMini: boolean;
   petSound: boolean;
-  /** Read alerts aloud with the system voice; default false. */
+  /** Read alerts aloud; default false. Turning it on with the local provider fetches the model. */
   petVoice: boolean;
+  petVoiceProvider: VoiceProvider;
+  /** Kokoro speaker id for the local provider. */
+  petVoiceSpeaker: number;
+  petVoiceSpeed: number;
+  /** Per service, so switching does not lose an address. API keys are stored separately. */
+  petVoiceRemotes: Partial<Record<RemoteProvider, RemoteVoice>>;
   /** Hide the character past the screen edge when docked; default true. */
   petEdgeHide: boolean;
   launchAtLogin: boolean;
@@ -133,6 +140,9 @@ export interface DesktopSettings {
   quickWindowShortcut: string;
   snoozeUntil: string | null;
 }
+
+/** The page never sees or changes where spoken alerts are sent. */
+export type PageSettings = Omit<DesktopSettings, 'petVoiceProvider' | 'petVoiceSpeaker' | 'petVoiceSpeed' | 'petVoiceRemotes'>;
 
 export interface Appearance {
   effective: 'light' | 'dark';
@@ -163,8 +173,8 @@ export interface PockymoeHost {
   };
   pet: { setVisible(visible: boolean): void; isVisible(): Promise<boolean> };
   settings: {
-    get(): Promise<DesktopSettings>;
-    set(patch: Partial<DesktopSettings>): Promise<DesktopSettings>;
+    get(): Promise<PageSettings>;
+    set(patch: Partial<PageSettings>): Promise<PageSettings>;
   };
   badge: { set(count: number, style: 'attention' | 'running' | 'none'): void };
   appearance: { sync(appearance: Appearance): void };
@@ -215,6 +225,8 @@ export interface PetControllerDeps {
   dispatch(command: Omit<HostCommand, 'id'>): Promise<HostCommandResult>;
   /** Opens the Preferences window without touching the page. */
   openPreferences(section?: 'general' | 'pet' | 'shortcuts'): void;
+  /** Encoded audio for an alert, or null when no voice is available yet. */
+  speak(text: string): Promise<Uint8Array | null>;
   /** Whether the delivery policy wants the pet to speak for this event (§5.2). */
   shouldSpeak(event: ActivityEvent): boolean;
   /** Directory holding bundled and imported pet packs. */
@@ -227,5 +239,8 @@ export interface PetControllerDeps {
 export interface PetController {
   setVisible(visible: boolean): void;
   isVisible(): boolean;
+  /** Plays encoded speech now, ahead of the alert queue, for previews. */
+  play(audio: Uint8Array): void;
+  say(text: string): void;
   dispose(): void;
 }

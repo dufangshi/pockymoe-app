@@ -5,7 +5,7 @@ import type { ActivityItem, ActivityRecent, Appearance, HostCommand, HostCommand
 import { resolveLocale, setLocale, t } from '../shared/i18n';
 import { conversationKey, conversationTitle } from '../shared/activityGroups';
 import { ANIMATIONS } from './animation';
-import { BubbleQueue } from './bubbles';
+import { BUBBLE_MS, BubbleQueue } from './bubbles';
 import { dockPosition, exposedRect, PET_HEIGHT, petLayout, restorePosition, surfaceLayout, type PetPosition } from './geometry';
 import { importPetPack as importPack, listPetPacks, imageDimensions, type PetPack } from './packs';
 import { petConversations } from './conversations';
@@ -72,16 +72,26 @@ export function createPetController(deps: PetControllerDeps): PetController {
   }
   let glassSize = { width: 132, height: 36 };
   function placeGlass(): void {
-    const bounds = surfaceLayout(window.getBounds(), display().workArea, glassSize.width, glassSize.height, position.edge);
+    const bounds = surfaceLayout(window.getBounds(), display().workArea, glassSize.width, glassSize.height);
     const before = glass.getBounds();
     if (Object.keys(bounds).some(key => bounds[key as keyof typeof bounds] !== before[key as keyof typeof before])) glass.setBounds(bounds);
   }
   function closeSurface(): void { panel = false; menu = false; detailOpen = false; controlsPinned = false; mode = 'controls'; glassDismissed = true; emit(); }
-  function cue(sound: PetCue['sound'], speech?: string): void {
-    const now = Date.now(), wanted: PetCue = { locale: uiLocale };
-    if (sound && settings.petSound && now - lastCue >= 800) { wanted.sound = sound; lastCue = now; }
-    if (speech && settings.petVoice && now - lastSpeech >= 2500) { wanted.speech = speech; lastSpeech = now; }
-    if ((wanted.sound || wanted.speech) && readySprite && !window.isDestroyed()) window.webContents.send('rcDesktop:pet:cue', wanted);
+  function play(audio: Uint8Array): void { if (readySprite && !window.isDestroyed()) window.webContents.send('rcDesktop:pet:speech', audio); }
+  // Synthesis takes seconds: read one at a time, and only the newest of whatever piled up meanwhile.
+  let synthesizing = false, nextSpeech: string | null = null;
+  async function say(text: string): Promise<void> {
+    if (synthesizing) { nextSpeech = text; return; }
+    synthesizing = true;
+    try { const audio = await deps.speak(text); if (audio && !disposed) play(audio); }
+    catch { /* The chime already told them; the voice service records why. */ }
+    synthesizing = false;
+    if (nextSpeech) { const next = nextSpeech; nextSpeech = null; void say(next); }
+  }
+  function cue(sound: PetCue['sound'] | undefined, speech?: string): void {
+    const now = Date.now();
+    if (sound && settings.petSound && now - lastCue >= 800 && readySprite && !window.isDestroyed()) { lastCue = now; window.webContents.send('rcDesktop:pet:cue', { sound }); }
+    if (speech && settings.petVoice && now - lastSpeech >= 2500) { lastSpeech = now; void say(speech); }
   }
   // macOS can deliver the prior panel's blur after a rapid close/reopen. Verify
   // settled native focus so that stale blur never tears down the newly opened UI.
@@ -102,7 +112,7 @@ export function createPetController(deps: PetControllerDeps): PetController {
   function emit(): void {
     if (disposed) return;
     const now = Date.now();
-    const expiring = bubbles.current && !bubbles.current.sticky && bubbles.current.shownAt !== null && now - bubbles.current.shownAt >= 6000 ? [...bubbles.current.events] : [];
+    const expiring = bubbles.current && !bubbles.current.sticky && bubbles.current.shownAt !== null && now - bubbles.current.shownAt >= BUBBLE_MS ? [...bubbles.current.events] : [];
     bubbles.tick(now);
     for (const event of expiring) deps.hub.acknowledge(event.alertId, 'pet');
     const snoozed = !!settings.snoozeUntil && Date.parse(settings.snoozeUntil) > now;
@@ -260,7 +270,7 @@ export function createPetController(deps: PetControllerDeps): PetController {
     moods.onEvent(event.type, now, delivered, reaction, ANIMATIONS[reaction].durations.reduce((a, b) => a + b, 0) * (pack?.manifest.remoteCodex?.frameScale ?? 1));
     if (delivered && bubbles.push(event, now)) {
       targetKey = event.item.key; targets.set(event.item.key, event.item); while (targets.size > 20) targets.delete(targets.keys().next().value!);
-      alertPeekUntil = now + 6000; glassDismissed = false;
+      alertPeekUntil = now + BUBBLE_MS; glassDismissed = false;
     }
     emit();
   }), deps.hub.onAcknowledge(id => { bubbles.acknowledge(id, Date.now()); emit(); }), deps.settings.onChange(next => {
@@ -285,6 +295,7 @@ export function createPetController(deps: PetControllerDeps): PetController {
     const tucked = position.edge && settings.petEdgeHide !== false && dockAmount === 1;
     const close = (tucked ? within(exposedRect(bounds, position.edge!), 12) : within(bounds, 60)) || glass.isVisible() && within(child, 8);
     if (controlsPinned && !close && now - awaySince >= 4000) controlsPinned = false;
+    if (close) bubbles.hold(now); // Reading it keeps it there.
     if (close) { if (!near) glassDismissed = false; near = true; awaySince = 0; if (!hoverSince) hoverSince = now; }
     else { near = false; hoverSince = 0; if (!awaySince) awaySince = now; }
     if (!position.edge || settings.petEdgeHide === false || panel || menu || controlsPinned || bubbles.current?.sticky || now < alertPeekUntil || close && now - hoverSince >= 150) peek = true;
@@ -296,7 +307,7 @@ export function createPetController(deps: PetControllerDeps): PetController {
   const devUrl = process.env.ELECTRON_RENDERER_URL;
   for (const view of [window, glass]) void (devUrl ? view.loadURL(`${devUrl.replace(/\/$/, '')}/pet/index.html`) : view.loadFile(join(__dirname, '../renderer/pet/index.html'))).then(() => { if (view === window) void refreshPacks(); });
   return {
-    setVisible(value) { if (deps.settings.get().petVisible !== value) deps.settings.set({ petVisible: value }); }, isVisible: () => visible && !disposed,
+    setVisible(value) { if (deps.settings.get().petVisible !== value) deps.settings.set({ petVisible: value }); }, isVisible: () => visible && !disposed, play, say(text) { cue(undefined, text); },
     dispose() {
       if (disposed) return; disposed = true; clearInterval(timer); clearTimeout(blurTimer); savePosition();
       for (const unsubscribe of unsubscribes) unsubscribe();

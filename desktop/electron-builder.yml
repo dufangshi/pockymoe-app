@@ -9,6 +9,10 @@ files:
   - build/*.png
   - build/tray-*.ico
   - package.json
+# The addon loads dylibs from beside itself, which needs real files.
+asarUnpack:
+  - '**/node_modules/sherpa-onnx-*-*/**'
+afterPack: scripts/afterPack.cjs
 extraResources:
   - from: assets/pets
     to: pets

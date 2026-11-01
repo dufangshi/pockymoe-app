@@ -58,7 +58,7 @@ try {
     await h('failCommand','resolveRequest');await glass.getByRole('button',{name:'Approve',exact:true}).click();await expect(glass.locator('.error-mark')).toBeVisible();await glass.locator('.error-mark').click();await expect(glass.getByRole('button',{name:'Open in thread'})).toBeVisible();await shot(`${id}-error`);await h('blur');await expect(glass.locator('.error-popover')).toHaveCount(0);await expect(glass.locator('.bubble.sticky')).toBeVisible();await action({type:'dismiss'});await h('failCommand',null);
     await action({type:'menu',value:true});await shot(`${id}-more`);await action({type:'close'});
     await h('settings',{petMini:true});await shot(`${id}-mini`);await h('settings',{petMini:false});
-    await h('settings',{petId:'gpt-dragon'});await sprite.waitForTimeout(200);await sprite.screenshot({path:`${evidence}/${id}-dragon@2x.png`,omitBackground:true});await h('settings',{petId:'moe'});
+    await h('settings',{petId:'frost'});await sprite.waitForTimeout(200);await sprite.screenshot({path:`${evidence}/${id}-dragon@2x.png`,omitBackground:true});await h('settings',{petId:'moe'});
   }
   const docking=[];
   if(!menusOnly){

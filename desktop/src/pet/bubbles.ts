@@ -17,6 +17,9 @@ function withEvents(bubble: PetBubble, events: ActivityEvent[]): PetBubble {
   return { ...bubble, events, sticky, shownAt: bubble.sticky && !sticky ? null : bubble.shownAt };
 }
 
+/** How long a finished-thread bubble stays beside the pet. */
+export const BUBBLE_MS = 30_000;
+
 export class BubbleQueue {
   private queue: PetBubble[] = [];
   private seen = new Map<string, number>();
@@ -66,8 +69,11 @@ export class BubbleQueue {
     this.tick(now);
   }
 
+  /** Restarts the visible bubble's time while the pointer is on it. */
+  hold(now: number): void { const current = this.queue[0]; if (current && current.shownAt !== null) this.queue[0] = { ...current, shownAt: now }; }
+
   tick(now: number): void {
-    while (this.current && !this.current.sticky && this.current.shownAt !== null && now - this.current.shownAt >= 6000) this.queue.shift();
+    while (this.current && !this.current.sticky && this.current.shownAt !== null && now - this.current.shownAt >= BUBBLE_MS) this.queue.shift();
     if (this.current && this.current.shownAt === null) this.queue[0] = { ...this.current, shownAt: now };
   }
 

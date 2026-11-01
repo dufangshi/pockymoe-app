@@ -3,11 +3,12 @@ import { access, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promi
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { deflateRawSync } from 'node:zlib';
+import { PNG } from 'pngjs';
 import type { ActivityEvent, ActivityItem } from '../shared/contract';
 import { ANIMATIONS, frameAt, moodFor } from './animation';
 import { scrollGeometry } from './scroll';
-import { BubbleQueue } from './bubbles';
-import { clampRect, defaultPosition, dockPosition, exposedRect, petLayout, restorePosition } from './geometry';
+import { BUBBLE_MS, BubbleQueue } from './bubbles';
+import { clampRect, CONTROLS_CLEARANCE, defaultPosition, dockPosition, exposedRect, petLayout, restorePosition, surfaceLayout } from './geometry';
 import { importPetPack, loadPetPack, MAX_PACK_BYTES, parseManifest, unpackPetZip, validateAtlas } from './packs';
 const item = (state: ActivityItem['state'], key = 'd:t'): ActivityItem => ({ key, deviceId: 'd', deviceName: 'Mac', workspaceId: 'w', workspaceLabel: 'Project', threadId: key, title: 'Build', state, since: new Date(0).toISOString(), unread: true });
 const event = (type: ActivityEvent['type'], key = 'd:t', id = key): ActivityEvent => ({ type, alertId: id, item: item(type === 'started' ? 'running' : type === 'resolved' ? 'idle' : type, key), at: new Date(0).toISOString() });
@@ -39,13 +40,28 @@ describe('bubble delivery', () => {
   });
   it('coalesces completion bursts, expires only after display and keeps attention sticky', () => {
     const q = new BubbleQueue(); q.push(event('needsInput', 'a'), 0); q.push(event('completed', 'b'), 200); q.push(event('completed', 'c'), 800);
-    expect(q.pending).toHaveLength(2); expect(q.pending[1].events).toHaveLength(2); q.tick(20000); expect(q.pending).toHaveLength(2); q.acknowledge('a', 20000); expect(q.current?.shownAt).toBe(20000); q.tick(25999); expect(q.current).not.toBeNull(); q.tick(26000); expect(q.current).toBeNull();
+    expect(q.pending).toHaveLength(2); expect(q.pending[1].events).toHaveLength(2); q.tick(20000); expect(q.pending).toHaveLength(2); q.acknowledge('a', 20000); expect(q.current?.shownAt).toBe(20000); q.tick(49999); expect(q.current).not.toBeNull(); q.tick(50000); expect(q.current).toBeNull();
+  });
+  it('holds a bubble while the pointer stays near it', () => {
+    const q = new BubbleQueue(); q.push(event('completed', 'a'), 0); q.tick(0);
+    q.hold(BUBBLE_MS - 1); q.tick(BUBBLE_MS + 1000); expect(q.current).not.toBeNull();
+    q.tick(BUBBLE_MS * 2 - 2); expect(q.current).not.toBeNull(); q.tick(BUBBLE_MS * 2 - 1); expect(q.current).toBeNull();
   });
   it('synchronizes acknowledgement and resolved requests', () => {
     const q = new BubbleQueue(); q.push(event('completed', 'a'), 0); q.push(event('completed', 'b'), 10); q.acknowledge('a', 100); expect(q.current?.events.map((e) => e.alertId)).toEqual(['b']); q.push(event('needsInput', 'c'), 200); q.resolve('c', 300); expect(q.current?.sticky).toBe(false);
   });
 });
 describe('display and dock geometry', () => {
+  it('keeps the control capsule under the sprite, also on the right and bottom edges', () => {
+    const area = { x: 0, y: 0, width: 1000, height: 800 };
+    const sprite = { x: 400, y: 300, width: 128, height: 140 };
+    expect(surfaceLayout(sprite, area, 132, 36).y).toBeGreaterThanOrEqual(sprite.y + sprite.height);
+    const right = surfaceLayout({ ...sprite, x: 872 }, area, 132, 36);
+    expect(right.y).toBeGreaterThanOrEqual(sprite.y + sprite.height); expect(right.x + right.width).toBeLessThanOrEqual(1000);
+    expect(surfaceLayout({ ...sprite, y: 700 }, area, 132, 36).y + 36).toBeLessThanOrEqual(700);
+    const docked = dockPosition({ x: 500, y: 790, displayId: 1, edge: null }, area, 140);
+    if (docked.edge === 'left' || docked.edge === 'right' || !docked.edge) expect(docked.y + 140 + CONTROLS_CLEARANCE).toBeLessThanOrEqual(800);
+  });
   const area = { x: -1440, y: 40, width: 1440, height: 860 }, primary = { id: 1, workArea: { x: 0, y: 38, width: 1512, height: 906 } };
   it('hovers a tucked pet only on its exposed strip', () => {
     const w = { x: 100, y: 100, width: 100, height: 100 };
@@ -133,11 +149,12 @@ describe('custom task scrollbar', () => {
 });
 
 describe('v3 atlas and fixed-window regressions', () => {
-  it('decodes the bundled v2 layout without adding look slots to animation loops', async () => {
-    const pack = await loadPetPack(new URL('../../assets/pets/gpt-dragon/', import.meta.url).pathname);
-    expect(pack.manifest.spriteVersionNumber).toBe(2); validateAtlas(pack.image, pack.manifest);
+  it('accepts the v2 layout of imported packs without adding look slots to animation loops', async () => {
+    const pack = await loadPetPack(new URL('../../assets/pets/frost/', import.meta.url).pathname);
+    const v2 = PNG.sync.write(new PNG({ width: 1536, height: 2288 })), manifest = { ...pack.manifest, spritesheetPath: 'spritesheet.png' as const, spriteVersionNumber: 2 };
+    validateAtlas(v2, manifest);
     expect(ANIMATIONS.idle.durations).toHaveLength(6); expect(ANIMATIONS.review.row).toBe(8);
-    expect(() => validateAtlas(pack.image, { ...pack.manifest, spriteVersionNumber: 1 })).toThrow('8×9');
+    expect(() => validateAtlas(v2, { ...manifest, spriteVersionNumber: 1 })).toThrow('8×9');
   });
   it('honours frameScale, caps one-shots on the last frame, and rejects unsafe values', async () => {
     const pack = await loadPetPack(new URL('../../assets/pets/moe/', import.meta.url).pathname);

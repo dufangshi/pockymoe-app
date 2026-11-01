@@ -39,3 +39,9 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+---
+
+Local speech uses sherpa-onnx (https://github.com/k2-fsa/sherpa-onnx, Apache-2.0), which bundles
+ONNX Runtime (MIT), and the Kokoro-82M v1.1-zh voices (https://huggingface.co/hexgrad/Kokoro-82M-v1.1-zh,
+Apache-2.0). The model is downloaded on request, not shipped with the app.
