@@ -2,12 +2,14 @@
 
 import argparse
 import concurrent.futures
+import ctypes
 import fcntl
 import hashlib
 import json
 import os
 from pathlib import Path
 import signal
+import shutil
 import socket
 import subprocess
 import sys
@@ -182,6 +184,11 @@ def prepare_web(codex, relay_origin, dev_web):
     if (output / "index.html").is_file():
         return output, 0
     output.mkdir(parents=True, exist_ok=True)
+    duration = build_static_web(codex, relay_origin, output)
+    return output, duration
+
+
+def build_static_web(codex, relay_origin, output):
     env = clean_environment()
     env.update({"VITE_POCKYMOE_RELAY_ORIGIN": relay_origin, "POCKYMOE_WEB_DOMAIN": "desktop.fixture.test"})
     began = time.monotonic()
@@ -192,7 +199,55 @@ def prepare_web(codex, relay_origin, dev_web):
                                 cwd=codex, env=env, stdout=log, stderr=log, check=False)
     if result.returncode:
         raise FixtureError(f"Static web build failed; inspect {output}/build.log")
-    return output, round(time.monotonic() - began, 3)
+    return round(time.monotonic() - began, 3)
+
+
+def exchange_directories(first, second):
+    # Both platforms support an atomic exchange of nonempty directories. The
+    # server keeps its directory path and resolves each new request there.
+    library = ctypes.CDLL(None, use_errno=True)
+    if sys.platform == "darwin":
+        exchange = library.renameatx_np
+    elif sys.platform.startswith("linux") and hasattr(library, "renameat2"):
+        exchange = library.renameat2
+    else:
+        raise FixtureError("Atomic artifact exchange requires macOS or Linux renameat2 support.")
+    exchange.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint]
+    exchange.restype = ctypes.c_int
+    if exchange(-2 if sys.platform == "darwin" else -100, os.fsencode(first),
+                -2 if sys.platform == "darwin" else -100, os.fsencode(second), 2):
+        code = ctypes.get_errno()
+        raise FixtureError(f"Atomic artifact exchange failed: {os.strerror(code)}")
+
+
+def rebuild_web(state):
+    if state.get("webMode") != "static" or not alive(state.get("webProcess")):
+        raise FixtureError("rebuild-web requires a running static fixture.")
+    target = Path(state["webDist"])
+    owned = LOCAL / "e2e-desktop-web"
+    if target.is_symlink() or not target.resolve().is_relative_to(owned.resolve()):
+        raise FixtureError("Refusing to replace an artifact outside the fixture's own static build directory.")
+    build_dir = Path(tempfile.mkdtemp(prefix="web-rebuild.", dir=Path(state["dataDir"]) / "web"))
+    began = time.monotonic()
+    build_static_web(Path(state["webRoot"]), state["relayOrigin"], build_dir)
+    html = (build_dir / "index.html").read_bytes()
+    if ((build_dir / "404.html").read_bytes() != html or
+            state["relayOrigin"].encode() not in html or not (build_dir / "relayServiceWorker.js").is_file()):
+        raise FixtureError(f"Incomplete Pages artifact; served build kept intact. Inspect {build_dir}")
+    # As in Pages deployment, retain older hashed chunks so already-open pages
+    # can still load their lazy imports until the reader reloads.
+    previous_assets = target / "assets"
+    for source in previous_assets.rglob("*"):
+        if source.is_file():
+            destination = build_dir / "assets" / source.relative_to(previous_assets)
+            if not destination.exists():
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(source, destination)
+    exchange_directories(build_dir, target)
+    state["webBuildSeconds"] = round(time.monotonic() - began, 3)
+    state["previousWebDist"] = str(build_dir)
+    write_json(STATE, state)
+    return {"path": str(target), "durationSeconds": state["webBuildSeconds"]}
 
 
 def launch_web(state):
@@ -420,7 +475,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", nargs="?", default="start", choices=[
         "start", "serve", "stop", "status", "env", "stop-device", "start-device", "complete", "fail",
-        "request-approval", "request-input", "start-turn", "burst", "verify", "verify-api", "verify-browser"])
+        "request-approval", "request-input", "start-turn", "burst", "verify", "verify-api", "verify-browser", "rebuild-web"])
     parser.add_argument("arguments", nargs="*")
     parser.add_argument("--dev-web", action="store_true", help="run Vite instead of the static Pages build")
     args = parser.parse_args()
@@ -438,6 +493,8 @@ def main():
         elif args.command == "status":
             print(json.dumps(public_status(read_state()) if STATE.exists() else {"ready": False},
                              ensure_ascii=False, indent=2))
+        elif args.command == "rebuild-web":
+            print(json.dumps(rebuild_web(read_state())))
         elif args.command == "stop":
             if STATE.exists():
                 stop(read_state())

@@ -57,6 +57,46 @@ class IsolationTests(unittest.TestCase):
             output.stdout = "Sun Nov  1 02:17:23 2026 Z\n"
             self.assertEqual(backend.identity(12345), "")
 
+    def test_rebuild_swaps_whole_artifact_and_retains_old_lazy_chunks(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            target = root / "e2e-desktop-web" / "served"
+            (target / "assets").mkdir(parents=True)
+            (target / "index.html").write_text("old entry")
+            (target / "assets" / "old-hash.js").write_text("old lazy chunk")
+            run = root / "run"
+            (run / "web").mkdir(parents=True)
+            state = {"webMode": "static", "webProcess": {}, "webDist": str(target),
+                     "dataDir": str(run), "webRoot": str(root), "relayOrigin": "http://127.0.0.1:18890"}
+
+            def build(_root, origin, output):
+                (output / "index.html").write_text("new entry " + origin)
+                (output / "404.html").write_text("new entry " + origin)
+                (output / "relayServiceWorker.js").write_text("new worker")
+
+            with patch.object(backend, "LOCAL", root), patch.object(backend, "STATE", root / "state.json"), \
+                    patch.object(backend, "alive", return_value=True), patch.object(backend, "build_static_web", side_effect=build):
+                result = backend.rebuild_web(state)
+            self.assertEqual(set(result), {"path", "durationSeconds"})
+            self.assertEqual((target / "index.html").read_text(), "new entry " + state["relayOrigin"])
+            self.assertEqual((target / "assets" / "old-hash.js").read_text(), "old lazy chunk")
+            self.assertEqual((Path(state["previousWebDist"]) / "index.html").read_text(), "old entry")
+
+    def test_failed_rebuild_keeps_served_artifact(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            target = root / "e2e-desktop-web" / "served"
+            target.mkdir(parents=True)
+            (target / "index.html").write_text("old entry")
+            (root / "run" / "web").mkdir(parents=True)
+            state = {"webMode": "static", "webProcess": {}, "webDist": str(target),
+                     "dataDir": str(root / "run"), "webRoot": str(root), "relayOrigin": "http://127.0.0.1:18890"}
+            with patch.object(backend, "LOCAL", root), patch.object(backend, "alive", return_value=True), \
+                    patch.object(backend, "build_static_web", side_effect=backend.FixtureError("failed")):
+                with self.assertRaisesRegex(backend.FixtureError, "failed"):
+                    backend.rebuild_web(state)
+            self.assertEqual((target / "index.html").read_text(), "old entry")
+
 
 if __name__ == "__main__":
     unittest.main()

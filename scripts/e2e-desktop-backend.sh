@@ -2,6 +2,7 @@
 # Pockymoe desktop E2E backend (Python 3, Node/pnpm, headless Chromium).
 # Usage: ./scripts/e2e-desktop-backend.sh start|serve [--dev-web]
 #        ./scripts/e2e-desktop-backend.sh stop|status|env
+#        ./scripts/e2e-desktop-backend.sh rebuild-web
 #        ./scripts/e2e-desktop-backend.sh stop-device 3|start-device 3
 #        ./scripts/e2e-desktop-backend.sh complete|fail|request-approval|request-input|start-turn DEVICE_IDX THREAD_ID
 #        ./scripts/e2e-desktop-backend.sh burst N

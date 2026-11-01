@@ -4,6 +4,7 @@
 ./scripts/e2e-desktop-backend.sh start              # API relay + static Web + 3 devices
 ./scripts/e2e-desktop-backend.sh serve --dev-web    # Vite instead; foreground cleanup
 ./scripts/e2e-desktop-backend.sh status
+./scripts/e2e-desktop-backend.sh rebuild-web        # fresh Pages build; atomic swap
 ./scripts/e2e-desktop-backend.sh env                # PRIVATE local test credentials
 ./scripts/e2e-desktop-backend.sh stop-device 3
 ./scripts/e2e-desktop-backend.sh start-device 3
@@ -53,8 +54,16 @@ API-only and redirects document navigation to that Web origin. `--dev-web` inste
 runs the product Vite config with the same relay origin. The fixture sets
 `Service-Worker-Allowed: /` for its development worker and excludes test-only files
 from HMR so a peer adding tests does not reset sign-in forms. Stop before changing
-Web mode. A running static fixture keeps its existing snapshot; stop/start picks up
-new product commits, while `--dev-web` follows source edits immediately.
+Web mode. `rebuild-web` compiles the current Web worktree into a fresh temporary
+directory using this fixture's relay origin, then atomically exchanges the complete
+served artifact directory. It changes no origin, account, relay, supervisor or Web
+server process. Old hashed chunks are retained for lazy imports in already-open
+pages; the previous full artifact is kept in the run's Web directory. A failed
+build leaves the served artifact intact. Output contains only the served path and
+duration in seconds. Reload the page after success. Atomic exchange requires macOS
+or Linux with `renameat2`; externally supplied artifacts outside the fixture's own
+build directory are protected from replacement. `--dev-web` follows source edits
+immediately.
 
 The disposable `desktop` account is registered through the real Web UI: vault
 creation, Argon2id, recovery confirmation and browser certification all run in
