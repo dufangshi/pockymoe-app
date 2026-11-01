@@ -7,6 +7,15 @@ import type { ActivityEvent } from '../src/shared/contract';
 import { connected, item, snapshot } from './fixtures';
 
 describe('ActivityHub', () => {
+  it('rechecks a terminal state when its timestamp catches up after the status update', () => {
+    const hub = connected(new ActivityHub()), events: ActivityEvent[] = []; hub.onEvent(event => events.push(event));
+    hub.sync(snapshot([item()]));
+    hub.sync(snapshot([item({ state: 'failed', unread: true, since: '2026-11-01T05:00:00.000Z' })]));
+    expect(events.map(event => event.type)).toEqual(['started']);
+    hub.sync(snapshot([item({ state: 'failed', unread: true, since: '2026-11-01T06:00:10.000Z' })]));
+    hub.sync(snapshot([item({ state: 'failed', unread: true, since: '2026-11-01T06:00:10.000Z' })]));
+    expect(events.map(event => event.type)).toEqual(['started', 'failed']); hub.dispose();
+  });
   it.each(['failed', 'completed', 'interrupted'] as const)('emits fresh %s when unread arrives after the terminal state', state => {
     const hub = connected(new ActivityHub()), events: ActivityEvent[] = []; hub.onEvent(event => events.push(event));
     hub.sync(snapshot([item({ state, unread: false })])); expect(events).toHaveLength(0);

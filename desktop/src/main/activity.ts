@@ -119,7 +119,10 @@ export class ActivityHub implements ActivityHubLike {
       // State and unread can arrive on separate updates. A terminal state first
       // seen as read must still announce once its unread flag catches up.
       const newlyUnread = old && !old.unread && item.unread && ['completed', 'failed', 'interrupted'].includes(item.state);
-      if (old?.state === item.state && alertId(old) === alertId(item) && !newlyUnread) continue;
+      // A status event may still carry the previous turn's completion time.
+      // Once the current turn timestamp arrives, evaluate it as fresh activity.
+      const becameCurrent = old && Date.parse(old.since) < baseline;
+      if (old?.state === item.state && alertId(old) === alertId(item) && !newlyUnread && !becameCurrent) continue;
       const type = item.state === 'running' ? 'started' : item.state === 'interrupted' ? 'failed' : item.state;
       const event: ActivityEvent = { type, alertId: alertId(item), item, at: next.generatedAt };
       if (type !== 'started') {

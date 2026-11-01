@@ -79,6 +79,11 @@ test('custom pickers support keyboard, pet thumbnails/credits and recent quick t
   await expect.poll(() => web.evaluate(() => window.commands)).toEqual(expect.arrayContaining([expect.objectContaining({ type: 'reply', deviceId: 'old', threadId: 'recent' })]));
   await quick.getByRole('option').click();
   await expect.poll(() => web.evaluate(() => window.commands)).toEqual(expect.arrayContaining([expect.objectContaining({ type: 'navigate', path: '/devices/old/threads/recent' })]));
+  await app.evaluate(() => globalThis.__pockymoeDesktopTest.windows.createLocal('relay'));
+  const setup = await pageAt('view=relay'); await setup.getByText('Advanced', { exact: true }).click();
+  await setup.getByLabel('Web address', { exact: true }).fill(origin); await setup.getByLabel('Relay address', { exact: true }).fill(origin);
+  await setup.getByRole('button', { name: 'Connect', exact: true }).click();
+  await expect.poll(() => app.windows().some(page => page.url().includes('view=relay'))).toBe(false);
 });
 test('long pickers scroll within the overlay and keep keyboard options visible', async () => {
   await pageAt(origin); await mode();
@@ -92,6 +97,19 @@ test('long pickers scroll within the overlay and keep keyboard options visible',
   for (const pack of ['classic', 'plum-pocket', 'terminal']) for (const effective of ['light', 'dark'] as const) {
     await mode(pack, effective); await capture(prefs, `preferences-long-picker-${pack}-${effective}`);
   }
+});
+test('close-to-tray keeps the Web activity source running while unfocused', async () => {
+  const web = await pageAt(origin);
+  expect(await app.evaluate(() => globalThis.__pockymoeDesktopTest.windows.main().webContents.getBackgroundThrottling())).toBe(false);
+  await app.evaluate(() => globalThis.__pockymoeDesktopTest.windows.main().close());
+  expect(await app.evaluate(() => globalThis.__pockymoeDesktopTest.windows.main().isVisible())).toBe(false);
+  await expect.poll(() => web.evaluate(() => document.visibilityState)).toBe('visible');
+  const time = new Date().toISOString();
+  await web.evaluate(value => {
+    if (document.visibilityState === 'visible') window.pockymoeHost!.activity.sync(value);
+  }, snapshot([item({ turnId: 'background-turn', since: time })], { generatedAt: time, syncedDeviceIds: ['mac'] }));
+  await expect.poll(() => app.evaluate(() => globalThis.__pockymoeDesktopTest.hub.snapshot()?.items[0]?.turnId)).toBe('background-turn');
+  expect(await app.evaluate(() => globalThis.__pockymoeDesktopTest.windows.main().isVisible())).toBe(false);
 });
 
 test('compact local surfaces in all packs, modes and desktop/narrow widths', async () => {

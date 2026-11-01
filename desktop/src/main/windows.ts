@@ -53,8 +53,10 @@ export class Windows {
       ...this.currentBounds(), minWidth: 900, minHeight: 600, show: false, title: 'Pockymoe',
       backgroundColor: process.platform === 'darwin' ? '#00000000' : '#202022',
       ...(process.platform === 'darwin' ? { titleBarStyle: 'hiddenInset' as const, trafficLightPosition: { x: 14, y: 13 }, vibrancy: 'sidebar' as const, visualEffectState: 'followWindow' as const, transparent: true } : { titleBarStyle: 'hidden' as const, titleBarOverlay: this.overlay(), backgroundMaterial: 'mica' as const }),
+      // The Web window owns account activity even when hidden. Keep its timers
+      // and visibility state active so close-to-tray cannot pause native alerts.
       // Keep the persisted session partition name across the product rename.
-      webPreferences: { preload: join(__dirname, '../preload/relay.js'), contextIsolation: true, sandbox: true, nodeIntegration: false, partition: 'persist:remote-codex', additionalArguments: [`--pockymoe-web-origin=${this.settings.get().webOrigin}`] }
+      webPreferences: { preload: join(__dirname, '../preload/relay.js'), contextIsolation: true, sandbox: true, nodeIntegration: false, backgroundThrottling: false, partition: 'persist:remote-codex', additionalArguments: [`--pockymoe-web-origin=${this.settings.get().webOrigin}`] }
     });
     const webContentsId = w.webContents.id;
     this.relay.add(w);
