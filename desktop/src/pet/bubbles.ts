@@ -61,9 +61,9 @@ export class BubbleQueue {
   }
 
   tick(now: number): void {
-    while (this.current && !this.current.sticky && this.current.shownAt !== null && now - this.current.shownAt >= 8000) this.queue.shift();
+    while (this.current && !this.current.sticky && this.current.shownAt !== null && now - this.current.shownAt >= 6000) this.queue.shift();
     if (this.current && this.current.shownAt === null) this.queue[0] = { ...this.current, shownAt: now };
   }
 
-  clear(): void { this.queue = []; }
+  clear(): void { this.queue = []; this.seen.clear(); this.threadSpoke.clear(); }
 }

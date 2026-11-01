@@ -8,10 +8,11 @@ app.getLocale = () => 'zh-CN';
 app.setPath('userData', mkdtempSync(join(tmpdir(), 'rc-pet-harness-')));
 const snapshotListeners = new Set<(value: ActivitySnapshot) => void>(), eventListeners = new Set<(value: ActivityEvent) => void>(), ackListeners = new Set<(id: string, source: string) => void>(), settingsListeners = new Set<(value: DesktopSettings) => void>();
 let snapshot: ActivitySnapshot = { version: 1, accountId: 'pet-fixture', generatedAt: new Date().toISOString(), focusedThreadKey: null, items: [] };
-let settings: DesktopSettings = { webOrigin: 'https://example.invalid', relayOrigin: 'https://example.invalid', alertMode: 'petFirst', petVisible: true, petId: 'moe', petSize: 'M', petMini: false, petSound: false, launchAtLogin: false, quickWindowShortcut: 'Alt+Space', snoozeUntil: null };
+let settings: DesktopSettings = { webOrigin: 'https://example.invalid', relayOrigin: 'https://example.invalid', alertMode: 'petFirst', petVisible: true, petId: 'moe', petSize: 'M', petMini: false, petSound: false, petEdgeHide: true, launchAtLogin: false, quickWindowShortcut: 'Alt+Space', snoozeUntil: null };
 const commands: Omit<HostCommand, 'id'>[] = [], acknowledgements: string[] = [];
 const appearanceListeners = new Set<(value: Appearance) => void>();
 let appearance: Appearance = { effective: 'light', pack: 'classic', accent: '#ad782e' };
+let cursorPoint = { x: -10000, y: -10000 };
 let replyFails = false, ignored = true, failingCommand: 'resolveRequest' | 'reply' | null = null;
 const hub: ActivityHubLike = {
   snapshot: () => snapshot,
@@ -27,7 +28,11 @@ const store: SettingsStoreLike = {
 };
 void app.whenReady().then(() => {
   const controller = createPetController({ hub, settings: store, appearance: () => appearance, onAppearance: (listener) => { appearanceListeners.add(listener); return () => appearanceListeners.delete(listener); }, dispatch: async (command) => { commands.push(command); if (command.type === failingCommand) { await new Promise((resolve) => setTimeout(resolve, 100)); return { ok: false, code: 'needsThread', error: 'needsThread' }; } if (command.type === 'reply') { await new Promise((resolve) => setTimeout(resolve, 120)); if (replyFails) return { ok: false, error: '模拟发送失败，请重试' }; } return { ok: true }; }, shouldSpeak: () => true, petDirectories: [join(process.cwd(), 'assets/pets')] });
-  const window = BrowserWindow.getAllWindows()[0], setIgnored = window.setIgnoreMouseEvents.bind(window);
+  const window = BrowserWindow.getAllWindows().find(view => !view.getParentWindow())!, glass = BrowserWindow.getAllWindows().find(view => !!view.getParentWindow())!;
+  const nativeSetBounds = window.setBounds.bind(window); let spriteBoundsCalls = 0; let requestedBounds = window.getBounds();
+  window.setBounds = (bounds, animate) => { spriteBoundsCalls++; requestedBounds = { ...requestedBounds, ...bounds }; nativeSetBounds(bounds, animate); };
+  Object.assign(screen, { getCursorScreenPoint: () => cursorPoint });
+  const setIgnored = window.setIgnoreMouseEvents.bind(window);
   window.setIgnoreMouseEvents = (value, options) => { ignored = value; setIgnored(value, options); };
   Object.assign(globalThis, { petHarness: {
     sync(value: ActivitySnapshot) { snapshot = value; for (const listener of snapshotListeners) listener(value); },
@@ -36,6 +41,11 @@ void app.whenReady().then(() => {
     theme(value: 'light' | 'dark') { nativeTheme.themeSource = value; },
     appearance(value: Appearance) { appearance = value; for (const listener of appearanceListeners) listener(value); },
     workArea(width: number) { const area = { x: 0, y: 38, width, height: 800 }; const display = { id: 1, workArea: area }; Object.assign(screen, { getPrimaryDisplay: () => display, getAllDisplays: () => [display], getDisplayNearestPoint: () => display, getDisplayMatching: () => display }); },
+    cursor: (point: { x: number; y: number }) => { cursorPoint = point; },
+    metrics: () => ({ spriteBoundsCalls, requestedBounds, dockVisible: app.dock?.isVisible(), sprite: window.getBounds(), glass: glass.getBounds(), glassVisible: glass.isVisible(), glassFocused: glass.isFocused() }),
+    resetMetrics: () => { spriteBoundsCalls = 0; },
+    blur: () => glass.blur(),
+    displays(values: { id: number; workArea: Electron.Rectangle }[]) { Object.assign(screen, { getPrimaryDisplay: () => values[0], getAllDisplays: () => values, getDisplayNearestPoint: (point: Electron.Point) => values.find(value => point.x >= value.workArea.x && point.x <= value.workArea.x + value.workArea.width) ?? values[0] }); screen.emit('display-metrics-changed'); },
     settings: (patch: Partial<DesktopSettings>) => store.set(patch),
     failCommand: (value: 'resolveRequest' | 'reply' | null) => { failingCommand = value; },
     ignored: () => ignored, failReply: (value: boolean) => { replyFails = value; },

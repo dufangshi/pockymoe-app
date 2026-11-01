@@ -22,6 +22,7 @@ export const english = {
   "线程已不在活动列表中。": "This thread is no longer active.",
   "无法保存桌宠位置。": "Could not save the pet position.",
   "没有可用的 Codex v1 宠物包。": "No valid Codex v1 pet pack is installed.",
+  "没有可用的宠物包。": "No valid pet pack is installed.",
   "导入 Codex 宠物包": "Import a Codex pet pack",
   "Codex 宠物包": "Codex pet pack",
   "文件夹": "Folder",

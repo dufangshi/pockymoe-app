@@ -7,7 +7,7 @@ import { randomUUID } from 'node:crypto';
 export const MAX_PACK_BYTES = 8 * 1024 * 1024;
 const MAX_MANIFEST_BYTES = 16 * 1024;
 export interface SleepingStrip { path: 'sleeping.webp' | 'sleeping.png'; frames: number; durationsMs: number[] }
-export interface PetManifest { id: string; displayName: string; description: string; spritesheetPath: 'spritesheet.png' | 'spritesheet.webp'; spriteVersionNumber?: number; remoteCodex?: { sleeping: SleepingStrip } }
+export interface PetManifest { id: string; displayName: string; description: string; spritesheetPath: 'spritesheet.png' | 'spritesheet.webp'; spriteVersionNumber?: number; author?: string; license?: string; sourceUrl?: string; licenseUrl?: string; remoteCodex?: { sleeping?: SleepingStrip; frameScale?: number } }
 export interface PetPack { manifest: PetManifest; directory: string; image: Buffer; sleepingImage?: Buffer }
 function fail(message: string): never { throw new Error(`Invalid pet pack: ${message}`); }
 export function parseManifest(data: Buffer): PetManifest {
@@ -20,12 +20,26 @@ export function parseManifest(data: Buffer): PetManifest {
   if (typeof manifest.displayName !== 'string' || !manifest.displayName.trim() || manifest.displayName.length > 100) fail('displayName must contain 1–100 characters');
   if (typeof manifest.description !== 'string' || manifest.description.length > 500) fail('description must be at most 500 characters');
   if (!['spritesheet.png', 'spritesheet.webp'].includes(String(manifest.spritesheetPath))) fail('spritesheetPath must be spritesheet.png or spritesheet.webp');
-  if (manifest.spriteVersionNumber !== undefined && manifest.spriteVersionNumber !== 1) fail('only Codex atlas v1 is documented and supported; v2 (8×11) is not yet supported');
-  let remoteCodex: PetManifest['remoteCodex'];
-  const extension = (manifest.remoteCodex as { sleeping?: SleepingStrip } | undefined)?.sleeping;
-  if (extension && ['sleeping.webp', 'sleeping.png'].includes(extension.path) && Number.isInteger(extension.frames) && extension.frames >= 1 && extension.frames <= 8 && Array.isArray(extension.durationsMs) && extension.durationsMs.length === extension.frames && extension.durationsMs.every((duration) => Number.isFinite(duration) && duration >= 100 && duration <= 5000)) remoteCodex = { sleeping: extension };
+  if (manifest.spriteVersionNumber !== undefined && ![1, 2].includes(manifest.spriteVersionNumber as number)) fail('spriteVersionNumber must be 1 (8×9) or 2 (8×11)');
+  const remoteCodex: PetManifest['remoteCodex'] = {};
+  const extensions = manifest.remoteCodex as Record<string, unknown> | undefined;
+  const extension = extensions?.sleeping as SleepingStrip | undefined;
+  if (extension) {
+    if (!['sleeping.webp', 'sleeping.png'].includes(extension.path) || !Number.isInteger(extension.frames) || extension.frames < 1 || extension.frames > 8 || !Array.isArray(extension.durationsMs) || extension.durationsMs.length !== extension.frames || !extension.durationsMs.every(duration => Number.isFinite(duration) && duration >= 100 && duration <= 5000)) fail('invalid remoteCodex.sleeping strip');
+    remoteCodex.sleeping = extension;
+  }
+  if (extensions?.frameScale !== undefined) {
+    if (typeof extensions.frameScale !== 'number' || !Number.isFinite(extensions.frameScale) || extensions.frameScale < .25 || extensions.frameScale > 8) fail('remoteCodex.frameScale must be between 0.25 and 8');
+    remoteCodex.frameScale = extensions.frameScale;
+  }
+  const metadata: Pick<PetManifest, 'author' | 'license' | 'sourceUrl' | 'licenseUrl'> = {};
+  for (const key of ['author', 'license', 'sourceUrl', 'licenseUrl'] as const) {
+    const value = manifest[key];
+    if (value !== undefined && (typeof value !== 'string' || value.length > 300)) fail(`invalid ${key}`);
+    if (typeof value === 'string') { if (key.endsWith('Url') && !/^https:\/\//.test(value)) fail(`invalid ${key}`); metadata[key] = value; }
+  }
   return { id: manifest.id, displayName: manifest.displayName, description: manifest.description,
-    spritesheetPath: manifest.spritesheetPath as PetManifest['spritesheetPath'], spriteVersionNumber: manifest.spriteVersionNumber as number | undefined, ...(remoteCodex ? { remoteCodex } : {}) };
+    spritesheetPath: manifest.spritesheetPath as PetManifest['spritesheetPath'], spriteVersionNumber: manifest.spriteVersionNumber as number | undefined, ...metadata, ...(Object.keys(remoteCodex).length ? { remoteCodex } : {}) };
 }
 export function imageDimensions(bytes: Buffer): { width: number; height: number; format: 'png' | 'webp' } {
   if (bytes.length > MAX_PACK_BYTES) fail('spritesheet exceeds 8 MB');
@@ -43,10 +57,11 @@ export function imageDimensions(bytes: Buffer): { width: number; height: number;
 export function validateAtlas(bytes: Buffer, manifest: PetManifest): void {
   const dimensions = imageDimensions(bytes);
   if (!manifest.spritesheetPath.endsWith(dimensions.format)) fail('image format does not match its extension');
-  if (dimensions.width !== 1536 || dimensions.height !== 1872) fail(`v1 atlas must be 1536×1872 (8×9), received ${dimensions.width}×${dimensions.height}`);
+  const rows = manifest.spriteVersionNumber === 2 ? 11 : 9;
+  if (dimensions.width !== 1536 || dimensions.height !== rows * 208) fail(`v${manifest.spriteVersionNumber ?? 1} atlas must be 1536×${rows * 208} (8×${rows}), received ${dimensions.width}×${dimensions.height}`);
 }
 function validateSleeping(bytes: Buffer, manifest: PetManifest): void {
-  const size = imageDimensions(bytes), strip = manifest.remoteCodex!.sleeping;
+  const size = imageDimensions(bytes), strip = manifest.remoteCodex!.sleeping!;
   if (size.width !== 192 * strip.frames || size.height !== 208 || !strip.path.endsWith(size.format)) fail('invalid sleeping strip dimensions or format');
 }
 async function safeRead(path: string, limit: number): Promise<Buffer> {
@@ -68,7 +83,7 @@ export async function loadPetPack(directory: string): Promise<PetPack> {
   const manifest = parseManifest(await safeRead(join(directory, 'pet.json'), MAX_MANIFEST_BYTES));
   const image = await safeRead(join(directory, manifest.spritesheetPath), MAX_PACK_BYTES);
   validateAtlas(image, manifest);
-  const sleepingImage = manifest.remoteCodex ? await safeRead(join(directory, manifest.remoteCodex.sleeping.path), MAX_PACK_BYTES) : undefined;
+  const sleepingImage = manifest.remoteCodex?.sleeping ? await safeRead(join(directory, manifest.remoteCodex.sleeping.path), MAX_PACK_BYTES) : undefined;
   if (sleepingImage) validateSleeping(sleepingImage, manifest);
   if (image.length + (sleepingImage?.length ?? 0) > MAX_PACK_BYTES) fail('combined spritesheets exceed 8 MB');
   return { manifest, image, directory, sleepingImage };
@@ -136,8 +151,8 @@ export async function importPetPack(source: string, userPetsDirectory: string, d
     const root = manifests[0].slice(0, -'pet.json'.length);
     manifest = parseManifest(files.get(manifests[0])!);
     const atlas = files.get(root + manifest.spritesheetPath);
-    sleepingImage = manifest.remoteCodex ? files.get(root + manifest.remoteCodex.sleeping.path) : undefined;
-    if (!atlas || files.size !== (manifest.remoteCodex ? 3 : 2) || manifest.remoteCodex && !sleepingImage) fail('zip must contain only pet.json and its declared spritesheets');
+    sleepingImage = manifest.remoteCodex?.sleeping ? files.get(root + manifest.remoteCodex.sleeping.path) : undefined;
+    if (!atlas || files.size !== (manifest.remoteCodex?.sleeping ? 3 : 2) || manifest.remoteCodex?.sleeping && !sleepingImage) fail('zip must contain only pet.json and its declared spritesheets');
     if (sleepingImage) validateSleeping(sleepingImage, manifest);
     image = atlas;
     validateAtlas(image, manifest);
@@ -151,7 +166,7 @@ export async function importPetPack(source: string, userPetsDirectory: string, d
   try {
     await writeFile(join(staging, 'pet.json'), JSON.stringify(manifest, null, 2));
     await writeFile(join(staging, manifest.spritesheetPath), image);
-    if (sleepingImage && manifest.remoteCodex) await writeFile(join(staging, manifest.remoteCodex.sleeping.path), sleepingImage);
+    if (sleepingImage && manifest.remoteCodex?.sleeping) await writeFile(join(staging, manifest.remoteCodex.sleeping.path), sleepingImage);
     // Existing packs are immutable: an import may never replace a bundled/custom pack silently.
     try { await lstat(destination); fail(`pet id ${manifest.id} is already installed`); }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }

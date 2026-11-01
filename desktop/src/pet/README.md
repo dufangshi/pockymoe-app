@@ -1,6 +1,11 @@
 # Desktop pet
 
-`createPetController` is owned by main and consumes only the frozen bridge types:
+The main process owns one fixed transparent character window and one reusable,
+parented glass window. Only dragging, size changes and display changes can alter
+character bounds. The glass child resizes to its compact controls, merged activity
+panel, pill bubble or More menu. macOS uses native HUD vibrancy; Windows uses
+acrylic (other platforms retain the translucent fallback). An interactive panel
+focuses and closes on native blur or Esc; passive bubbles never take focus.
 
 ```ts
 import { createPetController } from '../pet/controller';
@@ -13,42 +18,54 @@ const pet = createPetController({ hub, settings,
 // On shutdown: pet.dispose(). Settings changes are observed automatically.
 ```
 
-The build has two extra entries: `src/pet/preload.ts` → `out/preload/pet.js`
-and `src/pet/index.html` → `out/renderer/pet/index.html`. In development the
-renderer uses `ELECTRON_RENDERER_URL/pet/index.html`. No relay credentials enter
-this window. Its `rcDesktop.pet` methods accept only named, sender-checked actions.
-The panel becomes focusable while the user explicitly opens quick chat or its keyboard menu.
+The build entries remain `src/pet/preload.ts` → `out/preload/pet.js` and
+`src/pet/index.html` → `out/renderer/pet/index.html`. Both windows share the local
+renderer and sandboxed, named `rcDesktop.pet` methods. IPC verifies the sender and
+its top frame. No relay credentials enter either pet window.
 
-The native Settings screen can call the additional `importPetPack({ settings,
-petDirectories, parent })` export. Import validates dimensions/limits and decodes
-pixels before atomic installation under `app.getPath('userData')/pets`. ZIP paths
-are never extracted directly; only validated manifest/atlas bytes are installed.
-Codex v1 timings follow the Apache-2.0 hatch-pet contract linked in `animation.ts`.
-Undocumented atlas v2 is rejected explicitly. The optional bundled Moe sleeping
-strip is an independently validated extension; other manifest fields are ignored.
+The hub is the authority for per-device connection baselines and the 60-second
+missing-item grace period. The pet never generates reactions from snapshots:
+only new hub events trigger one-shot failure/completion reactions. Sustained
+poses are waiting/running/idle, with a two-second minimum dwell and 160ms sprite
+crossfade. Snooze uses the full-colour optional sleeping strip. `petEdgeHide`
+defaults to true; docking translates 75% of the sprite inside an on-screen fixed
+window, slides out after 150ms hover and tucks after 800ms away. Cursor proximity
+is polled in main at 100ms, independent of alpha hit testing.
 
-Run the focused checks from `desktop/`:
+Codex v1 (1536×1872) and v2 (1536×2288) are supported. The first nine rows retain
+the official hatch-pet timings; v2's last two rows are reserved for pointer-look
+poses, and idle column 6 is not played. Sources are linked in `animation.ts`.
+Optional `remoteCodex.frameScale` slows per-frame timing. Sleeping strips and
+frameScale are validated independently. Import validates dimensions, size caps,
+ZIP paths, symlinks and decoded pixels before atomic installation under userData.
+The shell may call `importPetPack({ settings, petDirectories, parent })`.
+
+The bundled `gpt-dragon` pack is GPT Dragon Girl by ouyang070125-cmyk, CC BY 4.0;
+its source/attribution/licence files ship alongside the unchanged atlas. Native
+Preferences/About display the credit via the shell's pet catalog.
+
+Focused checks from `desktop/`:
 
 ```sh
 pnpm exec vitest run --config src/pet/vitest.config.ts
 pnpm typecheck
 pnpm exec eslint src/pet
-pnpm exec electron-vite build --config src/pet/tools/electron.config.ts
-node src/pet/tools/capture.mjs
+pnpm build
+POCKYMOE_DESKTOP_EVIDENCE=<evidence-root> pnpm exec electron-vite build --config src/pet/tools/electron.config.ts
+POCKYMOE_DESKTOP_EVIDENCE=<evidence-root> node src/pet/tools/round3.mjs
+POCKYMOE_DESKTOP_EVIDENCE=<evidence-root> node src/pet/tools/round3-real.mjs
 ```
 
-The last two commands use a mock ActivityHub, an isolated temporary userData, and
-an independent Electron process. Screenshots/results go to
-`.local/desktop-evidence/pet/qa1/`; no Supervisor or real account is accessed.
-`node src/pet/tools/generate-placeholder.mjs` recreates the original procedural
-atlas for tests. Production packaging must exclude `assets/pets/placeholder/**`.
+`round3.mjs` uses an isolated mock hub and checks Classic/Plum Pocket/Terminal ×
+light/dark × 1440/900 work areas, all four dock edges at S/M/L, fixed bounds,
+Dock visibility, blur/Esc, request errors and drafts. `--smoke` limits the visual
+matrix. Virtual secondary-display geometry is checked separately; macOS clamps
+native windows to connected physical displays.
 
-Appearance follows the host v2 `appearance()` / `onAppearance` callbacks through the shared appearance helper. Status SVGs come directly from `shared/statusMarks.ts`. The capture script checks Classic, Plum Pocket and Terminal in light/dark on 1440px and 900px work areas; `--smoke` selects Classic on a 900px work area.
-
-For request/bubble polish only, run `node src/pet/tools/capture.mjs --polish`. It covers approval/input hierarchy, command chips, matching rail icons, action focus/contrast, both tail orientations and edge clamping across all three packs in light/dark mode.
-
-`node src/pet/tools/capture.mjs --grouped` verifies root-conversation counts, sibling alert paging, inactive-root titles and actual-agent approval/reply/acknowledgement routing across the theme matrix.
-
-`node src/pet/tools/qa1.mjs` checks English/Chinese page-locale updates, prose versus real command chips, and inline resolve/reply failure recovery through ErrorMark. It captures waiting bubbles and error details in every pack/mode at 1440px and 900px work-area widths.
-
-All app-owned pet copy uses `shared/i18n.ts`, including retained command failures and native import dialogs. `node src/pet/tools/qa1.mjs --locale-surfaces` checks the pet bubble, tray, controls and More menu in every theme/mode and en/zh-CN. `node src/pet/tools/locale-real.mjs` launches the real app against the parent fixture and switches language through Web Settings; it uses fixture credentials only inside sign-in and never logs authentication values.
+`round3-real.mjs` uses the already-running backend fixture, a fresh temporary
+profile and real page sign-in. It records the first login minute, tests a live
+approval/completion and page-language sync, and captures native glass only over
+the foreground fixture window. It never logs authentication values or restarts a
+service. Prepare ≥250 historical fixture threads before the acceptance run.
+Evidence is written under `<evidence-root>/round3/pet/`. The earlier v2/QA1 tools
+are superseded by these v3 scripts.

@@ -1,9 +1,17 @@
-import type { ActivityItem, Appearance, DesktopSettings, HostCommandResult } from '../shared/contract';
+import type { ActivityItem, ActivityRecent, Appearance, DesktopSettings, HostCommandResult } from '../shared/contract';
 import type { SpriteState } from './animation';
 import type { PetBubble } from './bubbles';
 import type { DockEdge, Rect } from './geometry';
 export interface PetViewState {
   appearance: Appearance;
+  surface: 'sprite' | 'glass';
+  mode: 'controls' | 'panel' | 'menu' | 'bubble';
+  near: boolean;
+  detailOpen: boolean;
+  recent: ActivityRecent[];
+  atlasRows: 9 | 11;
+  frameScale: number;
+  edgeHide: boolean;
   accountId: string | null;
   items: ActivityItem[];
   targets: ActivityItem[];
@@ -30,7 +38,10 @@ export type PetAction =
   | { type: 'open' | 'approve' | 'deny' | 'revealInMap'; key: string }
   | { type: 'reply'; key: string; text: string }
   | { type: 'target'; key: string }
-  | { type: 'dismiss' }
+  | { type: 'dismiss' | 'close' | 'openMap' }
+  | { type: 'detail'; value: boolean }
+  | { type: 'surfaceMeasure'; width: number; height: number }
+  | { type: 'setEdgeHide'; value: boolean }
   | { type: 'toggleTray' | 'toggleChat' | 'click' | 'openMain' | 'preferences' | 'importFolder' | 'importZip' }
   | { type: 'setSize'; size: 'S' | 'M' | 'L' }
   | { type: 'setPack'; id: string }
