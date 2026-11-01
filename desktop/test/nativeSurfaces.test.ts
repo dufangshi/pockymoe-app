@@ -105,6 +105,16 @@ it('records actual notification construction only in E2E mode', () => {
     notifications.dispose();
   } finally { vi.unstubAllEnvs(); }
 });
+it('distinguishes started and failed decisions that share the same stable turn alert ID', () => {
+  const hub = connected(new ActivityHub());
+  const settings = { get: () => ({ ...defaults, alertMode: 'system' }), onChange: () => () => undefined } as unknown as SettingsStore;
+  const notifications = new Notifications(hub, settings, { relay: new Set(), dispatch: vi.fn() } as unknown as Windows, () => undefined, () => null);
+  hub.sync(snapshot([item()])); hub.sync(snapshot([item({ state: 'failed', unread: true })]));
+  expect(notifications.decisions.filter(decision => decision.alertId === 'mac:turn-1')).toMatchObject([
+    { type: 'started', system: false }, { type: 'failed', system: true }
+  ]);
+  notifications.dispose(); hub.dispose();
+});
 
 it('matches the Web waiting badge, excluding unread failures and counting conversations', () => {
   const a = item({ key: 'mac:a', threadId: 'a', rootThreadKey: 'mac:root', state: 'needsInput' });

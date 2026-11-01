@@ -10,7 +10,7 @@ export const itemPath = (item: Pick<ActivityItem, 'deviceId' | 'threadId'>): str
 export class Notifications {
   private active = new Map<string, Notification>();
   readonly constructed: { alertId: string; key: string; type: string; at: string; events: { alertId: string; key: string; type: string }[] }[] = [];
-  readonly decisions: { alertId: string; system: boolean; pet: boolean }[] = [];
+  readonly decisions: { alertId: string; type: ActivityEvent['type']; at: string; system: boolean; pet: boolean }[] = [];
   private batch: EventCoalescer;
   private delivered = new Map<Notification, ActivityEvent[]>();
   refreshLocale(): void {
@@ -22,7 +22,7 @@ export class Notifications {
     hub.onEvent(event => {
       if (event.type === 'resolved') { this.close(event.alertId); return; }
       const decision = this.policy(event);
-      this.decisions.push({ alertId: event.alertId, ...decision });
+      this.decisions.push({ alertId: event.alertId, type: event.type, at: event.at, ...decision });
       if (this.decisions.length > 100) this.decisions.shift();
       if (decision.system) this.batch.add(event);
     });
