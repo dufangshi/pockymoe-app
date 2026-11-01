@@ -102,7 +102,6 @@ svg { width: 16px; height: 16px; flex-shrink: 0; fill: none; stroke: currentColo
 .bubble-text { cursor: pointer; display: block; padding: 0; text-align: left; width: 100%; font-weight: 500; line-height: 20px; overflow-wrap: anywhere; }
 .bubble-actions { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
 .bubble-actions .map-action { margin-left: auto; display: grid; place-items: center; width: 28px; height: 28px; flex: 0 0 28px; padding: 6px; background: transparent; }
-.below .unused-tail::after { bottom: auto; top: -5px; transform: rotate(225deg); }
 .chat { padding: 8px 12px; flex-shrink: 0; }
 .chat-target { display: flex; align-items: center; gap: 8px; color: var(--theme-muted); font-size: 11px; margin-bottom: 8px; }
 .chat-target select { background: transparent; border: 0; min-width: 0; max-width: 240px; font-size: 11px; color: var(--theme-muted); }
@@ -151,3 +150,11 @@ svg { width: 16px; height: 16px; flex-shrink: 0; fill: none; stroke: currentColo
 .map-icon { width: 16px; height: 16px; stroke-width: 2; }
 
 .command-token { display: inline-block; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
+
+.conversation + .conversation { margin-top: 8px; }
+.conversation .task:last-child { margin-bottom: 0; }
+.conversation .agent-task:not(:first-child) { margin-left: 12px; border-left-color: color-mix(in srgb, var(--theme-accent-solid) 32%, var(--theme-border)); }
+.bubble-secondary, .chat-target-meta { color: var(--theme-muted); font-size: 11px; line-height: 16px; margin-top: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-target-meta { margin: -4px 0 8px; }
+.bubble-pages { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 8px; color: var(--theme-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.bubble-pages button { width: 24px; height: 24px; padding: 4px; display: grid; place-items: center; }

@@ -1,18 +1,19 @@
 // Focused Electron validation. Uses only a mock ActivityHub and isolated userData.
 // From desktop/: pnpm exec electron-vite build --config src/pet/tools/electron.config.ts
-// node src/pet/tools/capture.mjs [--smoke] [--polish]
+// node src/pet/tools/capture.mjs [--smoke] [--polish] [--grouped]
 import { _electron as electron, expect } from '@playwright/test';
 import electronPath from 'electron';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { PNG } from 'pngjs';
-const rootEvidence = '/tmp/rc-desktop/evidence/pet/v3';
+const rootEvidence = '/tmp/rc-desktop/evidence/pet/grouping';
 const smoke = process.argv.includes('--smoke');
 const polish = process.argv.includes('--polish');
+const grouped = process.argv.includes('--grouped');
 const directory = smoke ? `${rootEvidence}/smoke` : rootEvidence;
 await mkdir(directory, { recursive: true });
 const application = await electron.launch({ executablePath: electronPath, args: [`${rootEvidence}/harness/main/index.js`], env: { ...process.env, ELECTRON_RENDERER_URL: '' } });
 const page = await application.firstWindow(), errors = [], captures = [];
-page.on('pageerror', (error) => errors.push(error.message));
+page.on('pageerror', (error) => { errors.push(error.message); console.error(error.stack); });
 const packs = smoke ? ['classic'] : ['classic', 'plum-pocket', 'terminal'];
 const widths = smoke ? [900] : [1440, 900];
 const now = new Date().toISOString();
@@ -27,7 +28,8 @@ const definitions = [
   ['completed', '修复登录与会话恢复', '登录恢复已修复，针对性回归全部通过。'],
   ['completed', '打磨桌面端交互细节', '卡片、气泡与快速回复已对齐。'],
 ];
-const sync = (items) => application.evaluate((_, items) => globalThis.petHarness.sync({ version: 1, accountId: 'pet-fixture-v3', generatedAt: new Date().toISOString(), focusedThreadKey: null, items }), items);
+let fixtureAccountId = 'pet-fixture-grouping';
+const sync = (items) => application.evaluate((_, value) => globalThis.petHarness.sync({ version: 1, accountId: value.accountId, generatedAt: new Date().toISOString(), focusedThreadKey: null, items: value.items }), { items, accountId: fixtureAccountId });
 const action = (value) => page.evaluate((value) => window.rcDesktop.pet.action(value), value);
 const setSettings = (patch) => application.evaluate((_, patch) => globalThis.petHarness.settings(patch), patch);
 const accent = (pack, mode) => pack === 'terminal' ? mode === 'dark' ? '#4de3a2' : '#0a47c4' : pack === 'plum-pocket' ? mode === 'dark' ? '#f0b54a' : '#e8a93a' : mode === 'dark' ? '#e4b86a' : '#ad782e';
@@ -56,6 +58,7 @@ try {
   for (const pack of packs) for (const mode of ['light', 'dark']) for (const width of widths) {
     const id = `${pack}-${mode}-${width}`, context = { pack, mode, width };
     console.log(`Capture ${id}`);
+    if (grouped) fixtureAccountId = `pet-grouping-${id}`;
     await page.emulateMedia({ colorScheme: mode === 'light' ? 'dark' : 'light', reducedMotion: 'no-preference' });
     await application.evaluate((_, width) => globalThis.petHarness.workArea(width), width);
     await application.evaluate((_, value) => globalThis.petHarness.appearance(value), { effective: mode, pack, accent: accent(pack, mode) });
@@ -64,6 +67,7 @@ try {
     await expect(page.locator('html')).toHaveAttribute('data-theme-preset', pack);
     await setSettings({ petMini: false, snoozeUntil: null });
     await action({ type: 'dismiss' });
+    if (grouped) { await captureGrouped(id, context); continue; }
     const items = definitions.map(([state, title, summary, kind], index) => ({ ...base, key: `${index % 2 ? 'studio' : 'macbook'}:${id}-${index}`, threadId: `${id}-${index}`, title, state, since: new Date(Date.now() - (index + 1) * 32000).toISOString(), turnId: `turn-${id}-${index}`, ...(index % 2 ? { deviceId: 'studio', deviceName: 'Windows Studio', workspaceLabel: 'desktop-app' } : {}), ...(kind ? { request: { id: `req-${id}-${index}`, kind, summary } } : { resultSummary: summary }) }));
     await sync(items); await moveTo(width - 220, 660); await ensureTray(true);
     await page.evaluate(() => { document.querySelector('.task-list').scrollTop = 0; });
@@ -176,7 +180,7 @@ try {
     await writeFile(`${directory}/${mode}-contact-index.json`, JSON.stringify(entries.map(({ name }) => name), null, 2));
   }
   await writeFile(`${directory}/capture-results.json`, JSON.stringify({ result: 'passed', screenshots: captures.length, combinations, errors, commands, captures: captures.map(({ name, pack, mode, width, bounds }) => ({ name, pack, mode, width, bounds })) }, null, 2));
-  console.log(`Pet v3 passed: ${captures.length} captures across ${combinations} appearance/work-area combinations.`);
+  console.log(`Pet activity grouping passed: ${captures.length} captures across ${combinations} appearance/work-area combinations.`);
 } finally { await application.close(); }
 
 async function capturePolish(id, items, context) {
@@ -228,4 +232,52 @@ async function assertTail() {
     const width = element.clientWidth, head = Number(element.dataset.headX), tail = Number(element.dataset.tailX);
     return Math.abs(tail - Math.max(20, Math.min(width - 20, head))) < .05 && getComputedStyle(element, '::after').content === 'none' && element.querySelector('.bubble-frame path').getAttribute('d').includes('L');
   })).toBe(true);
+}
+
+async function captureGrouped(id, context) {
+  const root = { ...base, key: `macbook:${id}-root`, threadId: `${id}-root`, title: '修复跨设备登录与会话恢复', state: 'running', turnId: `turn-${id}-root` };
+  const agent = (name, suffix, kind) => ({ ...base, key: `macbook:${id}-${suffix}`, threadId: `${id}-${suffix}`, title: `子线程任务 ${suffix}`, agentName: name, rootThreadKey: root.key, rootThreadTitle: root.title, state: 'needsInput', turnId: `turn-${id}-${suffix}`, request: { id: `request-${id}-${suffix}`, kind, summary: kind === 'approval' ? '运行 cargo test -p pockymoe-runtime' : '请确认 Windows 的线程恢复路径。' } });
+  const a = agent('审查', 'agent-a', 'approval'), b = agent('验证', 'agent-b', 'input');
+  const orphan = { ...base, key: `studio:${id}-agent-c`, deviceId: 'studio', deviceName: 'Windows Studio', workspaceLabel: 'desktop-app', threadId: `${id}-agent-c`, title: '子线程构建任务', agentName: '构建', rootThreadKey: `studio:${id}-inactive-root`, rootThreadTitle: '打磨桌面端通知与地图联动', state: 'running', turnId: `turn-${id}-agent-c` };
+  const items = [root, a, b, orphan];
+  const fire = (events) => application.evaluate((_, events) => { for (const event of events) globalThis.petHarness.event(event); }, events);
+  const asEvent = (item, type) => ({ item, type, alertId: `${item.deviceId}:${item.request?.id ?? item.turnId}`, at: new Date().toISOString() });
+  await sync(items); await moveTo(context.width - 220, 660); await ensureTray(true);
+  await expect(page.locator('.task-count')).toHaveText('2');
+  await expect(page.locator('.task')).toHaveCount(4);
+  await expect(page.locator('.group-label').first()).toHaveText('需要你1');
+  const needsConversation = page.locator('.conversation').first(); await expect(needsConversation).toHaveAttribute('data-conversation-key', root.key); await expect(needsConversation.locator('.task')).toHaveCount(2);
+  await expect(needsConversation.locator('.task-title strong').first()).toHaveText(root.title); await expect(needsConversation.locator('.meta').first()).toHaveText('智能体 审查 · MacBook Pro · pockymoe');
+  await shot(`${id}-tray-conversations`, context);
+  await page.locator(`.task[data-key="${a.key}"]`).getByRole('button', { name: '在地图中显示' }).click();
+  await page.evaluate(() => { const list = document.querySelector('.task-list'); list.scrollTop = list.scrollHeight; });
+  await expect(page.locator(`.task[data-key="${orphan.key}"] .task-title strong`)).toHaveText(orphan.rootThreadTitle);
+  await expect(page.locator(`.task[data-key="${orphan.key}"] .meta`)).toHaveText('智能体 构建 · Windows Studio · desktop-app');
+  await shot(`${id}-tray-inactive-root`, context);
+  await ensureTray(false); const eventA = asEvent(a, 'needsInput'), eventB = asEvent(b, 'needsInput'); await fire([eventA, eventB]);
+  const bubble = page.locator('.bubble'); await expect(page.locator('.bubble-pages')).toBeVisible();
+  if (await bubble.getAttribute('data-key') !== a.key) await bubble.getByRole('button', { name: '上一条提醒' }).click();
+  await expect(bubble).toHaveAttribute('data-key', a.key); await expect(bubble).toHaveAttribute('data-alert-id', eventA.alertId);
+  await expect(bubble.locator('.bubble-title')).toHaveText(root.title); await expect(bubble.locator('.bubble-secondary')).toHaveText('智能体 审查 · MacBook Pro · pockymoe'); await shot(`${id}-bubble-conversation`, context);
+  await bubble.getByRole('button', { name: '批准', exact: true }).click();
+  await sync([root, b, orphan]); await expect(bubble).toHaveAttribute('data-key', b.key); await expect(bubble).toHaveAttribute('data-alert-id', eventB.alertId);
+  await expect(page.locator('.bubble-pages')).toHaveCount(0); await expect(bubble.locator('.bubble-title')).toHaveText(root.title); await expect(bubble.locator('.bubble-secondary')).toHaveText('智能体 验证 · MacBook Pro · pockymoe'); await shot(`${id}-bubble-remaining-agent`, context);
+  await action({ type: 'target', key: b.key }); await expect(page.locator('#target-select')).toHaveValue(b.key); await expect(page.locator('#target-select optgroup')).toHaveCount(2);
+  await expect(page.locator('.chat-target-meta')).toHaveText('智能体 验证 · MacBook Pro · pockymoe'); await page.locator('#reply-input').fill('请继续验证恢复路径'); await shot(`${id}-chat-agent-target`, context);
+  await page.locator('#reply-input').press('Enter'); await expect(page.getByRole('status')).toHaveText('已发送'); await action({ type: 'toggleChat' });
+  const failed = { ...orphan, state: 'failed', resultSummary: '构建检查需要继续排查。' }; await sync([root, failed]); await fire([asEvent(failed, 'failed')]);
+  await expect(bubble.locator('.bubble-title')).toHaveText(orphan.rootThreadTitle); await expect(bubble.locator('.bubble-secondary')).toHaveText('智能体 构建 · Windows Studio · desktop-app'); await shot(`${id}-bubble-inactive-root`, context);
+  await bubble.getByRole('button', { name: '在地图中显示' }).click(); await bubble.locator('[data-action="bubbleOpen"]').click(); await expect(bubble).toHaveCount(0);
+  const done = (item, suffix) => ({ ...item, key: `${item.deviceId}:${id}-${suffix}`, threadId: `${id}-${suffix}`, request: null, state: 'completed', unread: true, turnId: `turn-${id}-${suffix}`, resultSummary: '智能体检查已完成。' });
+  const doneA = done(a, 'done-a'), doneB = done(b, 'done-b'); await sync([doneA, doneB]); await action({ type: 'review', value: false }); await fire([asEvent(doneA, 'completed'), asEvent(doneB, 'completed')]);
+  await expect(bubble.locator('.bubble-title')).toHaveText(root.title); await expect(page.locator('.task-count')).toHaveText('1'); await shot(`${id}-one-completed-conversation`, context);
+  await application.evaluate((_, alertId) => globalThis.petHarness.acknowledge(alertId), asEvent(doneA, 'completed').alertId); await expect(bubble).toHaveAttribute('data-key', doneB.key); await action({ type: 'dismiss' });
+  const nextA = done(a, 'burst-a'), nextB = done(b, 'burst-b'), nextC = done(orphan, 'burst-c'); await sync([nextA, nextB, nextC]); await fire([asEvent(nextA, 'completed'), asEvent(nextB, 'completed'), asEvent(nextC, 'completed')]);
+  await expect(bubble.locator('.bubble-title')).toHaveText('2 个对话完成'); await expect(page.locator('.task-count')).toHaveText('2'); await shot(`${id}-two-completed-conversations`, context); await action({ type: 'dismiss' });
+  const records = await application.evaluate(() => ({ commands: globalThis.petHarness.commands(), acknowledgements: globalThis.petHarness.acknowledgements() }));
+  expect(records.commands.some((command) => command.type === 'resolveRequest' && command.threadId === a.threadId && command.requestId === a.request.id)).toBe(true);
+  expect(records.commands.some((command) => command.type === 'reply' && command.threadId === b.threadId && command.deviceId === b.deviceId)).toBe(true);
+  expect(records.commands.some((command) => command.type === 'navigate' && command.path.endsWith(`/threads/${orphan.threadId}`))).toBe(true);
+  expect(records.acknowledgements).toContain(asEvent(failed, 'failed').alertId); expect(records.acknowledgements).toContain(asEvent(nextA, 'completed').alertId); expect(records.acknowledgements).toContain(asEvent(nextB, 'completed').alertId);
+  expect(records.acknowledgements).not.toContain(root.key); expect(records.acknowledgements).not.toContain(orphan.rootThreadKey);
 }

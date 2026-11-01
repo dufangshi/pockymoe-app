@@ -1,3 +1,4 @@
+import { conversationKey } from '../shared/activityGroups';
 import type { ActivityEvent } from '../shared/contract';
 
 export interface PetBubble {
@@ -6,6 +7,9 @@ export interface PetBubble {
   createdAt: number;
   shownAt: number | null;
   sticky: boolean;
+}
+export function bubbleConversationCount(bubble: Pick<PetBubble, 'events'>): number {
+  return new Set(bubble.events.map((event) => conversationKey(event.item))).size;
 }
 const priority = (bubble: PetBubble): number => bubble.sticky ? 3 : bubble.events[0]?.type === 'failed' ? 2 : 1;
 
@@ -25,34 +29,40 @@ export class BubbleQueue {
     this.seen.set(event.alertId, now);
     if (this.threadSpoke.has(event.item.key)) return false;
     this.threadSpoke.set(event.item.key, now);
+    const conversation = conversationKey(event.item);
+    const related = event.type !== 'completed' ? this.queue.find((bubble) => bubble.events.every((existing) => existing.type === event.type && conversationKey(existing.item) === conversation)) : undefined;
     const burst = event.type === 'completed'
       ? this.queue.find((bubble) => !bubble.sticky && bubble.events.every((e) => e.type === 'completed') && now - bubble.createdAt <= 1200)
       : undefined;
-    if (burst) burst.events.push(event);
+    if (related) this.queue = this.queue.map((bubble) => bubble === related ? { ...bubble, events: [...bubble.events, event], shownAt: bubble.shownAt !== null && !bubble.sticky ? now : bubble.shownAt } : bubble);
+    else if (burst) this.queue = this.queue.map((bubble) => bubble === burst ? { ...bubble, events: [...bubble.events, event] } : bubble);
     else this.queue.push({ id: event.alertId, events: [event], createdAt: now, shownAt: null, sticky: event.type === 'needsInput' });
     const previous = this.current;
     this.queue.sort((a, b) => priority(b) - priority(a) || a.createdAt - b.createdAt);
-    if (previous && previous !== this.current) previous.shownAt = null;
+    if (previous && previous !== this.current) this.queue = this.queue.map((bubble) => bubble === previous ? { ...bubble, shownAt: null } : bubble);
     this.tick(now);
     return true;
   }
 
   acknowledge(alertId: string, now: number): void {
     this.queue = this.queue.flatMap((bubble) => {
-      bubble.events = bubble.events.filter((event) => event.alertId !== alertId);
-      return bubble.events.length ? [bubble] : [];
+      const events = bubble.events.filter((event) => event.alertId !== alertId);
+      return events.length ? [{ ...bubble, events }] : [];
     });
     this.tick(now);
   }
 
   resolve(threadKey: string, now: number): void {
-    this.queue = this.queue.filter((bubble) => !bubble.sticky || !bubble.events.some((event) => event.item.key === threadKey));
+    this.queue = this.queue.flatMap((bubble) => {
+      const events = bubble.sticky ? bubble.events.filter((event) => event.item.key !== threadKey) : bubble.events;
+      return events.length ? [{ ...bubble, events }] : [];
+    });
     this.tick(now);
   }
 
   tick(now: number): void {
     while (this.current && !this.current.sticky && this.current.shownAt !== null && now - this.current.shownAt >= 8000) this.queue.shift();
-    if (this.current && this.current.shownAt === null) this.current.shownAt = now;
+    if (this.current && this.current.shownAt === null) this.queue[0] = { ...this.current, shownAt: now };
   }
 
   clear(): void { this.queue = []; }

@@ -2,6 +2,7 @@ import { app, BrowserWindow, dialog, ipcMain, nativeImage, nativeTheme, screen }
 import { join } from 'node:path';
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import type { Appearance, HostCommand, HostCommandResult, PetController, PetControllerDeps } from '../shared/contract';
+import { conversationKey } from '../shared/activityGroups';
 import { ANIMATIONS, moodFor, type SpriteState } from './animation';
 import { BubbleQueue } from './bubbles';
 import { dockPosition, PET_HEIGHT, petLayout, restorePosition, type PetPosition } from './geometry';
@@ -20,10 +21,11 @@ export function createPetController(deps: PetControllerDeps): PetController {
   let disposed = false, visible = settings.petVisible, tray = settings.petMini, chat = false, peek = false, reviewing = false;
   let menuOpen = false, reducedMotion = false, dockAmount = 0;
   let dockTimer: ReturnType<typeof setInterval> | null = null;
-  let completion: 'waving' | 'jumping' | null = null, completionUntil = 0, lastCompletedAt = 0, targetKey: string | null = null;
+  let completion: 'waving' | 'jumping' | null = null, completionUntil = 0, targetKey: string | null = null;
   let drag: { x: number; y: number; origin: PetPosition; moved: boolean; previousX: number } | null = null;
   let dragMood: SpriteState | null = null, interactive = false, lastPayload = '';
   const bubbles = new BubbleQueue();
+  const completedConversations = new Map<string, number>();
   const recentTargets = new Map<string, (typeof items)[number]>();
   let accountId = deps.hub.snapshot()?.accountId ?? null;
   let measured = { tray: 0, bubble: 0, chat: 0 };
@@ -187,15 +189,21 @@ export function createPetController(deps: PetControllerDeps): PetController {
   ipcMain.on('rcDesktop:pet:hitTest', onHitTest);
   ipcMain.handle('rcDesktop:pet:action', (event, value: unknown) => trusted(event) ? action(value) : { ok: false, error: 'Untrusted pet frame' });
   const unsubscribes = [deps.onAppearance((next) => { appearance = next; emit(); }), deps.hub.onSnapshot((snapshot) => {
-    if (accountId && accountId !== snapshot.accountId) { bubbles.clear(); recentTargets.clear(); targetKey = null; }
+    if (accountId && accountId !== snapshot.accountId) { bubbles.clear(); recentTargets.clear(); completedConversations.clear(); targetKey = null; }
     accountId = snapshot.accountId; items = snapshot.items;
     for (const item of items) if (recentTargets.has(item.key)) recentTargets.set(item.key, item);
     for (const bubble of [...bubbles.pending]) for (const event of bubble.events)
-      if (event.type === 'needsInput' && !items.some((candidate) => candidate.key === event.item.key && candidate.request?.id === event.item.request?.id)) bubbles.resolve(event.item.key, Date.now());
+      if (event.type === 'needsInput' && !items.some((candidate) => candidate.key === event.item.key && candidate.request?.id === event.item.request?.id)) bubbles.acknowledge(event.alertId, Date.now());
     emit();
   }), deps.hub.onEvent((event) => {
-    if (event.type === 'resolved') bubbles.resolve(event.item.key, Date.now());
-    else if (event.type === 'completed') { completion = Date.now() - lastCompletedAt <= 1200 ? 'jumping' : 'waving'; lastCompletedAt = Date.now(); completionUntil = Date.now() + ANIMATIONS[completion].durations.reduce((a: number, b: number) => a + b, 0); }
+    if (event.type === 'resolved') bubbles.acknowledge(event.alertId, Date.now());
+    else if (event.type === 'completed') {
+      const now = Date.now();
+      for (const [key, at] of completedConversations) if (now - at > 1200) completedConversations.delete(key);
+      completedConversations.set(conversationKey(event.item), now);
+      completion = completedConversations.size > 1 ? 'jumping' : 'waving';
+      completionUntil = now + ANIMATIONS[completion].durations.reduce((a: number, b: number) => a + b, 0);
+    }
     if (visible && deps.shouldSpeak(event) && !(settings.snoozeUntil && Date.parse(settings.snoozeUntil) > Date.now())) {
       if (bubbles.push(event, Date.now())) { targetKey = event.item.key; recentTargets.delete(event.item.key); recentTargets.set(event.item.key, event.item); while (recentTargets.size > 20) recentTargets.delete(recentTargets.keys().next().value!); }
     }
