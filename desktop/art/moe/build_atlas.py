@@ -123,25 +123,26 @@ def main():
     idle, blink, content, look, walkA, walkB, wave1, wave2, crouch, air, land, sleep = A
     type1, type2, focus, think, mag1, mag2, ask, hope, sad, slump, dizzy, surprised = B
     R = lambda p, **k: pose_canvas(p, scale, **k)
+    # One pose per state with small motion only: these rows loop for a long time, and
+    # jumping between different generated poses at 120-150 ms reads as flashing.
     rows = {
-        'idle': [R(idle), R(idle, sy=0.985, sx=1.01), R(idle, sy=0.975, sx=1.015),
-                 R(blink, sy=0.98, sx=1.01), R(idle, sy=0.99), R(idle)],
-        'running-right': [R(walkA, dy=-2, rot=-2), R(walkA, dy=-5, rot=-3), R(walkA, dy=-2, rot=-1),
-                          R(walkA, dy=0), R(walkB, dy=-2, rot=-2), R(walkB, dy=-5, rot=-3),
-                          R(walkB, dy=-2, rot=-1), R(walkB, dy=0)],
-        'waving': [R(idle), R(wave1, dy=-2), R(wave2, dy=-2, rot=-3), R(wave1)],
-        'jumping': [R(crouch, sy=0.9, sx=1.06), R(air, dy=-22, sy=1.05, sx=0.97),
-                    R(air, dy=-34), R(land, sy=0.92, sx=1.05), R(content)],
-        'failed': [R(surprised), R(sad), R(sad, dy=2, sy=0.98), R(slump),
-                   R(slump, rot=2), R(dizzy, rot=-3), R(dizzy, rot=3), R(slump, sy=0.97)],
-        'waiting': [R(ask), R(ask, dy=-3), R(ask), R(hope), R(hope, dy=-3, sy=1.01), R(hope)],
-        'running': [R(type1, glow=0.05), R(type2, glow=0.12), R(type1, glow=0.18),
-                    R(type2, glow=0.12), R(focus, glow=0.2), R(type2, glow=0.08)],
-        'review': [R(mag1), R(mag1, rot=-3), R(mag2), R(mag2, rot=3), R(think), R(mag1, rot=-1)],
+        'idle': [R(idle), R(idle, sy=0.992, sx=1.004), R(idle, sy=0.986, sx=1.007),
+                 R(blink, sy=0.988, sx=1.006), R(idle, sy=0.992, sx=1.004), R(idle)],
+        'running-right': [R(walkA, dy=-1), R(walkA, dy=-3), R(walkA, dy=-1), R(walkA),
+                          R(walkB, dy=-1), R(walkB, dy=-3), R(walkB, dy=-1), R(walkB)],
+        'waving': [R(wave1), R(wave1, rot=1.5), R(wave1), R(wave1, rot=-1.5)],
+        'jumping': [R(content, sy=0.95, sx=1.03), R(content, dy=-10), R(content, dy=-16),
+                    R(content, dy=-8), R(content, sy=0.97, sx=1.02)],
+        'failed': [R(slump), R(slump, sy=0.994), R(slump, sy=0.988), R(slump, sy=0.984),
+                   R(slump, sy=0.984), R(slump, sy=0.988), R(slump, sy=0.994), R(slump)],
+        'waiting': [R(hope), R(hope, dy=-1), R(hope, dy=-2), R(hope, dy=-2), R(hope, dy=-1), R(hope)],
+        'running': [R(type2, glow=0.02), R(type2, glow=0.05, dy=-0.5), R(type2, glow=0.08, dy=-1),
+                    R(type2, glow=0.1, dy=-1), R(type2, glow=0.07, dy=-0.5), R(type2, glow=0.04)],
+        'review': [R(mag2), R(mag2, rot=0.6), R(mag2, rot=1.2), R(mag2, rot=1.2), R(mag2, rot=0.6), R(mag2)],
     }
-    rows['running-left'] = [R(p, dy=dy, rot=-r, mirror=True) for p, dy, r in
-                            [(walkA, -2, -2), (walkA, -5, -3), (walkA, -2, -1), (walkA, 0, 0),
-                             (walkB, -2, -2), (walkB, -5, -3), (walkB, -2, -1), (walkB, 0, 0)]]
+    rows['running-left'] = [R(p, dy=dy, mirror=True) for p, dy in
+                            [(walkA, -1), (walkA, -3), (walkA, -1), (walkA, 0),
+                             (walkB, -1), (walkB, -3), (walkB, -1), (walkB, 0)]]
     atlas = Image.new('RGBA', (CW * 8, CH * 9))
     for r, (name, count) in enumerate(ROWS):
         frames = rows[name]
@@ -161,7 +162,7 @@ def main():
         'id': 'moe', 'displayName': 'Moe',
         'description': 'A cobalt axolotl who keeps an eye on your Remote Codex threads.',
         'spritesheetPath': 'spritesheet.webp',
-        'remoteCodex': {'sleeping': {'path': 'sleeping.webp', 'frames': 4, 'durationsMs': [900, 700, 900, 700]}},
+        'remoteCodex': {'frameScale': 2.5, 'sleeping': {'path': 'sleeping.webp', 'frames': 4, 'durationsMs': [900, 700, 900, 700]}},
     }, indent=2, ensure_ascii=False) + '\n')
     print('scale', round(scale, 4), 'poses', len(allp))
 

@@ -108,7 +108,7 @@ try {
   expect(sha256(renderedImage)).toBe(sha256(packagedImage)); expect(atlas).toEqual({ width: 1536, height: 1872 });
   report.checks.pet = { resourceDirectory, id: manifest.id, atlas, imageSha256: sha256(packagedImage) };
   stage = 'approval-trigger';
-  await expect.poll(() => app.evaluate(() => globalThis.__pockymoeDesktopTest.notifications.constructed.length), { timeout: 10_000 }).toBeGreaterThan(0);
+  // Baseline activity intentionally constructs no startup notifications.
   const previous = await app.evaluate((_electron, key) => globalThis.__pockymoeDesktopTest.hub.snapshot()?.items.find(item => item.key === key)?.request?.id || null, eventKey);
   control('request-approval'); eventCreated = true; stage = 'approval-snapshot';
   let requestId;

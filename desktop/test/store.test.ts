@@ -7,9 +7,9 @@ it('round-trips all settings and rejects invalid patches without mutation', () =
   const dir = mkdtempSync(join(tmpdir(), 'rc-settings-'));
   try {
     const path = join(dir, 'settings.json'), store = new SettingsStore(path);
-    expect(store.firstRun).toBe(true);
+    expect(store.firstRun).toBe(true); expect(store.get().petEdgeHide).toBe(true);
     const settings = { ...defaults, webOrigin: 'https://web.example.com', relayOrigin: 'https://relay.example.com', alertMode: 'both' as const, petVisible: false,
-      petId: 'another', petSize: 'L' as const, petMini: true, petSound: true, launchAtLogin: true,
+      petId: 'another', petSize: 'L' as const, petMini: true, petSound: true, petEdgeHide: false, launchAtLogin: true,
       quickWindowShortcut: 'CommandOrControl+Shift+Space', snoozeUntil: '2100-01-01T00:00:00Z' };
     store.set(settings);
     const restarted = new SettingsStore(path);
@@ -24,5 +24,15 @@ it('migrates a v1 relay-only configuration to the origin pair', () => {
   try {
     const path = join(dir, 'settings.json'); writeFileSync(path, JSON.stringify({ relayOrigin: 'https://custom.example.com', petId: 'moe' }));
     expect(new SettingsStore(path).get()).toMatchObject({ webOrigin: 'https://custom.example.com', relayOrigin: 'https://custom.example.com' });
+  } finally { rmSync(dir, { recursive: true }); }
+});
+it('persists unchanged defaults without recursively publishing identical settings', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'pockymoe-noop-'));
+  try {
+    const path = join(dir, 'settings.json'), store = new SettingsStore(path); let changes = 0;
+    store.onChange(next => { changes++; store.set({ petVisible: next.petVisible }); });
+    store.set({ petVisible: true });
+    expect(new SettingsStore(path).firstRun).toBe(false); expect(changes).toBe(0);
+    store.set({ petVisible: false }); expect(changes).toBe(1);
   } finally { rmSync(dir, { recursive: true }); }
 });

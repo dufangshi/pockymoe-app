@@ -1,7 +1,7 @@
 import type { ActivitySnapshot, Appearance, DesktopSettings, HostCommandResult } from './contract';
 export interface LocalState {
   locale: string; preferencesRequestId: number; preferencesSection: 'general' | 'pet' | 'shortcuts'; settings: DesktopSettings; appearance: Appearance | null; snapshot: ActivitySnapshot | null;
-  petAvailable: boolean; petPacks: { id: string; name: string }[]; version: string;
+  petAvailable: boolean; petPacks: { id: string; name: string; thumbnail?: string; rows?: number; author?: string; source?: string; license?: string; licenseUrl?: string }[]; version: string;
 }
 export type LocalAction =
   | { type: 'settings'; patch: Partial<DesktopSettings> }
@@ -11,6 +11,9 @@ export type LocalAction =
   | { type: 'changeConnection' }
   | { type: 'hide' }
   | { type: 'importPet' }
+  | { type: 'external'; url: string }
+  | { type: 'quickSize'; height: number }
+  | { type: 'connectionSize'; expanded: boolean }
   | { type: 'checkUpdate' };
 export interface LocalBridge {
   getState(): Promise<LocalState>;

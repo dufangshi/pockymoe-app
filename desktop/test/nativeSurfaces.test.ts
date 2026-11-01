@@ -3,7 +3,7 @@ import { EventEmitter } from 'node:events';
 import { beforeEach, afterEach, expect, it, vi } from 'vitest';
 import { ActivityHub } from '../src/main/activity';
 import { defaults } from '../src/main/store';
-import { item, snapshot } from './fixtures';
+import { connected, item, snapshot } from './fixtures';
 import type { Windows } from '../src/main/windows';
 import type { SettingsStore } from '../src/main/store';
 import type { MenuItemConstructorOptions } from 'electron';
@@ -25,7 +25,7 @@ import { activityCounts, taskbarBadge, trayTemplate } from '../src/main/tray';
 beforeEach(() => { setLocale('zh-CN'); vi.useFakeTimers(); notices.length = 0; });
 afterEach(() => vi.useRealTimers());
 it('uses stable native IDs, includes map actions and labels interruptions', async () => {
-  const hub = new ActivityHub(), dispatch = vi.fn().mockResolvedValue({ ok: true });
+  const hub = connected(new ActivityHub()), dispatch = vi.fn().mockResolvedValue({ ok: true });
   const settings = { get: () => ({ ...defaults, alertMode: 'system' }), onChange: () => () => undefined } as unknown as SettingsStore;
   const windows = { relay: new Set(), dispatch } as unknown as Windows;
   const notifications = new Notifications(hub, settings, windows, () => undefined, () => null);
@@ -62,28 +62,31 @@ it('counts root conversations and nests tray agents without retargeting actions'
   action({} as Electron.MenuItem, undefined, {}); expect(open).toHaveBeenCalledWith(b);
 });
 it('groups native notices by root title while approvals retain actual request IDs', async () => {
-  const hub = new ActivityHub(), dispatch = vi.fn().mockResolvedValue({ ok: true });
+  const hub = connected(new ActivityHub()), dispatch = vi.fn().mockResolvedValue({ ok: true });
   const settings = { get: () => ({ ...defaults, alertMode: 'system' }), onChange: () => () => undefined } as unknown as SettingsStore;
   const notifications = new Notifications(hub, settings, { relay: new Set(), dispatch } as unknown as Windows, () => undefined, () => null);
   hub.sync(snapshot([item({ key: 'mac:agent', threadId: 'agent', state: 'needsInput', agentName: 'Planner', rootThreadKey: 'mac:root', rootThreadTitle: '根对话', request: { id: 'own-request', kind: 'approval', summary: '运行测试' } })]));
   vi.advanceTimersByTime(1500);
-  expect(notices[0].options).toMatchObject({ id: 'mac:own-request', groupId: 'pockymoe:mac:root', title: '根对话', subtitle: '智能体 Planner · MacBook Pro · remoteCodex' });
+  expect(notices[0].options).toMatchObject({ id: 'mac:own-request', groupId: 'pockymoe:mac:root', title: '根对话', subtitle: 'MacBook Pro · remoteCodex · 🤖 1' });
+  expect(String(notices[0].options.subtitle)).not.toMatch(/智能体|Agent|Planner/);
   notices[0].emit('action', {}, 0); await Promise.resolve();
   expect(dispatch).toHaveBeenCalledWith({ type: 'resolveRequest', deviceId: 'mac', threadId: 'agent', requestId: 'own-request', decision: 'approve' });
   notifications.dispose();
 });
 it('counts conversations in a completion burst rather than each agent event', () => {
-  const hub = new ActivityHub(), dispatch = vi.fn().mockResolvedValue({ ok: true });
+  const hub = connected(new ActivityHub()), dispatch = vi.fn().mockResolvedValue({ ok: true });
   const settings = { get: () => ({ ...defaults, alertMode: 'system' }), onChange: () => () => undefined } as unknown as SettingsStore;
   const notifications = new Notifications(hub, settings, { relay: new Set(), dispatch } as unknown as Windows, () => undefined, () => null);
   hub.sync(snapshot(['a', 'b', 'c'].map(name => item({ key: `mac:${name}`, threadId: name, turnId: `turn-${name}`, state: 'completed', unread: true, rootThreadKey: 'mac:root', rootThreadTitle: '根对话' }))));
   vi.advanceTimersByTime(1500);
   expect(notices).toHaveLength(1); expect(notices[0].options).toMatchObject({ id: 'mac:turn-a', title: '根对话', groupId: 'pockymoe:mac:root' });
+  expect(notices[0].options.subtitle).toBe('MacBook Pro · remoteCodex · 🤖 3');
+  expect(String(notices[0].options.body).split('MacBook Pro')).toHaveLength(2);
   expect(String(notices[0].options.title)).not.toContain('3'); notifications.dispose();
 });
 
 it('refreshes already delivered notification actions in the page language with the same ID', () => {
-  const hub = new ActivityHub(), dispatch = vi.fn().mockResolvedValue({ ok: true });
+  const hub = connected(new ActivityHub()), dispatch = vi.fn().mockResolvedValue({ ok: true });
   const settings = { get: () => ({ ...defaults, alertMode: 'system' }), onChange: () => () => undefined } as unknown as SettingsStore;
   const notifications = new Notifications(hub, settings, { relay: new Set(), dispatch } as unknown as Windows, () => undefined, () => null);
   hub.sync(snapshot([item({ state: 'needsInput', request: { id: 'translate-request', kind: 'approval', summary: 'User request text' } })]));
@@ -96,7 +99,7 @@ it('refreshes already delivered notification actions in the page language with t
 it('records actual notification construction only in E2E mode', () => {
   vi.stubEnv('POCKYMOE_DESKTOP_E2E', '1');
   try {
-    const hub = new ActivityHub();
+    const hub = connected(new ActivityHub());
     const settings = { get: () => ({ ...defaults, alertMode: 'system' }), onChange: () => () => undefined } as unknown as SettingsStore;
     const notifications = new Notifications(hub, settings, { relay: new Set(), dispatch: vi.fn() } as unknown as Windows, () => undefined, () => null);
     hub.sync(snapshot([item({ state: 'needsInput', request: { id: 'constructed', kind: 'approval', summary: 'Run fixture checks' } })]));
@@ -104,6 +107,16 @@ it('records actual notification construction only in E2E mode', () => {
     expect(notifications.constructed).toEqual([expect.objectContaining({ alertId: 'mac:constructed', key: 'mac:thread-1', type: 'needsInput' })]);
     notifications.dispose();
   } finally { vi.unstubAllEnvs(); }
+});
+it('distinguishes started and failed decisions that share the same stable turn alert ID', () => {
+  const hub = connected(new ActivityHub());
+  const settings = { get: () => ({ ...defaults, alertMode: 'system' }), onChange: () => () => undefined } as unknown as SettingsStore;
+  const notifications = new Notifications(hub, settings, { relay: new Set(), dispatch: vi.fn() } as unknown as Windows, () => undefined, () => null);
+  hub.sync(snapshot([item()])); hub.sync(snapshot([item({ state: 'failed', unread: true })]));
+  expect(notifications.decisions.filter(decision => decision.alertId === 'mac:turn-1')).toMatchObject([
+    { type: 'started', system: false }, { type: 'failed', system: true }
+  ]);
+  notifications.dispose(); hub.dispose();
 });
 
 it('matches the Web waiting badge, excluding unread failures and counting conversations', () => {

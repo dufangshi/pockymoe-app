@@ -73,6 +73,19 @@ export interface ActivitySnapshot {
   focusedThreadKey: string | null;
   /** needsInput, failed/interrupted (unread, last 24h), completed (unread) and running only. */
   items: ActivityItem[];
+  /** Threads opened most recently (up to 5), for surfaces with no active items to show. */
+  recent?: ActivityRecent[];
+  /** Devices whose first read finished since this page connected; older items on them are history, not news. */
+  syncedDeviceIds?: string[];
+}
+
+export interface ActivityRecent {
+  key: string;
+  deviceId: string;
+  deviceName: string;
+  workspaceLabel: string;
+  threadId: string;
+  title: string;
 }
 
 export type HostCommand =
@@ -111,6 +124,10 @@ export interface DesktopSettings {
   petSize: 'S' | 'M' | 'L';
   petMini: boolean;
   petSound: boolean;
+  /** Read alerts aloud with the system voice; default false. */
+  petVoice: boolean;
+  /** Hide the character past the screen edge when docked; default true. */
+  petEdgeHide: boolean;
   launchAtLogin: boolean;
   /** Electron accelerator; default 'Alt+Space'. */
   quickWindowShortcut: string;
@@ -194,8 +211,10 @@ export type PetMood =
 export interface PetControllerDeps {
   hub: ActivityHubLike;
   settings: SettingsStoreLike;
-  /** Focus the main window and run a command in the relay page (navigate, approve, reply, ...). */
+  /** Run a command in the relay page; only commands that show something raise the main window. */
   dispatch(command: Omit<HostCommand, 'id'>): Promise<HostCommandResult>;
+  /** Opens the Preferences window without touching the page. */
+  openPreferences(section?: 'general' | 'pet' | 'shortcuts'): void;
   /** Whether the delivery policy wants the pet to speak for this event (§5.2). */
   shouldSpeak(event: ActivityEvent): boolean;
   /** Directory holding bundled and imported pet packs. */

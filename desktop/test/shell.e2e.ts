@@ -16,7 +16,7 @@ import { item, snapshot } from './fixtures';
 type Runtime = { lastDialog?: Electron.MessageBoxOptions; lastSave?: Electron.SaveDialogOptions; appearance: AppearanceStore; hub: ActivityHub; settings: SettingsStore; windows: Windows; tray: DesktopTray; notifications: Notifications };
 declare global { var __pockymoeDesktopTest: Runtime }
 declare global { interface Window { pockymoeHost?: PockymoeHost; commands: unknown[] } }
-const evidence = `${(process.env.POCKYMOE_DESKTOP_EVIDENCE || '.local/desktop-evidence')}/shell/v2`;
+const evidence = join(process.env.POCKYMOE_DESKTOP_EVIDENCE || '/tmp/rc-desktop/evidence/round3/shell', 'compat');
 let relay: Server, api: Server, relayOriginValue: string, other: Server, origin: string, otherOrigin: string;
 const apps: ElectronApplication[] = [];
 const themes = new WeakMap<ElectronApplication, 'light' | 'dark'>();
@@ -68,6 +68,34 @@ test.beforeAll(async () => {
 test.afterEach(async () => { for (const app of apps.splice(0)) await app.close(); for (const dir of directories.splice(0)) rmSync(dir, { recursive: true, force: true }); });
 test.afterAll(async () => { await Promise.all([new Promise<void>(done => relay.close(() => done())), new Promise<void>(done => other.close(() => done())), new Promise<void>(done => api.close(() => done()))]); });
 
+test('pet controls never raise the main window, and a click shows the capsule first', async () => {
+  const app = await launch('light'); const page = await pageAt(app, origin);
+  await expect.poll(() => page.evaluate(() => !!window.pockymoeHost)).toBe(true);
+  const surfaces = (): Page[] => app.windows().filter(w => w.url().includes('/pet/'));
+  await expect.poll(() => surfaces().length).toBe(2);
+  const bySurface = async (name: string): Promise<Page> => { for (const w of surfaces()) if (await w.evaluate(() => document.body.dataset.surface) === name) return w; throw new Error(name); };
+  await expect.poll(async () => { try { await bySurface('glass'); await bySurface('sprite'); return true; } catch { return false; } }).toBe(true);
+  const sprite = await bySurface('sprite'), glass = await bySurface('glass');
+  const act = (action: unknown) => sprite.evaluate(a => (window as never as { rcDesktop: { pet: { action(x: unknown): Promise<{ ok: boolean }> } } }).rcDesktop.pet.action(a), action);
+  await app.evaluate(({ BrowserWindow }) => { for (const w of BrowserWindow.getAllWindows()) if (w.webContents.getURL().startsWith('http')) w.hide(); });
+  const mainVisible = () => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().some(w => w.webContents.getURL().startsWith('http') && w.isVisible()));
+  expect(await mainVisible()).toBe(false);
+  await act({ type: 'click' });
+  await expect(glass.locator('nav.controls')).toBeVisible();
+  await expect(glass.locator('.panel')).toHaveCount(0);
+  await expect.poll(() => sprite.evaluate(() => document.querySelector<HTMLElement>('#app')?.dataset.lastCue)).toBe('click:running');
+  await act({ type: 'toggleTray' });
+  await expect(glass.locator('.panel')).toBeVisible();
+  expect(await mainVisible()).toBe(false);
+  await act({ type: 'close' });
+  await expect(glass.locator('.panel')).toHaveCount(0);
+  expect(await mainVisible()).toBe(false);
+  await app.evaluate(() => { void globalThis.__pockymoeDesktopTest.windows.dispatch({ type: 'markRead', key: 'missing' }); });
+  expect(await mainVisible()).toBe(false);
+  await act({ type: 'preferences' });
+  await pageAt(app, 'view=preferences');
+  expect(await mainVisible()).toBe(false);
+});
 test('OAuth finishes in a bridge-free sign-in window on the page session', async () => {
   const app = await launch('light'); const page = await pageAt(app, origin);
   await page.evaluate(start => { location.assign(start); }, `${relayOriginValue}/relay/auth/oauth/github/start`);
@@ -92,7 +120,7 @@ test('split origins bridge, activity delivery, tray and quick-window command rou
   const active = item({ state: 'needsInput', request: { id: 'req-1', kind: 'approval', summary: '运行 cargo test -p runtime' } });
   const running = item({ key: 'pc:thread-2', deviceId: 'pc', deviceName: 'Windows Studio', threadId: 'thread-2', turnId: 'turn-2', title: '完善设备统计视图', workspaceLabel: 'supervisor-web' });
   const completed = item({ key: 'mac:thread-3', threadId: 'thread-3', turnId: 'turn-3', title: '优化工作区树形导航', state: 'completed', unread: true, resultSummary: '键盘导航与过滤已完成' });
-  await page.evaluate(s => window.pockymoeHost!.activity.sync(s), snapshot([active, running, completed]));
+  await page.evaluate(s => { window.pockymoeHost!.activity.sync({ ...s, items: [], generatedAt: '2026-11-01T05:59:00.000Z', syncedDeviceIds: ['mac', 'pc'] }); window.pockymoeHost!.activity.sync(s); }, snapshot([active, running, completed]));
   await expect.poll(() => app.evaluate(() => globalThis.__pockymoeDesktopTest.tray.menuLabels)).toContain('修复登录状态同步 — MacBook Pro');
   expect(await app.evaluate(() => globalThis.__pockymoeDesktopTest.notifications.decisions)).toEqual(expect.arrayContaining([expect.objectContaining({ alertId: 'mac:req-1', system: true })]));
   await app.evaluate(({ globalShortcut }) => { if (!globalShortcut.isRegistered('Alt+Space')) throw new Error('Quick shortcut not registered'); globalThis.__pockymoeDesktopTest.windows.toggleQuick(); });
@@ -106,7 +134,7 @@ test('split origins bridge, activity delivery, tray and quick-window command rou
   await expect.poll(() => page.evaluate(() => window.commands)).toEqual(expect.arrayContaining([expect.objectContaining({ type: 'navigate', path: '/devices/mac/threads/thread-1' })]));
   // A focused thread must be suppressed even when focus changes in the same sync.
   await app.evaluate(() => globalThis.__pockymoeDesktopTest.windows.focusMain());
-  await page.evaluate(s => window.pockymoeHost!.activity.sync(s), snapshot([item({ state: 'completed', turnId: 'focused-turn', unread: true })], { focusedThreadKey: 'mac:thread-1', generatedAt: '2026-11-01T06:02:00.000Z' }));
+  await page.evaluate(s => { window.pockymoeHost!.activity.sync({ ...s, items: [], generatedAt: '2026-11-01T05:59:00.000Z', syncedDeviceIds: ['mac', 'pc'] }); window.pockymoeHost!.activity.sync(s); }, snapshot([item({ state: 'completed', turnId: 'focused-turn', unread: true })], { focusedThreadKey: 'mac:thread-1', generatedAt: '2026-11-01T06:02:00.000Z' }));
   await expect.poll(() => app.evaluate(() => globalThis.__pockymoeDesktopTest.notifications.decisions.find(d => d.alertId === 'mac:focused-turn'))).toMatchObject({ system: false, pet: false });
   await page.evaluate(() => window.pockymoeHost!.window.openThread('/devices/pc/threads/thread-2', { newWindow: true }));
   const second = await pageAt(app, '/devices/pc/threads/thread-2');
@@ -145,14 +173,14 @@ const packs = ['classic', 'plum-pocket', 'terminal'] as const;
 function appearanceFor(pack: string, effective: 'light' | 'dark'): Appearance {
   return { effective, pack, locale: 'zh-CN', accent: pack === 'terminal' ? effective === 'dark' ? '#4de3a2' : '#0a47c4' : pack === 'plum-pocket' ? '#e8a93a' : '#a57224' };
 }
-async function capture(app: ElectronApplication, page: Page, name: string, pack: string, mode: string): Promise<void> {
+async function capture(app: ElectronApplication, page: Page, name: string, pack: string, mode: string, widths = [1440, 900]): Promise<void> {
   await page.screenshot({ animations: 'disabled', path: join(evidence, `${name}-${pack}-${mode}-native.png`) });
   const original = await app.evaluate(({ BrowserWindow }, url) => BrowserWindow.getAllWindows().find(w => w.webContents.getURL() === url)!.getContentSize(), page.url());
-  for (const width of [1440, 900]) {
-    await app.evaluate(({ BrowserWindow }, { url, width }) => {
+  for (const width of widths) {
+    await app.evaluate(({ BrowserWindow }, { url, width, height }) => {
       const w = BrowserWindow.getAllWindows().find(w => w.webContents.getURL() === url)!;
-      w.setContentSize(width, 640);
-    }, { url: page.url(), width });
+      w.setContentSize(width, height);
+    }, { url: page.url(), width, height: width <= 560 ? original[1] : 640 });
     await expect.poll(() => page.evaluate(() => innerWidth)).toBe(width);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await page.screenshot({ animations: 'disabled', path: join(evidence, `${name}-${pack}-${mode}-${width}.png`) });
@@ -166,7 +194,7 @@ for (const pack of packs) for (const theme of ['light', 'dark'] as const) test(`
   await app.evaluate((_electron, value) => globalThis.__pockymoeDesktopTest.appearance.sync(value), appearance);
   await expect(setup.locator('html')).toHaveAttribute('data-theme-preset', pack);
   await expect(setup.locator('html')).toHaveAttribute('data-theme-effective', theme);
-  await expect(setup.getByRole('heading', { name: '你的设备，随时在手边。' })).toBeVisible();
+  await expect(setup.getByRole('heading', { name: '连接 Pockymoe' })).toBeVisible();
   await capture(app, setup, 'relay', pack, theme);
   await setup.getByText('高级', { exact: true }).click();
   await capture(app, setup, 'relay-advanced', pack, theme);
@@ -183,7 +211,8 @@ for (const pack of packs) for (const theme of ['light', 'dark'] as const) test(`
   await expect(preferences.getByRole('heading', { name: '通用', exact: true })).toBeVisible();
   await expect(preferences.locator('html')).toHaveAttribute('data-theme-effective', theme);
   await capture(app, preferences, 'preferences', pack, theme);
-  await preferences.getByLabel('提醒方式').selectOption('both');
+  await preferences.getByRole('button', { name: '提醒方式', exact: true }).click();
+  await preferences.getByRole('option', { name: '两者都用', exact: true }).click();
   await expect.poll(() => app.evaluate(() => globalThis.__pockymoeDesktopTest.settings.get().alertMode)).toBe('both');
   await preferences.getByRole('button', { name: '桌宠', exact: true }).click();
   await capture(app, preferences, 'preferences-pet', pack, theme);
@@ -192,11 +221,11 @@ for (const pack of packs) for (const theme of ['light', 'dark'] as const) test(`
   await preferences.getByRole('textbox', { name: '快捷窗口快捷键' }).fill('CommandOrControl+Shift+Space'); await preferences.getByRole('button', { name: '保存', exact: true }).click();
   await expect.poll(() => app.evaluate(({ globalShortcut }) => globalShortcut.isRegistered('CommandOrControl+Shift+Space'))).toBe(true);
   const items = [item({ state: 'needsInput', request: { id: `request-${theme}`, kind: 'input', summary: '请选择部署环境' } }), item({ key: 'mac:thread-2', threadId: 'thread-2', turnId: `run-${theme}`, title: '完善桌面端交互细节', since: new Date(Date.now() - 65_000).toISOString() }), item({ key: 'mac:thread-3', threadId: 'thread-3', turnId: `done-${theme}`, title: '检查跨设备索引缓存', state: 'completed', unread: true, resultSummary: '离线恢复验证通过' })];
-  await page.evaluate(s => window.pockymoeHost!.activity.sync(s), snapshot(items));
+  await page.evaluate(s => { window.pockymoeHost!.activity.sync({ ...s, items: [], generatedAt: '2026-11-01T05:59:00.000Z', syncedDeviceIds: ['mac', 'pc'] }); window.pockymoeHost!.activity.sync(s); }, snapshot(items));
   await app.evaluate(() => globalThis.__pockymoeDesktopTest.windows.createLocal('quick'));
   const quick = await pageAt(app, 'view=quick'); await expect(quick.getByRole('option')).toHaveCount(3);
   await expect(quick.locator('.elapsed')).toHaveText(/^01:0[5-9]$/);
-  expect((await quick.getByRole('option').first().boundingBox())!.height).toBe(44);
+  expect((await quick.getByRole('option').first().boundingBox())!.height).toBe(34);
   expect(await quick.locator('svg[data-status=running] circle').count()).toBe(2);
   await capture(app, quick, 'quick', pack, theme);
   const before = await quick.locator('.elapsed').textContent();
@@ -209,20 +238,25 @@ for (const pack of packs) for (const theme of ['light', 'dark'] as const) test(`
   await page.evaluate(a => window.pockymoeHost!.appearance.sync(a), appearanceFor(pack, theme));
   const root = item({ key: 'mac:root', threadId: 'root', title: '完善 Pockymoe 桌面体验', since: new Date(Date.now() - 70_000).toISOString() });
   const agent = (id: string, name: string) => item({ key: `mac:${id}`, threadId: id, title: `子任务 ${name}`, agentName: name, rootThreadKey: root.key, rootThreadTitle: '旧根标题', state: 'needsInput', request: { id: `request-${id}`, kind: 'approval', summary: '运行定向测试' } });
-  await page.evaluate(s => window.pockymoeHost!.activity.sync(s), snapshot([root, agent('a', 'Planner'), agent('b', 'Reviewer')]));
+  await page.evaluate(s => { window.pockymoeHost!.activity.sync({ ...s, items: [], generatedAt: '2026-11-01T05:59:00.000Z', syncedDeviceIds: ['mac', 'pc'] }); window.pockymoeHost!.activity.sync(s); }, snapshot([root, { ...agent('a', 'Planner'), state: 'running', request: null }, agent('b', 'Reviewer'), item({ key: 'pc:resource', deviceId: 'pc', threadId: 'resource', title: '校验打包资源', since: root.since })]));
   await expect.poll(() => app.evaluate(() => globalThis.__pockymoeDesktopTest.tray.menuLabels)).toContain('需要你 · 1');
   await page.evaluate(async () => { window.pockymoeHost!.badge.set(99, 'attention'); await window.pockymoeHost!.settings.get(); });
   if (process.platform === 'darwin') expect(await app.evaluate(({ app }) => app.dock!.getBadge())).toBe('1');
   await app.evaluate(() => globalThis.__pockymoeDesktopTest.windows.createLocal('quick'));
   const quick = await pageAt(app, 'view=quick');
   await expect(quick.getByRole('option')).toHaveCount(2);
-  await expect(quick.locator('[data-key="mac:a"] strong')).toContainText(root.title);
-  await expect(quick.locator('[data-key="mac:a"] .row-copy>span')).toHaveText('智能体 Planner · MacBook Pro · remoteCodex');
-  await capture(app, quick, 'root-groups-collapsed', pack, theme);
-  await quick.getByRole('button', { name: `展开「${root.title}」的线程`, exact: true }).click();
-  await expect(quick.getByRole('option')).toHaveCount(3);
-  await capture(app, quick, 'root-groups-expanded', pack, theme);
-  await quick.locator('[data-key="mac:b"]').hover();
+  await expect(quick.locator('[data-key="mac:b"] strong')).toHaveText(root.title);
+  await expect(quick.locator('.conversation-count')).toHaveText('2');
+  await expect(quick.locator('.conversation-count svg')).toHaveCount(1);
+  await expect(quick.locator('.conversation-toggle')).toHaveCount(0);
+  await expect(quick.locator('.row-copy>span')).toHaveCount(0);
+  await expect(quick.locator('#reply')).not.toHaveAttribute('placeholder', /智能体|Agent/);
+  expect(await quick.locator('#quick-list').innerText()).not.toMatch(/智能体|Agent|MacBook Pro|remoteCodex/);
+  await capture(app, quick, 'conversation-row', pack, theme, [560, 380]);
+  // Searching a member keeps the conversation intact and targets its waiting request.
+  await quick.getByLabel('搜索活动线程').fill('Planner');
+  await expect(quick.getByRole('option')).toHaveCount(1);
+  await expect(quick.locator('.conversation-count')).toHaveText('2');
   await expect(quick.locator('[data-key="mac:b"]')).toHaveAttribute('aria-selected', 'true');
   await quick.getByLabel('快速回复').fill('请继续审查'); await quick.getByLabel('发送回复', { exact: true }).click();
   await expect.poll(() => page.evaluate(() => window.commands)).toEqual(expect.arrayContaining([expect.objectContaining({ type: 'reply', threadId: 'b', text: '请继续审查' })]));
@@ -239,7 +273,7 @@ for (const pack of packs) for (const theme of ['light', 'dark'] as const) test(`
   const page = await pageAt(app, origin);
   await page.evaluate(a => { window.pockymoeHost!.appearance.sync(a); }, appearanceFor(pack, theme));
   const rows = [item({ title: 'Review desktop shell', state: 'needsInput', request: { id: 'locale-request', kind: 'approval', summary: 'Approve targeted tests' }, workspaceLabel: 'pockymoe' }), item({ key: 'mac:locale-running', threadId: 'locale-running', title: 'Verify activity updates', workspaceLabel: 'pockymoe', since: new Date(Date.now() - 65_000).toISOString() })];
-  await page.evaluate(s => window.pockymoeHost!.activity.sync(s), snapshot(rows));
+  await page.evaluate(s => { window.pockymoeHost!.activity.sync({ ...s, items: [], generatedAt: '2026-11-01T05:59:00.000Z', syncedDeviceIds: ['mac', 'pc'] }); window.pockymoeHost!.activity.sync(s); }, snapshot(rows));
   await page.evaluate(() => window.pockymoeHost!.window.openPreferences('general'));
   const prefs = await pageAt(app, 'view=preferences');
   await app.evaluate(() => globalThis.__pockymoeDesktopTest.windows.createLocal('quick'));

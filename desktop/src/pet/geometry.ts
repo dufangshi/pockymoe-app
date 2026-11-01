@@ -21,37 +21,37 @@ export function restorePosition(position: PetPosition | undefined, displays: Pet
 export function dockPosition(position: PetPosition, area: Rect, height: number): PetPosition {
   const width = height * 192 / 208;
   const bounded = clampRect({ ...position, width, height }, area);
-  const distances: [DockEdge, number][] = [['left', Math.abs(position.x - area.x)], ['right', Math.abs(position.x + width - area.x - area.width)],
-    ['top', Math.abs(position.y - area.y)], ['bottom', Math.abs(position.y + height - area.y - area.height)]];
+  // Signed: dragging hard at an edge overshoots it, which must dock rather than count as far away.
+  const distances: [DockEdge, number][] = [['left', position.x - area.x], ['right', area.x + area.width - position.x - width],
+    ['top', position.y - area.y], ['bottom', area.y + area.height - position.y - height]];
   distances.sort((a, b) => a[1] - b[1]);
   const edge = distances[0][1] <= 24 ? distances[0][0] : null;
   return { displayId: position.displayId, x: edge === 'left' ? area.x : edge === 'right' ? area.x + area.width - width : bounded.x,
     y: edge === 'top' ? area.y : edge === 'bottom' ? area.y + area.height - height : bounded.y, edge };
 }
-export function petLayout(position: PetPosition, area: Rect, height: number, options: { panel: boolean; bubble?: boolean; chat: boolean; mini: boolean; peek: boolean; menu?: boolean; dockAmount?: number; measured?: { tray: number; bubble: number; chat: number } }) {
+/** Fixed sprite bounds: panel, menu, bubble and hover state never affect this window. */
+export function petLayout(position: PetPosition, area: Rect, height: number, options: { panel?: boolean; bubble?: boolean; chat?: boolean; mini?: boolean; peek?: boolean; menu?: boolean; dockAmount?: number; measured?: { tray: number; bubble: number; chat: number } } = {}) {
   const width = Math.round(height * 192 / 208);
-  let x = position.x, y = position.y;
-  const dockAmount = options.dockAmount ?? (options.peek ? 0 : 1);
-  if (!options.mini) {
-    if (position.edge === 'left') x -= width * .45 * dockAmount;
-    if (position.edge === 'right') x += width * .45 * dockAmount;
-    if (position.edge === 'top') y -= height * .45 * dockAmount;
-    if (position.edge === 'bottom') y += height * .45 * dockAmount;
-  }
-  const bodyHeight = options.mini ? 0 : height;
-  // Pick the roomier side from the work area, then shrink the scrollable tray to fit.
-  // This decision must not depend on panel height: otherwise measurements can flip it back and forth.
-  const above = Math.max(0, y - area.y), below = Math.max(0, area.y + area.height - y - bodyHeight);
-  const panelAbove = above >= below;
-  const sideRoom = Math.max(above, below);
-  const bubbleHeight = options.bubble ? (options.measured?.bubble || 90) + 12 : 0;
-  const chatHeight = options.chat ? (options.measured?.chat || 84) + 12 : 0;
-  const available = Math.max(56, sideRoom - 64 - bubbleHeight - chatHeight);
-  const panelHeight = options.panel ? Math.min(options.measured?.tray || 414, 414, available) : 0;
-  const extraHeight = Math.max(options.menu ? Math.min(420, sideRoom) : 48, (panelHeight ? panelHeight + 12 : 0) + bubbleHeight + chatHeight + 48);
-  const windowWidth = options.panel || options.chat || options.bubble || options.menu ? 352 : Math.max(276, width + 120);
-  const window = clampRect({ x: x + width / 2 - windowWidth / 2, y: panelAbove ? y - extraHeight : y - 60, width: windowWidth, height: bodyHeight + extraHeight + 60 }, area);
-  return { window: { x: Math.round(window.x), y: Math.round(window.y), width: Math.round(window.width), height: Math.round(window.height) },
-    pet: { x: Math.round(x - window.x), y: Math.round(y - window.y), width, height: bodyHeight }, panelHeight,
-    panelAbove };
+  const window = clampRect({ x: Math.round(position.x), y: Math.round(position.y), width, height }, area);
+  const amount = options.dockAmount ?? (options.peek ? 0 : 1);
+  const x = position.edge === 'left' ? -width * .75 * amount : position.edge === 'right' ? width * .75 * amount : 0;
+  const y = position.edge === 'top' ? -height * .75 * amount : position.edge === 'bottom' ? height * .75 * amount : 0;
+  return { window, pet: { x, y, width, height }, panelAbove: window.y - area.y >= area.y + area.height - window.y - height, panelHeight: Math.min(258, area.height - 16) };
+}
+/** The strip of a tucked pet still on screen; hovering only this brings it out. */
+export function exposedRect(window: Rect, edge: DockEdge, visible = .25): Rect {
+  const width = Math.round(window.width * visible), height = Math.round(window.height * visible);
+  if (edge === 'left') return { ...window, width };
+  if (edge === 'right') return { ...window, x: window.x + window.width - width, width };
+  if (edge === 'top') return { ...window, height };
+  return { ...window, y: window.y + window.height - height, height };
+}
+/** Position the separate glass child against the body, entirely inside the work area. */
+export function surfaceLayout(sprite: Rect, area: Rect, width: number, height: number, edge: DockEdge | null): Rect {
+  const above = sprite.y - area.y >= area.y + area.height - sprite.y - sprite.height;
+  let x = sprite.x + sprite.width / 2 - width / 2;
+  let y = above ? sprite.y - height - 8 : sprite.y + sprite.height + 8;
+  if (edge === 'left') { x = sprite.x + sprite.width + 8; y = sprite.y + sprite.height / 2 - height / 2; }
+  if (edge === 'right') { x = sprite.x - width - 8; y = sprite.y + sprite.height / 2 - height / 2; }
+  return clampRect({ x: Math.round(x), y: Math.round(y), width, height }, area);
 }

@@ -10,7 +10,7 @@ export function installMenu(windows: Windows, settings: SettingsStore): void {
     wc.sendInputEvent({ type: 'keyDown', keyCode: 'F', modifiers }); wc.sendInputEvent({ type: 'keyUp', keyCode: 'F', modifiers });
   };
   const application: MenuItemConstructorOptions = { label: 'Pockymoe', submenu: [
-    { role: 'about', label: t('关于 Pockymoe') }, { type: 'separator' },
+    { label: t('关于 Pockymoe'), click: () => windows.createLocal('about') }, { type: 'separator' },
     { label: t('设置…'), accelerator: 'CommandOrControl+,', click: () => windows.createLocal('preferences') },
     { label: t('更改 Pockymoe 地址…'), click: () => windows.createLocal('relay') }, { type: 'separator' },
     ...(process.platform === 'darwin' ? [{ role: 'services' as const, label: t('服务') }, { type: 'separator' as const },

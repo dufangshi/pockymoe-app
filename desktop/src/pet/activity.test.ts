@@ -41,4 +41,26 @@ describe('conversation bubbles retain actual thread/request identities', () => {
     const nextRequest = { ...a, alertId: 'd:another-request' }; expect(queue.push(nextRequest, 29999)).toBe(false);
     expect(queue.push({ ...nextRequest, alertId: 'd:after-window' }, 30000)).toBe(true); expect(queue.pending).toHaveLength(2);
   });
+  it('keeps mixed failure, completion and attention events in one conversation bubble', () => {
+    const queue = new BubbleQueue(), done = alert({ ...child('done'), state: 'completed', request: null, turnId: 'done' }, 'completed');
+    const failed = alert({ ...child('failed'), state: 'failed', request: null, turnId: 'failed' }, 'failed');
+    const request = alert(child('waiting'));
+    queue.push(done, 0); queue.push(failed, 10); queue.push(request, 20);
+    expect(queue.pending).toHaveLength(1); expect(bubbleConversationCount(queue.current!)).toBe(1); expect(queue.current?.sticky).toBe(true);
+    queue.acknowledge(request.alertId, 30); expect(queue.current?.sticky).toBe(false); expect(queue.current?.events).toEqual([done, failed]);
+  });
+  it('moves attention out of a completion burst without repeating the conversation elsewhere', () => {
+    const queue = new BubbleQueue();
+    const done = (id: string, root: string) => alert({ ...child(id, root), state: 'completed', request: null, turnId: id }, 'completed');
+    queue.push(done('a', 'd:root'), 0); queue.push(done('b', 'd:other'), 10); queue.push(alert(child('waiting')), 20);
+    expect(queue.pending).toHaveLength(2); expect(queue.current?.sticky).toBe(true);
+    const roots = queue.pending.flatMap(bubble => [...new Set(bubble.events.map(event => event.item.rootThreadKey ?? event.item.key))]);
+    expect(roots.sort()).toEqual(['d:other', 'd:root']); expect(new Set(roots).size).toBe(roots.length);
+  });
+  it('does not coalesce equal conversation titles across devices', () => {
+    const queue = new BubbleQueue(), a = child('a');
+    const remote = { ...child('remote'), key: 'other:remote', deviceId: 'other', rootThreadKey: 'other:root' };
+    queue.push(alert(a), 0); queue.push({ ...alert(remote), alertId: 'other:request' }, 1);
+    expect(queue.pending).toHaveLength(2); expect(queue.pending.map(bubble => bubbleConversationCount(bubble))).toEqual([1, 1]);
+  });
 });
