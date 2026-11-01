@@ -1,6 +1,23 @@
 /** One source for app-owned desktop strings. Thread titles, summaries and names
  * are user content and are intentionally never translated. */
 export const english = {
+  "正在批准…": "Approving…",
+  "正在拒绝…": "Denying…",
+  "未发送": "Not sent",
+  "请在线程中完成此操作。": "Complete this action in the thread.",
+  "操作未完成，请重试或在线程中继续。": "The action could not be completed. Try again or continue in the thread.",
+  "此请求已不再等待批准。": "This request is no longer awaiting approval.",
+  "请输入回复（最多16000个字符）。": "Please enter a reply (maximum 16000 characters).",
+  "主窗口暂时无法连接，请稍后重试。": "The main window is unavailable. Try again.",
+  "线程已不在活动列表中。": "This thread is no longer active.",
+  "无法保存桌宠位置。": "Could not save the pet position.",
+  "没有可用的 Codex v1 宠物包。": "No valid Codex v1 pet pack is installed.",
+  "导入 Codex 宠物包": "Import a Codex pet pack",
+  "Codex 宠物包": "Codex pet pack",
+  "文件夹": "Folder",
+  "桌宠操作无效": "Invalid pet action",
+  "未知桌宠操作": "Unknown pet action",
+  "不受信任的桌宠页面": "Untrusted pet frame",
   "需要你批准": "Approval needed",
   "需要你回答": "Answer needed",
   "批准": "Approve",
@@ -253,9 +270,9 @@ export function t(key: MessageKey, values: Record<string, string | number> = {},
 }
 
 /** Re-localize app-owned static errors/statuses already returned by an action. */
-export function localizeMessage(message: string): string {
-  if (Object.hasOwn(english, message)) return t(message as MessageKey);
+export function localizeMessage(message: string, language: string = locale): string {
+  if (Object.hasOwn(english, message)) return t(message as MessageKey, {}, language);
   const key = (Object.keys(english) as MessageKey[]).find(key => english[key] === message);
-  return key ? t(key) : message;
+  return key ? t(key, {}, language) : message;
 }
 export function formatList(items: string[]): string { return new Intl.ListFormat(locale, { style: 'short', type: 'conjunction' }).format(items); }
