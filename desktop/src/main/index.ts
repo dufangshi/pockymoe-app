@@ -228,7 +228,7 @@ else {
     for (const url of [...deepLinks, ...process.argv.filter(a => /^(pockymoe|remotecodex):/.test(a))]) manager.openDeepLink(url);
     if (process.env.POCKYMOE_DESKTOP_E2E !== '1') { configureUpdates(); void registerApns(settings, manager); }
     app.on('activate', () => { if (manager.relay.size) manager.focusMain(); else manager.createLocal('relay'); });
-    app.on('before-quit', () => { manager.quitting = true; manager.dispose(); notifications.dispose(); pet?.dispose(); tray.dispose(); globalShortcut.unregisterAll(); });
+    app.on('before-quit', () => { manager.quitting = true; manager.dispose(); notifications.dispose(); pet?.dispose(); tray.dispose(); hub.dispose(); globalShortcut.unregisterAll(); });
     if (process.env.POCKYMOE_DESKTOP_E2E === '1') Object.assign(globalThis, { __pockymoeDesktopTest: { hub, settings, appearance, windows: manager, tray, notifications, capabilities } });
   }).catch(error => {
     if (process.env.POCKYMOE_DESKTOP_E2E === '1') console.error(error);

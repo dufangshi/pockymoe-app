@@ -100,6 +100,16 @@ Local DOM controls follow the approved Electron utility-window exception in
 upstream `docs/ui-principles.md`, including keyboard/focus behavior, ErrorMark
 feedback and custom overlay scrollbars.
 
+ActivityHub owns connection baselines per device. A completed first device read
+(`syncedDeviceIds`, including devices without threads) establishes its cutoff;
+older items stay visible as history without emitting alerts or pet reactions.
+For older pages without that metadata, the hub waits for two snapshots containing
+the device. Missing items remain in the shared snapshot for 60 seconds, so a
+short device/network gap does not resolve requests or change the pet's state.
+Explicit state/request changes still resolve immediately. Recent-thread metadata
+is validated and limited to five entries. `petEdgeHide` defaults to true and is
+persisted alongside the other pet settings.
+
 Notifications and tray items support **在地图中显示** (`revealInMap`). The tray and
 Cmd/Ctrl+0 open the map (`openMap`). Cmd/Ctrl+K aliases the Web's existing
 Cmd/Ctrl+F search binding; the shell does not register F a second time.

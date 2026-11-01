@@ -1,4 +1,4 @@
-import type { ActivityEvent, ActivityHubLike, ActivityItem, ActivitySnapshot } from '../shared/contract';
+import type { ActivityEvent, ActivityHubLike, ActivityItem, ActivityRecent, ActivitySnapshot } from '../shared/contract';
 import { readJson, writeJson } from './store';
 
 const states = new Set(['needsInput', 'failed', 'interrupted', 'completed', 'running', 'idle']);
@@ -31,7 +31,22 @@ export function validateSnapshot(value: unknown): ActivitySnapshot {
       request: i.request ? { id: i.request.id, kind: i.request.kind, summary: i.request.summary } : null
     };
   });
-  return { version: 1, generatedAt: s.generatedAt, accountId: s.accountId, focusedThreadKey: s.focusedThreadKey, items };
+  let recent: ActivityRecent[] | undefined;
+  if (s.recent !== undefined) {
+    if (!Array.isArray(s.recent) || s.recent.length > 5) throw new Error('Invalid recent threads');
+    const recentKeys = new Set<string>();
+    recent = s.recent.map(i => {
+      if (!i || !text(i.deviceId, 256) || !i.deviceId || !text(i.threadId, 256) || !i.threadId ||
+          i.key !== `${i.deviceId}:${i.threadId}` || recentKeys.has(i.key) || !text(i.deviceName, 256) ||
+          !text(i.workspaceLabel, 512) || !text(i.title, 512)) throw new Error('Invalid recent thread');
+      recentKeys.add(i.key);
+      return { key: i.key, deviceId: i.deviceId, deviceName: i.deviceName, workspaceLabel: i.workspaceLabel, threadId: i.threadId, title: i.title };
+    });
+  }
+  if (s.syncedDeviceIds !== undefined && (!Array.isArray(s.syncedDeviceIds) || s.syncedDeviceIds.length > 2000 ||
+      s.syncedDeviceIds.some(id => !text(id, 256) || !id) || new Set(s.syncedDeviceIds).size !== s.syncedDeviceIds.length)) throw new Error('Invalid synced devices');
+  return { version: 1, generatedAt: s.generatedAt, accountId: s.accountId, focusedThreadKey: s.focusedThreadKey, items,
+    ...(recent ? { recent } : {}), ...(s.syncedDeviceIds ? { syncedDeviceIds: [...s.syncedDeviceIds] } : {}) };
 }
 export function alertId(item: ActivityItem): string {
   return `${item.deviceId}:${item.state === 'needsInput' && item.request ? item.request.id : item.turnId || `${item.threadId}:${item.since}`}`;
@@ -42,6 +57,11 @@ export class ActivityHub implements ActivityHubLike {
   private events = new Set<(e: ActivityEvent) => void>();
   private acknowledgements = new Set<(id: string, source: string) => void>();
   private seen = new Map<string, number>();
+  private baselines = new Map<string, number>();
+  private firstSeen = new Set<string>();
+  private missing = new Map<string, number>();
+  private announced = new Set<string>();
+  private expiry?: ReturnType<typeof setTimeout>;
   constructor(private seenPath?: string, private now = () => Date.now()) {
     const entries = seenPath ? readJson(seenPath) : null;
     if (Array.isArray(entries)) for (const entry of entries) {
@@ -57,18 +77,45 @@ export class ActivityHub implements ActivityHubLike {
   sync(value: unknown): void {
     const next = validateSnapshot(value);
     if (this.current?.accountId === next.accountId && Date.parse(next.generatedAt) < Date.parse(this.current.generatedAt)) return;
+    if (this.current?.accountId !== next.accountId) {
+      this.baselines.clear(); this.firstSeen.clear(); this.missing.clear(); this.announced.clear(); clearTimeout(this.expiry);
+    }
     const previous = new Map((this.current?.accountId === next.accountId ? this.current.items : []).map(i => [i.key, i]));
+    // Explicit metadata includes devices with zero items. Without it, wait for
+    // a second snapshot containing that device before establishing its baseline.
+    const arrived = new Set(next.items.map(item => item.deviceId));
+    const synced = next.syncedDeviceIds ?? [...arrived].filter(device => this.firstSeen.has(device));
+    for (const device of synced) {
+      if (!this.baselines.has(device)) this.baselines.set(device, Date.parse(next.generatedAt));
+    }
+    for (const device of arrived) this.firstSeen.add(device);
+    const incoming = new Set(next.items.map(item => item.key));
+    for (const key of incoming) this.missing.delete(key);
+    for (const old of previous.values()) if (!incoming.has(old.key)) {
+      const absentSince = this.missing.get(old.key) ?? this.now();
+      this.missing.set(old.key, absentSince);
+      if (this.now() - absentSince < 60_000) next.items.push(old);
+      else this.missing.delete(old.key);
+    }
+    // Bound transient retained state independently of the 2,000-item input cap.
+    while (this.missing.size > 2000) {
+      const key = this.missing.keys().next().value!;
+      this.missing.delete(key); next.items = next.items.filter(item => item.key !== key);
+    }
     this.current = next;
     for (const listener of this.snapshots) listener(this.snapshot()!);
+    const nextItems = new Map(next.items.map(item => [item.key, item]));
     for (const old of previous.values()) {
-      const item = next.items.find(i => i.key === old.key);
-      if (old.state === 'needsInput' && (item?.state !== 'needsInput' || item.request?.id !== old.request?.id)) this.emit({ type: 'resolved', alertId: alertId(old), item: old, at: next.generatedAt });
+      const item = nextItems.get(old.key);
+      if (old.state === 'needsInput' && (item?.state !== 'needsInput' || item.request?.id !== old.request?.id)) this.resolve(old, next.generatedAt);
       if (old.unread && (!item || !item.unread)) this.acknowledge(alertId(old), 'main');
     }
     this.prune();
     for (const item of next.items) {
       const old = previous.get(item.key);
       if (item.state === 'idle') continue;
+      const baseline = this.baselines.get(item.deviceId);
+      if (baseline === undefined || Date.parse(item.since) < baseline) continue;
       if (old?.state === item.state && alertId(old) === alertId(item)) continue;
       const type = item.state === 'running' ? 'started' : item.state === 'interrupted' ? 'failed' : item.state;
       const event: ActivityEvent = { type, alertId: alertId(item), item, at: next.generatedAt };
@@ -78,11 +125,39 @@ export class ActivityHub implements ActivityHubLike {
         if (this.seen.has(key)) continue;
         this.seen.set(key, this.now());
       }
+      if (type === 'needsInput') this.announced.add(event.alertId);
       this.emit(event);
     }
     this.prune();
     if (this.seenPath) writeJson(this.seenPath, [...this.seen]);
+    this.scheduleExpiry();
   }
+  private resolve(item: ActivityItem, at: string): void {
+    const id = alertId(item);
+    if (this.announced.delete(id)) this.emit({ type: 'resolved', alertId: id, item, at });
+  }
+  private scheduleExpiry(): void {
+    clearTimeout(this.expiry);
+    if (!this.missing.size) return;
+    const deadline = Math.min(...this.missing.values()) + 60_000;
+    this.expiry = setTimeout(() => {
+      if (!this.current) return;
+      const expired = this.current.items.filter(item => this.missing.has(item.key) && this.now() - this.missing.get(item.key)! >= 60_000);
+      const keys = new Set(expired.map(item => item.key));
+      this.current.items = this.current.items.filter(item => !keys.has(item.key));
+      for (const key of keys) this.missing.delete(key);
+      if (expired.length) {
+        for (const listener of this.snapshots) listener(this.snapshot()!);
+        for (const item of expired) {
+          if (item.state === 'needsInput') this.resolve(item, new Date(this.now()).toISOString());
+          if (item.unread) this.acknowledge(alertId(item), 'main');
+        }
+      }
+      this.scheduleExpiry();
+    }, Math.max(1, deadline - this.now()));
+    this.expiry.unref?.();
+  }
+  dispose(): void { clearTimeout(this.expiry); this.snapshots.clear(); this.events.clear(); this.acknowledgements.clear(); }
   private emit(event: ActivityEvent): void { for (const listener of this.events) listener(structuredClone(event)); }
   onSnapshot(listener: (s: ActivitySnapshot) => void): () => void { this.snapshots.add(listener); return () => this.snapshots.delete(listener); }
   onEvent(listener: (e: ActivityEvent) => void): () => void { this.events.add(listener); return () => this.events.delete(listener); }

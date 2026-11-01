@@ -6,7 +6,7 @@ import { relayOrigin } from './security';
 
 export const defaults: DesktopSettings = {
   webOrigin: 'https://app.lnz-study.com', relayOrigin: 'https://remote.lnz-study.com', alertMode: 'petFirst', petVisible: true,
-  petId: 'moe', petSize: 'M', petMini: false, petSound: false, launchAtLogin: false,
+  petId: 'moe', petSize: 'M', petMini: false, petSound: false, petEdgeHide: true, launchAtLogin: false,
   quickWindowShortcut: 'Alt+Space', snoozeUntil: null
 };
 export function readJson(path: string): unknown { try { return JSON.parse(readFileSync(path, 'utf8')); } catch { return null; } }
@@ -26,7 +26,7 @@ export function validateSettings(patch: unknown): Partial<DesktopSettings> {
       case 'petId': if (typeof value !== 'string' || !/^[\w.-]{1,100}$/.test(value)) throw new Error(t('宠物标识无效')); out.petId = value; break;
       case 'quickWindowShortcut': if (typeof value !== 'string' || value.length < 3 || value.length > 80) throw new Error(t('快捷键无效')); out.quickWindowShortcut = value; break;
       case 'snoozeUntil': if (value !== null && (typeof value !== 'string' || !Number.isFinite(Date.parse(value)))) throw new Error(t('暂停时间无效')); out.snoozeUntil = value as string | null; break;
-      case 'petVisible': case 'petMini': case 'petSound': case 'launchAtLogin':
+      case 'petVisible': case 'petMini': case 'petSound': case 'petEdgeHide': case 'launchAtLogin':
         if (typeof value !== 'boolean') throw new Error(t('开关值无效')); out[key] = value; break;
       default: throw new Error(t('未知设置'));
     }

@@ -3,7 +3,7 @@ import { EventEmitter } from 'node:events';
 import { beforeEach, afterEach, expect, it, vi } from 'vitest';
 import { ActivityHub } from '../src/main/activity';
 import { defaults } from '../src/main/store';
-import { item, snapshot } from './fixtures';
+import { connected, item, snapshot } from './fixtures';
 import type { Windows } from '../src/main/windows';
 import type { SettingsStore } from '../src/main/store';
 import type { MenuItemConstructorOptions } from 'electron';
@@ -25,7 +25,7 @@ import { activityCounts, taskbarBadge, trayTemplate } from '../src/main/tray';
 beforeEach(() => { setLocale('zh-CN'); vi.useFakeTimers(); notices.length = 0; });
 afterEach(() => vi.useRealTimers());
 it('uses stable native IDs, includes map actions and labels interruptions', async () => {
-  const hub = new ActivityHub(), dispatch = vi.fn().mockResolvedValue({ ok: true });
+  const hub = connected(new ActivityHub()), dispatch = vi.fn().mockResolvedValue({ ok: true });
   const settings = { get: () => ({ ...defaults, alertMode: 'system' }), onChange: () => () => undefined } as unknown as SettingsStore;
   const windows = { relay: new Set(), dispatch } as unknown as Windows;
   const notifications = new Notifications(hub, settings, windows, () => undefined, () => null);
@@ -62,7 +62,7 @@ it('counts root conversations and nests tray agents without retargeting actions'
   action({} as Electron.MenuItem, undefined, {}); expect(open).toHaveBeenCalledWith(b);
 });
 it('groups native notices by root title while approvals retain actual request IDs', async () => {
-  const hub = new ActivityHub(), dispatch = vi.fn().mockResolvedValue({ ok: true });
+  const hub = connected(new ActivityHub()), dispatch = vi.fn().mockResolvedValue({ ok: true });
   const settings = { get: () => ({ ...defaults, alertMode: 'system' }), onChange: () => () => undefined } as unknown as SettingsStore;
   const notifications = new Notifications(hub, settings, { relay: new Set(), dispatch } as unknown as Windows, () => undefined, () => null);
   hub.sync(snapshot([item({ key: 'mac:agent', threadId: 'agent', state: 'needsInput', agentName: 'Planner', rootThreadKey: 'mac:root', rootThreadTitle: '根对话', request: { id: 'own-request', kind: 'approval', summary: '运行测试' } })]));
@@ -73,7 +73,7 @@ it('groups native notices by root title while approvals retain actual request ID
   notifications.dispose();
 });
 it('counts conversations in a completion burst rather than each agent event', () => {
-  const hub = new ActivityHub(), dispatch = vi.fn().mockResolvedValue({ ok: true });
+  const hub = connected(new ActivityHub()), dispatch = vi.fn().mockResolvedValue({ ok: true });
   const settings = { get: () => ({ ...defaults, alertMode: 'system' }), onChange: () => () => undefined } as unknown as SettingsStore;
   const notifications = new Notifications(hub, settings, { relay: new Set(), dispatch } as unknown as Windows, () => undefined, () => null);
   hub.sync(snapshot(['a', 'b', 'c'].map(name => item({ key: `mac:${name}`, threadId: name, turnId: `turn-${name}`, state: 'completed', unread: true, rootThreadKey: 'mac:root', rootThreadTitle: '根对话' }))));
@@ -83,7 +83,7 @@ it('counts conversations in a completion burst rather than each agent event', ()
 });
 
 it('refreshes already delivered notification actions in the page language with the same ID', () => {
-  const hub = new ActivityHub(), dispatch = vi.fn().mockResolvedValue({ ok: true });
+  const hub = connected(new ActivityHub()), dispatch = vi.fn().mockResolvedValue({ ok: true });
   const settings = { get: () => ({ ...defaults, alertMode: 'system' }), onChange: () => () => undefined } as unknown as SettingsStore;
   const notifications = new Notifications(hub, settings, { relay: new Set(), dispatch } as unknown as Windows, () => undefined, () => null);
   hub.sync(snapshot([item({ state: 'needsInput', request: { id: 'translate-request', kind: 'approval', summary: 'User request text' } })]));
@@ -96,7 +96,7 @@ it('refreshes already delivered notification actions in the page language with t
 it('records actual notification construction only in E2E mode', () => {
   vi.stubEnv('POCKYMOE_DESKTOP_E2E', '1');
   try {
-    const hub = new ActivityHub();
+    const hub = connected(new ActivityHub());
     const settings = { get: () => ({ ...defaults, alertMode: 'system' }), onChange: () => () => undefined } as unknown as SettingsStore;
     const notifications = new Notifications(hub, settings, { relay: new Set(), dispatch: vi.fn() } as unknown as Windows, () => undefined, () => null);
     hub.sync(snapshot([item({ state: 'needsInput', request: { id: 'constructed', kind: 'approval', summary: 'Run fixture checks' } })]));

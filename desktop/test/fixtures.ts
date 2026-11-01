@@ -7,3 +7,8 @@ export const snapshot = (items: ActivityItem[], patch: Partial<ActivitySnapshot>
   version: 1, generatedAt: '2026-11-01T06:01:00.000Z', accountId: 'fixture', focusedThreadKey: null, items, ...patch
 });
 export const event = (patch: Partial<ActivityEvent> = {}): ActivityEvent => ({ type: 'completed', alertId: 'mac:turn-1', item: item({ state: 'completed', unread: true }), at: '2026-11-01T06:01:00.000Z', ...patch });
+// Event tests establish completed device reads before injecting new transitions.
+export const connected = <T extends { sync(value: ActivitySnapshot): void }>(hub: T): T => {
+  hub.sync(snapshot([], { generatedAt: '2026-11-01T05:59:00.000Z', syncedDeviceIds: ['mac', 'pc'] }));
+  return hub;
+};
