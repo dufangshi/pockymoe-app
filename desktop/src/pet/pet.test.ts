@@ -95,6 +95,6 @@ describe('interaction regressions', () => {
   });
   it('refuses a header-valid image if the pixel decoder rejects it, before installing anything', async () => {
     const temp = await mkdtemp(join(tmpdir(), 'pet-decode-'));
-    try { await expect(importPetPack(new URL('../../assets/pets/placeholder/', import.meta.url).pathname, join(temp, 'pets'), () => false)).rejects.toThrow('cannot decode'); await expect(access(join(temp, 'pets', 'placeholder'))).rejects.toThrow(); } finally { await rm(temp, { recursive: true, force: true }); }
+    try { const source = new URL('../../assets/pets/placeholder/', import.meta.url).pathname; await expect(importPetPack(source, join(temp, 'pets'), undefined, ['placeholder'])).rejects.toThrow('already installed'); await expect(importPetPack(source, join(temp, 'pets'), () => false)).rejects.toThrow('cannot decode'); await expect(access(join(temp, 'pets', 'placeholder'))).rejects.toThrow(); } finally { await rm(temp, { recursive: true, force: true }); }
   });
 });

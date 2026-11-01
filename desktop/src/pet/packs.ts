@@ -123,7 +123,7 @@ export function unpackPetZip(bytes: Buffer): Map<string, Buffer> {
   if (offset !== end) fail('invalid central directory size');
   return entries;
 }
-export async function importPetPack(source: string, userPetsDirectory: string, decode?: (bytes: Buffer) => boolean | Promise<boolean>): Promise<PetPack> {
+export async function importPetPack(source: string, userPetsDirectory: string, decode?: (bytes: Buffer) => boolean | Promise<boolean>, reservedIds: readonly string[] = []): Promise<PetPack> {
   const stat = await lstat(source);
   if (stat.isSymbolicLink()) fail('symlink sources are not allowed');
   let manifest: PetManifest, image: Buffer, sleepingImage: Buffer | undefined;
@@ -142,6 +142,7 @@ export async function importPetPack(source: string, userPetsDirectory: string, d
     image = atlas;
     validateAtlas(image, manifest);
   }
+  if (reservedIds.includes(manifest.id)) fail(`pet id ${manifest.id} is already installed`);
   if (image.length + (sleepingImage?.length ?? 0) > MAX_PACK_BYTES) fail('combined spritesheets exceed 8 MB');
   if (decode && (!await decode(image) || sleepingImage && !await decode(sleepingImage))) fail('cannot decode spritesheet pixels');
   await mkdir(userPetsDirectory, { recursive: true });
