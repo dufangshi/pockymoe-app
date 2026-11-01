@@ -2,6 +2,7 @@ import { app, BrowserWindow, dialog, ipcMain, nativeImage, nativeTheme, screen }
 import { join } from 'node:path';
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import type { Appearance, HostCommand, HostCommandResult, PetController, PetControllerDeps } from '../shared/contract';
+import { getLocale, resolveLocale, setLocale } from '../shared/i18n';
 import { conversationKey } from '../shared/activityGroups';
 import { ANIMATIONS, moodFor, type SpriteState } from './animation';
 import { BubbleQueue } from './bubbles';
@@ -17,6 +18,8 @@ export function createPetController(deps: PetControllerDeps): PetController {
   try { const stored: unknown = JSON.parse(readFileSync(positionFile, 'utf8')); if (stored && typeof stored === 'object' && !Array.isArray(stored)) positions = stored as Record<string, PetPosition>; } catch { /* First launch. */ }
   let settings = deps.settings.get(), items = deps.hub.snapshot()?.items ?? [];
   let appearance: Appearance = deps.appearance() ?? { effective: nativeTheme.shouldUseDarkColors ? 'dark' : 'light', pack: 'classic', accent: '#ad782e' };
+  let uiLocale = resolveLocale(appearance.locale || app.getLocale());
+  setLocale(uiLocale);
   let packs: PetPack[] = [], pack: PetPack | undefined, error: string | null = null;
   let disposed = false, visible = settings.petVisible, tray = settings.petMini, chat = false, peek = false, reviewing = false;
   let menuOpen = false, reducedMotion = false, dockAmount = 0;
@@ -45,7 +48,7 @@ export function createPetController(deps: PetControllerDeps): PetController {
   const trusted = (event: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent): boolean =>
     !disposed && event.sender === window.webContents && event.senderFrame === window.webContents.mainFrame;
   const dispatch = async (command: Command): Promise<HostCommandResult> => {
-    try { return await deps.dispatch(command); } catch { return { ok: false, error: app.getLocale().startsWith('zh') ? '主窗口暂时无法连接，请稍后重试。' : 'The main window is unavailable. Try again.' }; }
+    try { return await deps.dispatch(command); } catch { return { ok: false, error: uiLocale === 'zh-CN' ? '主窗口暂时无法连接，请稍后重试。' : 'The main window is unavailable. Try again.' }; }
   };
   function savePosition(): void {
     positions[String(position.displayId)] = position;
@@ -67,11 +70,11 @@ export function createPetController(deps: PetControllerDeps): PetController {
       const bounds = window.getBounds();
       if (Object.keys(layout.window).some((key) => bounds[key as keyof typeof bounds] !== layout.window[key as keyof typeof layout.window])) window.setBounds(layout.window);
     }
-    const state: PetViewState = { appearance, items, targets: [...new Map([...items, ...recentTargets.values()].map((item) => [item.key, item])).values()], mood: dragMood ?? moodFor(items, { snoozed, completion, reviewing }),
+    const state: PetViewState = { appearance, accountId, items, targets: [...new Map([...items, ...recentTargets.values()].map((item) => [item.key, item])).values()], mood: dragMood ?? moodFor(items, { snoozed, completion, reviewing }),
       bubble: snoozed ? null : bubbles.current, settings: { petSize: settings.petSize, petMini: settings.petMini, petSound: settings.petSound, petId: settings.petId },
       imageUrl: pack ? `data:image/${pack.manifest.spritesheetPath.endsWith('png') ? 'png' : 'webp'};base64,${pack.image.toString('base64')}` : '',
       ...(pack?.sleepingImage && pack.manifest.remoteCodex ? { sleeping: { imageUrl: `data:image/${pack.manifest.remoteCodex.sleeping.path.endsWith('png') ? 'png' : 'webp'};base64,${pack.sleepingImage.toString('base64')}`, frames: pack.manifest.remoteCodex.sleeping.frames, durationsMs: pack.manifest.remoteCodex.sleeping.durationsMs } } : {}),
-      packName: pack?.manifest.displayName ?? '', packs: packs.map(({ manifest }) => ({ id: manifest.id, displayName: manifest.displayName })), error, locale: app.getLocale(),
+      packName: pack?.manifest.displayName ?? '', packs: packs.map(({ manifest }) => ({ id: manifest.id, displayName: manifest.displayName })), error, locale: uiLocale,
       tray, chat, peek, edge: position.edge, dockAmount, pet: layout.pet, panelAbove: layout.panelAbove, panelHeight: layout.panelHeight, targetKey };
     const payload = JSON.stringify(state);
     if (payload !== lastPayload) { lastPayload = payload; window.webContents.send('rcDesktop:pet:state', state); }
@@ -109,7 +112,7 @@ export function createPetController(deps: PetControllerDeps): PetController {
     if (!value || typeof value !== 'object' || typeof (value as PetAction).type !== 'string') return { ok: false, error: 'Invalid pet action' };
     const action = value as PetAction;
     const item = 'key' in action && typeof action.key === 'string' ? items.find((candidate) => candidate.key === action.key) ?? recentTargets.get(action.key) : undefined;
-    if (['open', 'approve', 'deny', 'reply', 'target', 'revealInMap'].includes(action.type) && !item) return { ok: false, error: app.getLocale().startsWith('zh') ? '线程已不在活动列表中。' : 'This thread is no longer active.' };
+    if (['open', 'approve', 'deny', 'reply', 'target', 'revealInMap'].includes(action.type) && !item) return { ok: false, error: uiLocale === 'zh-CN' ? '线程已不在活动列表中。' : 'This thread is no longer active.' };
     switch (action.type) {
       case 'open': {
         if (!item) break;
@@ -146,7 +149,7 @@ export function createPetController(deps: PetControllerDeps): PetController {
         if (![action.tray, action.bubble, action.chat].every((value) => Number.isFinite(value) && value >= 0 && value <= 10000)) break;
         measured = { tray: Math.min(action.tray, 414), bubble: Math.min(action.bubble, 280), chat: Math.min(action.chat, 140) }; break;
       case 'importFolder': case 'importZip': {
-        const chosen = await dialog.showOpenDialog({ title: 'Import Codex pet', properties: [action.type === 'importFolder' ? 'openDirectory' : 'openFile'], ...(action.type === 'importZip' ? { filters: [{ name: 'Codex pet pack', extensions: ['zip'] }] } : {}) });
+        const chosen = await dialog.showOpenDialog({ title: uiLocale === 'zh-CN' ? '导入 Codex 宠物包' : 'Import Codex pet', properties: [action.type === 'importFolder' ? 'openDirectory' : 'openFile'], ...(action.type === 'importZip' ? { filters: [{ name: 'Codex pet pack', extensions: ['zip'] }] } : {}) });
         if (!chosen.canceled && chosen.filePaths[0]) {
           try {
             const imported = await importPack(chosen.filePaths[0], userPets, (bytes) => decodeImage(window, bytes), packs.map((pack) => pack.manifest.id));
@@ -188,7 +191,7 @@ export function createPetController(deps: PetControllerDeps): PetController {
   ipcMain.on('rcDesktop:pet:ready', onReady);
   ipcMain.on('rcDesktop:pet:hitTest', onHitTest);
   ipcMain.handle('rcDesktop:pet:action', (event, value: unknown) => trusted(event) ? action(value) : { ok: false, error: 'Untrusted pet frame' });
-  const unsubscribes = [deps.onAppearance((next) => { appearance = next; emit(); }), deps.hub.onSnapshot((snapshot) => {
+  const unsubscribes = [deps.onAppearance((next) => { appearance = next; if (next.locale) uiLocale = resolveLocale(next.locale); setLocale(uiLocale); emit(); }), deps.hub.onSnapshot((snapshot) => {
     if (accountId && accountId !== snapshot.accountId) { bubbles.clear(); recentTargets.clear(); completedConversations.clear(); targetKey = null; }
     accountId = snapshot.accountId; items = snapshot.items;
     for (const item of items) if (recentTargets.has(item.key)) recentTargets.set(item.key, item);
@@ -238,7 +241,7 @@ export function createPetController(deps: PetControllerDeps): PetController {
 
 /** Native Settings import entry; shell owns the parent window, pet owns validation. */
 export async function importPetPack(deps: { petDirectories: string[]; settings: PetControllerDeps['settings']; parent: BrowserWindow }): Promise<void> {
-  const choice = await dialog.showMessageBox(deps.parent, { type: 'question', message: app.getLocale().startsWith('zh') ? '导入 Codex 宠物包' : 'Import a Codex pet pack', buttons: ['Folder', 'ZIP', 'Cancel'], cancelId: 2 });
+  const choice = await dialog.showMessageBox(deps.parent, { type: 'question', message: getLocale() === 'zh-CN' ? '导入 Codex 宠物包' : 'Import a Codex pet pack', buttons: getLocale() === 'zh-CN' ? ['文件夹', 'ZIP', '取消'] : ['Folder', 'ZIP', 'Cancel'], cancelId: 2 });
   if (choice.response === 2) return;
   const result = await dialog.showOpenDialog(deps.parent, { properties: [choice.response === 0 ? 'openDirectory' : 'openFile'], ...(choice.response === 1 ? { filters: [{ name: 'Codex pet pack', extensions: ['zip'] }] } : {}) });
   if (result.canceled || !result.filePaths[0]) return;

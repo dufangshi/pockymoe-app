@@ -6,7 +6,17 @@ function commandHtml(value: string): string {
   return `<code>${value.split(/(\s+)/).map((part) => /^\s+$/.test(part) ? escapeHtml(part) : `<span class="command-token">${escapeHtml(part)}</span>`).join('')}</code>`;
 }
 
-/** Summaries remain plain text; only explicit code and common command cues get a code chip. */
+/** Unquoted prose stays prose. Unknown commands can opt in with explicit backticks. */
+export function isShellCommand(value: string): boolean {
+  if (/[?？!！。\n]/.test(value) || /\.\s*$/.test(value)) return false;
+  const match = /^(?:"([^"]+)"|'([^']+)'|(\S+))/.exec(value.trim());
+  const token = match?.[1] ?? match?.[2] ?? match?.[3] ?? '';
+  if (/^[a-z]+:\/\//i.test(token)) return false;
+  if (/^(?:cargo|git|pnpm|npm|npx|yarn|bun|node|python3?|pockymoe|bash|zsh|sh|pwsh|powershell|dotnet|go|make|cmake|pytest|uv|ruff|docker|kubectl|curl|wget|ls|cat|rg|find|sed|awk|grep|pip3?)$/.test(token)) return true;
+  return /^(?:\.\.?[\\/]|~[\\/]|\/|[A-Za-z]:[\\/])/.test(token) || /^[\w.@+-]+(?:[\\/][\w.@+-]+)+$/.test(token);
+}
+
+/** Only explicit code spans or a recognizable command payload get a chip. */
 export function requestSummaryHtml(value: string): string {
   const inlineCode = /`([^`\n]+)`/g;
   let result = '', offset = 0;
@@ -15,9 +25,9 @@ export function requestSummaryHtml(value: string): string {
     offset = match.index! + match[0].length;
   }
   if (offset) return result + escapeHtml(value.slice(offset));
-  const prefixed = /^((?:运行|执行|命令|run|execute|command)\s*[:：]?\s*)([\x20-\x7e]+)$/i.exec(value);
-  if (prefixed) return escapeHtml(prefixed[1]) + commandHtml(prefixed[2]);
-  if (/^(?:cargo|git|pnpm|npm|npx|yarn|bun|node|python3?|pockymoe|bash|zsh|sh|pwsh|dotnet|go|make|cmake)(?:\s|$)/.test(value)) return commandHtml(value);
+  const prefixed = /^((?:请?(?:运行|执行)|命令|(?:please\s+)?(?:run|execute)|command)\s*[:：]?\s+)(.+)$/i.exec(value);
+  if (prefixed && isShellCommand(prefixed[2])) return escapeHtml(prefixed[1]) + commandHtml(prefixed[2]);
+  if (isShellCommand(value)) return commandHtml(value);
   return escapeHtml(value);
 }
 

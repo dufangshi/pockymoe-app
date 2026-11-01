@@ -5,7 +5,7 @@ import { _electron as electron, expect } from '@playwright/test';
 import electronPath from 'electron';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { PNG } from 'pngjs';
-const rootEvidence = '/tmp/rc-desktop/evidence/pet/grouping';
+const rootEvidence = '/tmp/rc-desktop/evidence/pet/qa1';
 const smoke = process.argv.includes('--smoke');
 const polish = process.argv.includes('--polish');
 const grouped = process.argv.includes('--grouped');

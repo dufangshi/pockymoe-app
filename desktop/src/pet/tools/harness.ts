@@ -12,7 +12,7 @@ let settings: DesktopSettings = { webOrigin: 'https://example.invalid', relayOri
 const commands: Omit<HostCommand, 'id'>[] = [], acknowledgements: string[] = [];
 const appearanceListeners = new Set<(value: Appearance) => void>();
 let appearance: Appearance = { effective: 'light', pack: 'classic', accent: '#ad782e' };
-let replyFails = false, ignored = true;
+let replyFails = false, ignored = true, failingCommand: 'resolveRequest' | 'reply' | null = null;
 const hub: ActivityHubLike = {
   snapshot: () => snapshot,
   onSnapshot: (listener) => { snapshotListeners.add(listener); return () => snapshotListeners.delete(listener); },
@@ -26,7 +26,7 @@ const store: SettingsStoreLike = {
   onChange: (listener) => { settingsListeners.add(listener); return () => settingsListeners.delete(listener); },
 };
 void app.whenReady().then(() => {
-  const controller = createPetController({ hub, settings: store, appearance: () => appearance, onAppearance: (listener) => { appearanceListeners.add(listener); return () => appearanceListeners.delete(listener); }, dispatch: async (command) => { commands.push(command); if (command.type === 'reply') { await new Promise((resolve) => setTimeout(resolve, 120)); if (replyFails) return { ok: false, error: '模拟发送失败，请重试' }; } return { ok: true }; }, shouldSpeak: () => true, petDirectories: [join(process.cwd(), 'assets/pets')] });
+  const controller = createPetController({ hub, settings: store, appearance: () => appearance, onAppearance: (listener) => { appearanceListeners.add(listener); return () => appearanceListeners.delete(listener); }, dispatch: async (command) => { commands.push(command); if (command.type === failingCommand) { await new Promise((resolve) => setTimeout(resolve, 100)); return { ok: false, code: 'needsThread', error: 'needsThread' }; } if (command.type === 'reply') { await new Promise((resolve) => setTimeout(resolve, 120)); if (replyFails) return { ok: false, error: '模拟发送失败，请重试' }; } return { ok: true }; }, shouldSpeak: () => true, petDirectories: [join(process.cwd(), 'assets/pets')] });
   const window = BrowserWindow.getAllWindows()[0], setIgnored = window.setIgnoreMouseEvents.bind(window);
   window.setIgnoreMouseEvents = (value, options) => { ignored = value; setIgnored(value, options); };
   Object.assign(globalThis, { petHarness: {
@@ -37,6 +37,7 @@ void app.whenReady().then(() => {
     appearance(value: Appearance) { appearance = value; for (const listener of appearanceListeners) listener(value); },
     workArea(width: number) { const area = { x: 0, y: 38, width, height: 800 }; const display = { id: 1, workArea: area }; Object.assign(screen, { getPrimaryDisplay: () => display, getAllDisplays: () => [display], getDisplayNearestPoint: () => display, getDisplayMatching: () => display }); },
     settings: (patch: Partial<DesktopSettings>) => store.set(patch),
+    failCommand: (value: 'resolveRequest' | 'reply' | null) => { failingCommand = value; },
     ignored: () => ignored, failReply: (value: boolean) => { replyFails = value; },
     commands: () => commands, acknowledgements: () => acknowledgements,
   } });

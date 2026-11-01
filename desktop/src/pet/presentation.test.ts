@@ -14,6 +14,9 @@ describe('request summary presentation', () => {
     expect(textOnly(requestSummaryHtml('pnpm test'))).toBe('pnpm test');
     expect(requestSummaryHtml('请确认提醒方式')).toBe('请确认提醒方式');
   });
+  it.each(['Run the focused regression checks?', 'Run the focused regression checks', 'cargo test?', '运行回归检查？', 'Please execute the checks.', 'https://example.com/check'])('leaves prose and uncertain payloads as plain text: %s', (value) => { expect(requestSummaryHtml(value)).not.toContain('<code>'); });
+  it.each(['cargo test -p runtime', 'Run cargo test', './scripts/check.sh --focused', '/usr/bin/python3 --version', 'scripts/check.sh', 'Please run ./checks.sh'])('recognizes executable/path payloads: %s', (value) => { expect(requestSummaryHtml(value)).toContain('<code>'); });
+  it('honours explicitly quoted code even when it contains question punctuation', () => { expect(requestSummaryHtml('Run `echo "ready?"`')).toContain('<code>'); });
   it('keeps untrusted summary text inert inside and outside chips', () => {
     expect(textOnly(requestSummaryHtml('<img src=x onerror=alert(1)> `echo "<script>"`'))).toBe('&lt;img src=x onerror=alert(1)&gt; echo &quot;&lt;script&gt;&quot;');
   });

@@ -39,7 +39,7 @@ node src/pet/tools/capture.mjs
 
 The last two commands use a mock ActivityHub, an isolated temporary userData, and
 an independent Electron process. Screenshots/results go to
-`/tmp/rc-desktop/evidence/pet/grouping/`; no Supervisor or real account is accessed.
+`/tmp/rc-desktop/evidence/pet/qa1/`; no Supervisor or real account is accessed.
 `node src/pet/tools/generate-placeholder.mjs` recreates the original procedural
 atlas for tests. Production packaging must exclude `assets/pets/placeholder/**`.
 
@@ -48,3 +48,5 @@ Appearance follows the host v2 `appearance()` / `onAppearance` callbacks through
 For request/bubble polish only, run `node src/pet/tools/capture.mjs --polish`. It covers approval/input hierarchy, command chips, matching rail icons, action focus/contrast, both tail orientations and edge clamping across all three packs in light/dark mode.
 
 `node src/pet/tools/capture.mjs --grouped` verifies root-conversation counts, sibling alert paging, inactive-root titles and actual-agent approval/reply/acknowledgement routing across the theme matrix.
+
+`node src/pet/tools/qa1.mjs` checks English/Chinese page-locale updates, prose versus real command chips, and inline resolve/reply failure recovery through ErrorMark. It captures waiting bubbles and error details in every pack/mode at 1440px and 900px work-area widths.

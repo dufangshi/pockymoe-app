@@ -4,6 +4,7 @@ import type { PetBubble } from './bubbles';
 import type { DockEdge, Rect } from './geometry';
 export interface PetViewState {
   appearance: Appearance;
+  accountId: string | null;
   items: ActivityItem[];
   targets: ActivityItem[];
   mood: SpriteState;
