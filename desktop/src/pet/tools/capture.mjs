@@ -114,7 +114,7 @@ try {
     await moveTo(width - petWidth, 500); await expect(page.locator('#app')).toHaveAttribute('data-dock-edge', 'right'); await shot(`${id}-dock-right`, context);
     await moveTo(width - 220, 660); await setSettings({ petMini: true }); await expect(page.locator('#character')).toHaveCount(0); await shot(`${id}-mini`, context);
     await setSettings({ petMini: false }); await ensureTray(false);
-    await page.locator('[data-action="more"]').click(); await expect(page.getByRole('menuitem').first()).toBeFocused(); await page.keyboard.press('ArrowDown'); await expect(page.getByRole('menuitem').nth(1)).toBeFocused(); await shot(`${id}-more`, context); await page.keyboard.press('Escape'); await expect(page.getByRole('menu')).toHaveCount(0);
+    await page.locator('[data-action="more"]').click(); await expect(page.getByRole('menuitem').first()).toBeFocused(); await page.keyboard.press('ArrowDown'); await expect(page.getByRole('menuitem').nth(1)).toBeFocused(); await shot(`${id}-more`, context); await page.keyboard.press('Escape'); await expect(page.getByRole('menu')).toHaveCount(0); await expect(page.locator('#pet-more-trigger')).toBeFocused();
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await setSettings({ snoozeUntil: new Date(Date.now() + 60000).toISOString() });
     await expect(page.locator('.sleep-motes path').first()).toHaveCSS('animation-name', 'none');

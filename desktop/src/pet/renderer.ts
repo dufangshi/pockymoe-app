@@ -76,7 +76,7 @@ function render(): void {
   if (focused === 'reply-input' && state.chat) { const input = document.querySelector<HTMLInputElement>('#reply-input'); input?.focus(); if (selection !== null) input?.setSelectionRange(selection, selection); }
   for (const button of root.querySelectorAll('.more button')) button.setAttribute('role', 'menuitem');
   if (menu && focusedMenuAction) root.querySelector<HTMLElement>(`.more [data-action="${focusedMenuAction}"]`)?.focus();
-  else if (menu && focused) document.getElementById(focused)?.focus();
+  else if (focused && focused !== 'reply-input') document.getElementById(focused)?.focus();
   const list = document.querySelector<HTMLElement>('.task-list'); if (list) list.scrollTop = savedScroll;
   paintSprite();
   requestAnimationFrame(() => {
