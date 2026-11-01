@@ -48,6 +48,8 @@ test.beforeAll(async () => {
   other = external.server; otherOrigin = external.origin;
   const apiFixture = await server((req, res) => {
     if (req.url === '/healthz') { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ status: 'ok' })); }
+    else if (req.url === '/relay/auth/oauth/github/start') { res.setHeader('Content-Type', 'text/html'); res.end('<!doctype html><title>Provider sign-in</title><h1>Provider</h1>'); }
+    else if (req.url === '/relay/auth/oauth/github/callback') { res.writeHead(302, { Location: `${origin}/?signedIn=1` }); res.end(); }
     else if (req.url === '/') { res.writeHead(307, { Location: origin }); res.end(); }
     else { res.setHeader('Content-Type', 'text/html'); res.end('<html><title>Relay API only</title></html>'); }
   });
@@ -66,6 +68,19 @@ test.beforeAll(async () => {
 test.afterEach(async () => { for (const app of apps.splice(0)) await app.close(); for (const dir of directories.splice(0)) rmSync(dir, { recursive: true, force: true }); });
 test.afterAll(async () => { await Promise.all([new Promise<void>(done => relay.close(() => done())), new Promise<void>(done => other.close(() => done())), new Promise<void>(done => api.close(() => done()))]); });
 
+test('OAuth finishes in a bridge-free sign-in window on the page session', async () => {
+  const app = await launch('light'); const page = await pageAt(app, origin);
+  await page.evaluate(start => { location.assign(start); }, `${relayOriginValue}/relay/auth/oauth/github/start`);
+  const signIn = await pageAt(app, '/relay/auth/oauth/github/start');
+  await expect(signIn).toHaveTitle('Provider sign-in');
+  expect(await signIn.evaluate(() => typeof window.pockymoeHost)).toBe('undefined');
+  expect(await signIn.evaluate(() => navigator.userAgent)).not.toMatch(/Electron|Pockymoe/i);
+  expect(page.url()).not.toContain('/relay/auth/');
+  await signIn.evaluate(callback => { location.assign(callback); }, `${relayOriginValue}/relay/auth/oauth/github/callback`);
+  await expect.poll(() => page.url()).toContain('signedIn=1');
+  await expect.poll(() => app.windows().some(w => w.url().includes('/relay/auth/'))).toBe(false);
+  expect(await page.evaluate(() => !!window.pockymoeHost)).toBe(true);
+});
 test('split origins bridge, activity delivery, tray and quick-window command round trip', async () => {
   const app = await launch('light'); const page = await pageAt(app, origin);
   await expect.poll(() => page.evaluate(() => !!window.pockymoeHost)).toBe(true);
