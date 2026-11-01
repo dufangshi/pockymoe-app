@@ -3,8 +3,8 @@ import lucideNotice from './NOTICE?raw';
 document.head.append(document.createComment(lucideNotice));
 import { ANIMATIONS, frameAt, type SpriteState } from './animation';
 import { activityStatus, statusMarkStyles, statusMarkSvg, type StatusMark } from '../shared/statusMarks';
-import { activitySecondary, conversationTitle, groupActivities } from '../shared/activityGroups';
-import { bubbleConversationCount } from './bubbles';
+import { conversationTitle } from '../shared/activityGroups';
+import { panelConversations, petConversations, petMetadata, replyTarget as conversationReplyTarget, type PetConversation } from './conversations';
 import { applyAppearance } from '../shared/appearance';
 import { accentForeground, escapeHtml as escape, requestSummaryHtml } from './presentation';
 import { getLocale, setLocale, t, type MessageKey } from '../shared/i18n';
@@ -19,7 +19,8 @@ const markStyle = document.createElement('style'); markStyle.textContent = statu
 const motion = matchMedia('(prefers-reduced-motion: reduce)');
 let state: PetViewState | null = null, signature = '', lastMeasure = '';
 let draft = '', sendState: 'idle' | 'sending' | 'sent' | 'error' = 'idle';
-let selected: string | null = null, lastSound = 0, lastBubble = '';
+let selected: string | null = null, selectedRequest: string | null = null, lastSound = 0, lastBubble = '';
+const collapsedRequests = new Set<string>();
 const failures = new Map<string, { result: HostCommandResult; key?: string }>(), pending = new Set<string>();
 let drag: { id: number; x: number; y: number; moved: boolean } | null = null;
 let scrollDrag: { id: number; grab: number } | null = null;
@@ -28,6 +29,7 @@ let spriteImage: HTMLImageElement | null = null, alpha: Uint8ClampedArray | null
 let lastPointer: { clientX: number; clientY: number } | null = null;
 const canvas = document.createElement('canvas'), context = canvas.getContext('2d', { willReadFrequently: true })!;
 const paths: Record<string, string> = {
+  robot: '<rect x="3" y="4" width="10" height="9" rx="2"/><path d="M8 2v2M1 7v3M15 7v3M6 10h4"/><circle cx="6" cy="7.5" r=".6"/><circle cx="10" cy="7.5" r=".6"/>', chevron: '<path d="m6 4 4 4-4 4"/>',
   tasks: '<rect x="3" y="2.5" width="10" height="11" rx="2"/><path d="M6 6h4M6 9h4"/>',
   home: '<path d="m2 7 6-5 6 5M4 6v8h8V6M7 14v-4h2v4"/>', more: '<circle cx="3" cy="8" r=".6"/><circle cx="8" cy="8" r=".6"/><circle cx="13" cy="8" r=".6"/>',
   close: '<path d="m5 5 6 6M11 5l-6 6"/>', send: '<path d="M8 13V3m-4 4 4-4 4 4"/>', check: '<path d="m3 8 3 3 7-7"/>',
@@ -38,7 +40,7 @@ const paths: Record<string, string> = {
 const icon = (name: string): string => `<svg viewBox="${name === 'map' ? '0 0 24 24' : '0 0 16 16'}" aria-hidden="true">${paths[name] ?? paths.tasks}</svg>`;
 const button = (action: string, label: string, body: string, extra = '') => `<button type="button" data-action="${action}" title="${escape(label)}" aria-label="${escape(label)}" ${extra}>${body}</button>`;
 function status(item: ActivityItem): string {
-  const kind = activityStatus(item), labels: Record<StatusMark, MessageKey> = { running: '运行中', unread: '已完成，未读', failed: '失败', interrupted: '已中断', waiting: '等待你', idle: '已读，空闲', 'agents-running': '智能体线程运行中', unknown: '状态未知' };
+  const kind = activityStatus(item), labels: Record<StatusMark, MessageKey> = { running: '运行中', unread: '已完成，未读', failed: '失败', interrupted: '已中断', waiting: '等待你', idle: '已读，空闲', 'agents-running': '运行中', unknown: '状态未知' };
   return statusMarkSvg(kind, t(labels[kind]));
 }
 const title = (item: ActivityItem) => conversationTitle(item, state?.items);
@@ -49,38 +51,44 @@ function decisions(item: ActivityItem, surface: string): string {
   return `<span class="decisions">${button('approve', t('批准'), icon('check'), `class="primary"${disabled}`)}${button('deny', t('拒绝'), icon('close'), disabled)}</span>`;
 }
 function controls(): string {
-  return `<nav class="controls" aria-label="${escape(t('桌宠控制'))}">${button('toggleTray', t('活动面板'), icon('tasks') + (state?.items.length ? `<span class="task-count">${groupActivities(state.items).length}</span>` : ''), `aria-expanded="${state?.mode === 'panel'}"`)}${button('openMain', t('打开主窗口'), icon('home'))}${button('openMap', t('在地图中显示'), icon('map'))}${button('more', t('更多'), icon('more'), `aria-haspopup="menu" aria-expanded="${state?.mode === 'menu'}"`)}</nav>`;
+  return `<nav class="controls" aria-label="${escape(t('桌宠控制'))}">${button('toggleTray', t('活动面板'), icon('tasks') + (state?.items.length ? `<span class="task-count">${petConversations(state.items).length}</span>` : ''), `aria-expanded="${state?.mode === 'panel'}"`)}${button('openMain', t('打开主窗口'), icon('home'))}${button('openMap', t('在地图中显示'), icon('map'))}${button('more', t('更多'), icon('more'), `aria-haspopup="menu" aria-expanded="${state?.mode === 'menu'}"`)}</nav>`;
 }
-function orderedRows(): ActivityItem[] {
-  if (!state) return [];
-  const rank = { needsInput: 0, failed: 1, interrupted: 1, completed: 2, running: 3, idle: 4 };
-  if (!state.items.length) return state.recent.slice(0, 5).map(item => ({ ...item, workspaceId: '', state: 'idle', since: '', unread: false }));
-  const sorted = [...state.items].sort((a, b) => rank[a.state] - rank[b.state] || Date.parse(b.since) - Date.parse(a.since));
-  return groupActivities(sorted, state.items).flatMap(group => [...group.items].sort((a, b) => rank[a.state] - rank[b.state]));
+function orderedRows(): PetConversation[] { return state ? panelConversations(state.items, state.recent) : []; }
+function robotBadge(group: PetConversation): string {
+  if (!group.children.length) return '';
+  const names = group.children.map(item => item.agentName || item.title).join(', ');
+  return `<span class="children-count" title="${escape(names)}" aria-label="${escape(`${t('{count} 个子线程', { count: group.children.length })}: ${names}`)}">${icon('robot')}<span>${group.children.length}</span></span>`;
 }
-function taskRow(item: ActivityItem): string {
-  const waiting = item.state === 'needsInput', agent = item.rootThreadKey && item.rootThreadKey !== item.key;
-  const summary = waiting ? item.request?.summary : agent ? activitySecondary(item) : null;
-  return `<article class="task-row ${waiting ? 'waiting' : ''} ${item.state === 'idle' ? 'recent' : ''} ${item.key === selected ? 'selected' : ''}" data-key="${escape(item.key)}" role="option" aria-selected="${item.key === selected}" tabindex="0" aria-label="${escape(`${title(item)} · ${activitySecondary(item)}`)}">
-    <div class="row-main">${status(item)}<span class="row-title" title="${escape(title(item))}">${escape(title(item))}</span><span class="row-meta" title="${escape(activitySecondary(item))}">${item.state === 'running' ? `<span data-since="${escape(item.since)}">${elapsed(Date.now() - Date.parse(item.since))}</span>` : escape(item.deviceName)}</span><span class="row-actions">${button('open', t('打开'), icon('open'))}${button('revealInMap', t('在地图中显示'), icon('map'))}</span>${waiting && item.request?.kind === 'approval' ? decisions(item, 'row') : ''}${errorSlot(`row:${item.key}`)}</div>
-    ${summary ? `<div class="row-summary" title="${escape(summary)}">${waiting ? requestSummaryHtml(summary) : escape(summary)}</div>` : ''}
-    ${agent && waiting ? `<div class="agent-meta">${escape(activitySecondary(item))}</div>` : ''}</article>`;
+function requestLine(item: ActivityItem, group: PetConversation, actions: boolean, extra = ''): string {
+  const owner = item.key !== group.key ? item.agentName || item.title : '';
+  return `<div class="request-row ${actions ? '' : 'request-summary-row'} ${selected === group.key && selectedRequest === item.key ? 'selected' : ''}" data-key="${escape(item.key)}" data-request-key="${escape(item.key)}" data-conversation-key="${escape(group.key)}" role="option" aria-selected="${selected === group.key && selectedRequest === item.key}" tabindex="0" title="${escape([owner, item.request?.summary, petMetadata(item)].filter(Boolean).join(' · '))}">${owner ? `<span class="request-owner">${escape(owner)}</span>` : ''}<span class="request-copy">${requestSummaryHtml(item.request?.summary ?? '')}</span>${extra}${actions && item.request?.kind === 'approval' ? decisions(item, 'row') : ''}${actions ? errorSlot(`row:${item.key}`) : ''}</div>`;
+}
+function taskRow(group: PetConversation, duplicateTitle = false): string {
+  const item = group.statusItem, waiting = group.requests.length > 0, active = selected === group.key;
+  const expanded = active && group.requests.length > 1 && !collapsedRequests.has(group.key), primary = group.requests[0];
+  const toggle = group.requests.length > 1 ? button('toggleRequests', t(expanded ? '收起「{title}」的线程' : '展开「{title}」的线程', { title: group.title }), icon('chevron'), `class="request-toggle ${expanded ? 'expanded' : ''}" aria-expanded="${expanded}"`) : '';
+  return `<article class="conversation-row ${waiting ? 'waiting' : ''}" data-conversation-key="${escape(group.key)}"><div class="task-row ${active && !selectedRequest ? 'selected' : ''} ${item.state === 'idle' ? 'recent' : ''}" data-key="${escape(group.key)}" role="option" aria-selected="${active && !selectedRequest}" tabindex="0" title="${escape(`${group.title} · ${petMetadata(group.root)}`)}"><div class="row-main">${toggle}${status(item)}<span class="row-title">${escape(group.title)}</span><span class="row-meta">${item.state === 'running' && !duplicateTitle ? `<span data-since="${escape(item.since)}">${elapsed(Date.now() - Date.parse(item.since))}</span>` : escape(item.deviceName)}</span><span class="row-actions">${button('open', t('打开'), icon('open'))}${button('revealInMap', t('在地图中显示'), icon('map'))}</span>${robotBadge(group)}${primary && !expanded && primary.request?.kind === 'approval' ? `<span data-key="${escape(primary.key)}">${decisions(primary, 'row')}${errorSlot(`row:${primary.key}`)}</span>` : errorSlot(`row:${group.key}`)}</div></div>${expanded ? `<div class="request-lines">${group.requests.map(request => requestLine(request, group, true)).join('')}</div>` : primary ? requestLine(primary, group, false, group.requests.length > 1 ? button('toggleRequests', `${t('活动面板')} (${group.requests.length})`, `+${group.requests.length - 1}`, 'class="request-more"') : '') : ''}</article>`;
 }
 function renderGlass(): void {
   if (!state || state.surface !== 'glass') return;
   const input = document.querySelector<HTMLInputElement>('#reply-input'), focused = document.activeElement === input;
   const selection = input?.selectionStart ?? null, savedScroll = document.querySelector('.task-list')?.scrollTop ?? 0;
   const rows = orderedRows();
-  if (!rows.some(item => item.key === selected)) selected = rows[0]?.key ?? null;
-  const target = rows.find(item => item.key === selected);
+  if (!rows.some(group => group.key === selected)) { selected = rows[0]?.key ?? null; selectedRequest = null; }
+  const selectedGroup = rows.find(group => group.key === selected);
+  if (selectedRequest && !selectedGroup?.requests.some(item => item.key === selectedRequest)) selectedRequest = null;
+  const target = selectedGroup ? conversationReplyTarget(selectedGroup, selectedRequest) : undefined;
   root.className = `glass mode-${state.mode}`;
   let content = controls();
-  if (state.mode === 'panel') content = `<section class="panel" aria-label="${escape(t('活动面板'))}"><div class="scroll-frame" data-scroll-area><div class="task-list scroll-content" role="listbox" aria-label="${escape(t('活动任务'))}" id="pet-task-list">${rows.length ? rows.map(taskRow).join('') : `<div class="empty">${icon('check')}${escape(t('一切就绪'))}</div>`}</div><div class="scroll-track" role="scrollbar" aria-label="${escape(t('滚动活动任务'))}" aria-controls="pet-task-list" aria-orientation="vertical" aria-valuemin="0" tabindex="0" hidden><div class="scroll-thumb"></div></div></div><form id="chat-form" class="chat" data-key="${escape(target?.key ?? '')}"><input id="reply-input" aria-label="${escape(t('发送回复'))}" placeholder="${escape(target ? t('回复 {title}…', { title: title(target) }) : t('一切就绪'))}" value="${escape(draft)}" maxlength="16000" autocomplete="off" ${!target || sendState === 'sending' ? 'disabled' : ''}>${errorSlot(`chat:${target?.key}`)}${button('send', sendState === 'sent' ? t('已发送') : sendState === 'sending' ? t('正在发送…') : t('发送回复'), sendState === 'sent' ? icon('check') : icon('send'), `class="send ${sendState === 'sending' ? 'sending' : ''}" ${!target || !draft.trim() || sendState === 'sending' ? 'disabled' : ''}`)}</form><span class="live-announcement" role="status">${sendState === 'error' ? escape(t('未发送')) : sendState === 'sent' ? escape(t('已发送')) : ''}</span></section>`;
+  if (state.mode === 'panel') content = `<section class="panel" aria-label="${escape(t('活动面板'))}"><header class="panel-header"><span aria-hidden="true">${icon('tasks')}</span>${button('close', t('关闭任务'), icon('close'))}</header><div class="scroll-frame" data-scroll-area><div class="task-list scroll-content" role="listbox" aria-label="${escape(t('活动任务'))}" id="pet-task-list">${rows.length ? rows.map(group => taskRow(group, rows.some(other => other.key !== group.key && other.title === group.title))).join('') : `<div class="empty">${icon('check')}${escape(t('一切就绪'))}</div>`}</div><div class="scroll-track" role="scrollbar" aria-label="${escape(t('滚动活动任务'))}" aria-controls="pet-task-list" aria-orientation="vertical" aria-valuemin="0" tabindex="0" hidden><div class="scroll-thumb"></div></div></div><form id="chat-form" class="chat" data-key="${escape(target?.key ?? '')}"><input id="reply-input" aria-label="${escape(t('发送回复'))}" placeholder="${escape(target ? t('回复 {title}…', { title: title(target) }) : t('一切就绪'))}" value="${escape(draft)}" maxlength="16000" autocomplete="off" ${!target || sendState === 'sending' ? 'disabled' : ''}>${errorSlot(`chat:${target?.key}`)}${button('send', sendState === 'sent' ? t('已发送') : sendState === 'sending' ? t('正在发送…') : t('发送回复'), sendState === 'sent' ? icon('check') : icon('send'), `class="send ${sendState === 'sending' ? 'sending' : ''}" ${!target || !draft.trim() || sendState === 'sending' ? 'disabled' : ''}`)}</form><span class="live-announcement" role="status">${sendState === 'error' ? escape(t('未发送')) : sendState === 'sent' ? escape(t('已发送')) : ''}</span></section>`;
   if (state.mode === 'menu') content = `<section class="more" role="menu" aria-label="${escape(t('宠物偏好'))}">${button('mini', t('Mini 模式'), `${escape(t('Mini 模式'))}${state.settings.petMini ? icon('check') : ''}`, 'role="menuitemcheckbox" aria-checked="'+state.settings.petMini+'"')}<div class="menu-sizes" role="group" aria-label="${escape(t('宠物大小'))}">${(['S', 'M', 'L'] as const).map(size => button(`size-${size}`, size, size, `role="menuitemradio" aria-checked="${state!.settings.petSize === size}"`)).join('')}</div>${button('edgeHide', t('贴边自动隐藏'), `<span class="menu-copy">${escape(t('贴边自动隐藏'))}</span>` + (state.edgeHide ? icon('check') : ''), `role="menuitemcheckbox" aria-checked="${state.edgeHide}"`)}${button('sound', t('轻触提示音'), `<span class="menu-copy">${escape(t('轻触提示音'))}</span>` + (state.settings.petSound ? icon('check') : ''), `role="menuitemcheckbox" aria-checked="${state.settings.petSound}"`)}<hr>${button('preferences', t('偏好设置…'), escape(t('偏好设置…')), 'role="menuitem"')}${button('hide', t('隐藏桌宠'), escape(t('隐藏桌宠')), 'role="menuitem"')}</section>`;
-  const bubble = state.bubble, event = bubble?.events[0];
-  if (state.mode === 'bubble' && bubble && event) {
-    const item = event.item, count = bubbleConversationCount(bubble), heading = count > 1 ? t('{count} 完成', { count }) : title(item);
-    content = `<aside class="bubble ${bubble.sticky ? 'sticky' : ''}" data-key="${escape(item.key)}" data-alert-id="${escape(event.alertId)}"><div class="bubble-line">${status(item)}${button('open', heading, escape(heading), 'class="bubble-title"')}<span class="bubble-device" title="${escape(activitySecondary(item))}">${escape(item.deviceName)}</span>${bubble.sticky && item.request?.kind === 'approval' ? decisions(item, 'bubble') : ''}${errorSlot(`bubble:${item.key}`)}</div>${bubble.sticky && item.request?.summary ? `<div class="request-summary" title="${escape(item.request.summary)}">${requestSummaryHtml(item.request.summary)}</div>` : ''}${bubble.events.length > 1 && count === 1 ? `<span class="bubble-extra">+${bubble.events.length - 1}</span>` : ''}</aside>${state.near ? controls() : ''}`;
+  const bubble = state.bubble;
+  const bubbleGroups = bubble ? petConversations(bubble.events.map(event => event.item), state.items) : [];
+  const group = bubbleGroups[0];
+  if (state.mode === 'bubble' && bubble && group) {
+    const item = group.requests[0] ?? group.statusItem, count = bubbleGroups.length, event = bubble.events.find(event => event.item.key === item.key) ?? bubble.events[0];
+    const heading = count > 1 ? t('{count} 完成', { count }) : group.title;
+    content = `<aside class="bubble ${bubble.sticky ? 'sticky' : ''}" data-key="${escape(group.key)}" data-conversation-key="${escape(group.key)}" data-alert-id="${escape(event.alertId)}"><div class="bubble-line">${status(group.statusItem)}${button('open', heading, escape(heading), 'class="bubble-title"')}<span class="bubble-device" title="${escape(petMetadata(group.root))}">${escape(item.deviceName)}</span>${bubble.sticky && item.request?.kind === 'approval' ? `<span data-key="${escape(item.key)}">${decisions(item, 'bubble')}${errorSlot(`bubble:${item.key}`)}</span>` : errorSlot(`bubble:${item.key}`)}</div>${bubble.sticky && item.request?.summary ? `<div class="bubble-request-line"><div class="request-summary" title="${escape(item.request.summary)}">${requestSummaryHtml(item.request.summary)}</div>${group.requests.length > 1 ? button('showConversation', `${t('活动面板')} (${group.requests.length})`, `+${group.requests.length - 1}`, 'class="request-more"') : ''}</div>` : ''}</aside>${state.near ? controls() : ''}`;
   }
   root.innerHTML = content;
   root.querySelectorAll<HTMLElement>('[data-error-id]').forEach(slot => {
@@ -108,24 +116,40 @@ async function itemAction(action: PetAction & { key: string }, surface: string):
   if (state?.accountId !== account) return result;
   pending.delete(id); if (!result.ok) failures.set(id, { result, key: action.key }); renderGlass(); return result;
 }
+function selectActivityRow(row: HTMLElement): void {
+  selected = row.closest<HTMLElement>('[data-conversation-key]')?.dataset.conversationKey ?? row.dataset.key ?? null;
+  selectedRequest = row.dataset.requestKey ?? null;
+  if (selected) collapsedRequests.delete(selected);
+  const group = orderedRows().find(group => group.key === selected), target = group ? conversationReplyTarget(group, selectedRequest) : null;
+  if (target) void bridge.action({ type: 'target', key: target.key });
+  renderGlass();
+}
 root.addEventListener('click', event => {
   const element = event.target as HTMLElement, control = element.closest<HTMLElement>('[data-action]');
-  const row = element.closest<HTMLElement>('.task-row');
-  if (!control && row) { selected = row.dataset.key!; void bridge.action({ type: 'target', key: selected }); renderGlass(); return; }
+  const row = element.closest<HTMLElement>('.task-row,.request-row');
+  if (!control && row) { selectActivityRow(row); return; }
   if (!control || !state) return;
   const type = control.dataset.action!, key = control.closest<HTMLElement>('[data-key]')?.dataset.key;
   const surface = control.closest('.bubble') ? 'bubble' : 'row'; sound();
+  if (type === 'toggleRequests') {
+    const groupKey = control.closest<HTMLElement>('[data-conversation-key]')?.dataset.conversationKey; if (!groupKey) return;
+    if (selected === groupKey && !collapsedRequests.has(groupKey)) collapsedRequests.add(groupKey); else collapsedRequests.delete(groupKey);
+    selected = groupKey; selectedRequest = null; renderGlass(); return;
+  }
+  if (type === 'showConversation' && key) { void bridge.action({ type: 'showConversation', key }); return; }
   if (key && ['approve', 'deny', 'open', 'revealInMap'].includes(type)) { void itemAction({ type: type as 'approve' | 'deny' | 'open' | 'revealInMap', key }, surface); return; }
   if (type === 'send') { document.querySelector<HTMLFormElement>('#chat-form')?.requestSubmit(); return; }
   const action: PetAction = type === 'more' ? { type: 'menu', value: true } : type.startsWith('size-') ? { type: 'setSize', size: type.slice(5) as 'S' | 'M' | 'L' } : type === 'mini' ? { type: 'setMini', value: !state.settings.petMini } : type === 'edgeHide' ? { type: 'setEdgeHide', value: !state.edgeHide } : type === 'sound' ? { type: 'setSound', value: !state.settings.petSound } : type === 'hide' ? { type: 'setVisible', value: false } : { type } as PetAction;
   void bridge.action(action);
 });
-root.addEventListener('dblclick', event => { const row = (event.target as HTMLElement).closest<HTMLElement>('.task-row'); if (row) void itemAction({ type: 'open', key: row.dataset.key! }, 'row'); });
+root.addEventListener('dblclick', event => { const row = (event.target as HTMLElement).closest<HTMLElement>('.task-row,.request-row'); if (row?.dataset.key) void itemAction({ type: 'open', key: row.dataset.key }, 'row'); });
 root.addEventListener('input', event => { if ((event.target as HTMLElement).id !== 'reply-input') return; draft = (event.target as HTMLInputElement).value; sendState = 'idle'; const send = root.querySelector<HTMLButtonElement>('.send'); if (send) { send.disabled = !draft.trim(); send.innerHTML = icon('send'); } });
 root.addEventListener('submit', event => {
   event.preventDefault(); if (!selected || !draft.trim() || sendState === 'sending') return;
+  const group = orderedRows().find(group => group.key === selected); if (!group) return;
+  const target = conversationReplyTarget(group, selectedRequest);
   sendState = 'sending'; const text = draft, account = state?.accountId; renderGlass();
-  void itemAction({ type: 'reply', key: selected, text }, 'chat').then(result => { if (state?.accountId !== account) return; sendState = result.ok ? 'sent' : 'error'; if (result.ok && draft === text) draft = ''; renderGlass(); });
+  void itemAction({ type: 'reply', key: target.key, text }, 'chat').then(result => { if (state?.accountId !== account) return; sendState = result.ok ? 'sent' : 'error'; if (result.ok && draft === text) draft = ''; renderGlass(); });
 });
 function renderSprite(): void {
   if (!state) return;
@@ -200,21 +224,24 @@ window.addEventListener('keydown', event => {
     const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 : (index + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
     event.preventDefault(); items[next]?.focus();
   }
-  const row = (event.target as HTMLElement).closest<HTMLElement>('.task-row');
+  if ((event.target as HTMLElement).closest('button')) return;
+  const row = (event.target as HTMLElement).closest<HTMLElement>('.task-row,.request-row');
   if (row && ['ArrowDown', 'ArrowUp', 'Home', 'End', 'Enter'].includes(event.key)) {
-    event.preventDefault(); const rows = [...root.querySelectorAll<HTMLElement>('.task-row')], index = rows.indexOf(row), next = event.key === 'Home' ? 0 : event.key === 'End' ? rows.length - 1 : event.key === 'Enter' ? index : (index + (event.key === 'ArrowDown' ? 1 : -1) + rows.length) % rows.length;
-    selected = rows[next]?.dataset.key ?? null; if (selected) void bridge.action({ type: 'target', key: selected }); renderGlass(); root.querySelector<HTMLElement>(`.task-row[data-key="${CSS.escape(selected ?? '')}"]`)?.focus();
+    event.preventDefault(); const rows = [...root.querySelectorAll<HTMLElement>('.task-row,.request-row')], index = rows.indexOf(row), next = event.key === 'Home' ? 0 : event.key === 'End' ? rows.length - 1 : event.key === 'Enter' ? index : (index + (event.key === 'ArrowDown' ? 1 : -1) + rows.length) % rows.length;
+    const destination = rows[next]; if (!destination) return;
+    const key = destination.dataset.key, request = destination.classList.contains('request-row'); selectActivityRow(destination);
+    root.querySelector<HTMLElement>(`.${request ? 'request-row' : 'task-row'}[data-key="${CSS.escape(key ?? '')}"]`)?.focus();
   }
 });
 bridge.onState(next => {
   const old = state, changedMode = old?.mode !== next.mode;
-  if (old && old.accountId !== next.accountId) { failures.clear(); pending.clear(); draft = ''; sendState = 'idle'; selected = null; }
+  if (old && old.accountId !== next.accountId) { failures.clear(); pending.clear(); draft = ''; sendState = 'idle'; selected = null; selectedRequest = null; collapsedRequests.clear(); }
   state = next; setLocale(next.locale); applyAppearance(next.appearance); document.title = `Pockymoe · ${t('桌宠')}`; root.setAttribute('aria-label', document.title);
   const accent = next.appearance.accent; canvas.width = 1; canvas.height = 1; context.clearRect(0, 0, 1, 1); context.fillStyle = accent; context.fillRect(0, 0, 1, 1); const [r, g, b] = context.getImageData(0, 0, 1, 1).data; document.documentElement.style.setProperty('--accent-fg', accentForeground(r, g, b));
   document.body.dataset.surface = next.surface; root.dataset.visible = String(next.near || next.settings.petMini || next.mode !== 'controls');
   if (next.surface === 'sprite') { renderSprite(); updateHit(); return; }
   if (old?.detailOpen && !next.detailOpen) root.querySelector<HTMLButtonElement>('.error-mark[aria-expanded="true"]')?.click();
-  if (changedMode && next.mode === 'panel') selected = null;
+  if (changedMode && next.mode === 'panel') { selected = next.targetKey; selectedRequest = null; collapsedRequests.clear(); }
   const contentKey = JSON.stringify([next.accountId, next.items, next.recent, next.mode, next.mode === 'bubble' && next.near, next.bubble, next.settings, next.locale, next.appearance, next.edgeHide]);
   if (signature !== contentKey) { signature = contentKey; renderGlass(); }
   if (changedMode && next.mode === 'menu') root.querySelector<HTMLElement>('[role^="menuitem"]')?.focus();

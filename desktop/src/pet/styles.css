@@ -1,5 +1,5 @@
-:root { color-scheme:light; font:13px/18px -apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI Variable Text","Segoe UI",sans-serif; --theme-fg:#25262b;--theme-muted:#63676d;--theme-fg-muted:var(--theme-muted);--theme-border:rgb(30 35 45 / .12);--theme-hover:rgb(35 40 50 / .065);--glass:rgb(255 255 255 / .30);--theme-accent-solid:#ad782e;--theme-danger:#cb343e;--theme-warning:#ad7515;--scrollbar-thumb-idle:rgb(35 40 50 / .13);--scrollbar-thumb:rgb(35 40 50 / .28);--scrollbar-radius:8px;--accent-fg:#fff; }
-:root[data-theme-effective="dark"] { color-scheme:dark;--theme-fg:#f1f2f5;--theme-muted:#b2b5be;--theme-border:rgb(255 255 255 / .13);--theme-hover:rgb(255 255 255 / .085);--glass:rgb(24 27 33 / .40);--theme-danger:#f07575;--theme-warning:#efb752;--scrollbar-thumb-idle:rgb(215 220 230 / .16);--scrollbar-thumb:rgb(215 220 230 / .34); }
+:root { color-scheme:light; font:13px/18px -apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI Variable Text","Segoe UI",sans-serif; --theme-fg:#25262b;--theme-muted:#4f5762;--theme-fg-muted:var(--theme-muted);--theme-border:rgb(30 35 45 / .12);--theme-hover:rgb(35 40 50 / .065);--glass:rgb(255 255 255 / .80);--theme-accent-solid:#ad782e;--theme-danger:#cb343e;--theme-warning:#ad7515;--scrollbar-thumb-idle:rgb(35 40 50 / .13);--scrollbar-thumb:rgb(35 40 50 / .28);--scrollbar-radius:8px;--accent-fg:#fff; }
+:root[data-theme-effective="dark"] { color-scheme:dark;--theme-fg:#f1f2f5;--theme-muted:#b2b5be;--theme-border:rgb(255 255 255 / .13);--theme-hover:rgb(255 255 255 / .085);--glass:rgb(24 27 33 / .72);--theme-danger:#f07575;--theme-warning:#efb752;--scrollbar-thumb-idle:rgb(215 220 230 / .16);--scrollbar-thumb:rgb(215 220 230 / .34); }
 :root[data-theme-preset="terminal"] { font-family:ui-monospace,"SF Mono","Cascadia Mono",monospace;--scrollbar-radius:0px; }
 :root[data-theme-preset="plum-pocket"] { --scrollbar-radius:12px; }
 * { box-sizing:border-box; }
@@ -91,3 +91,20 @@ hr { border:0;border-top:1px solid var(--theme-border);margin:4px; }
 .glass.mode-controls { transition:opacity 200ms ease; }.glass.mode-controls[data-visible="false"] { opacity:0; }
 .bubble:not(.sticky) { animation:pill-life 6s linear both; }
 @keyframes pill-life { 0% { opacity:0; } 3%,96% { opacity:1; } 100% { opacity:0; } }
+
+.panel-header { display:flex;align-items:center;justify-content:space-between;height:26px;padding:0 5px 0 9px;border-bottom:1px solid var(--theme-border); }
+.panel-header>span { display:flex;color:var(--theme-muted); }.panel-header svg { width:13px;height:13px; }
+.panel-header button { width:22px;height:22px;border-radius:50%;color:var(--theme-muted); }
+.conversation-row { border-radius:6px; }.conversation-row.waiting { box-shadow:inset 2px 0 var(--theme-warning); }
+.children-count { display:inline-flex;align-items:center;gap:2px;flex:none;color:var(--theme-muted);font-size:10px;font-variant-numeric:tabular-nums; }
+.children-count svg { width:13px;height:13px; }
+.row-main>span[data-key] { display:inline-flex;align-items:center;flex:none; }
+.request-toggle { width:12px;height:24px;margin-right:-3px;color:var(--theme-muted); }.request-toggle svg { width:12px;height:12px; }.request-toggle.expanded svg { transform:rotate(90deg); }
+.request-row { display:flex;align-items:center;gap:6px;min-height:30px;margin-left:20px;padding:1px 4px;border-radius:5px;cursor:default; }
+.request-row.selected { background:var(--theme-hover); }.request-summary-row { min-height:22px;padding-bottom:4px; }
+.request-owner { max-width:64px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px;color:var(--theme-muted);flex:none; }
+.request-copy { flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:var(--theme-muted);line-height:18px; }
+.request-copy code { background:color-mix(in srgb,var(--theme-fg) 7%,transparent);border-radius:4px;padding:1px 3px;font:10.5px/16px ui-monospace,"SF Mono",Consolas,monospace; }
+.request-more { height:22px;min-width:24px;padding:0 3px;color:var(--theme-muted);font-size:10px; }
+.bubble-request-line { display:flex;align-items:center;padding-right:7px; }.bubble-request-line .request-summary { flex:1;min-width:0; }
+.bubble-request-line .request-more { align-self:flex-start; }

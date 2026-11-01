@@ -8,6 +8,7 @@ import { ANIMATIONS } from './animation';
 import { BubbleQueue } from './bubbles';
 import { dockPosition, PET_HEIGHT, petLayout, restorePosition, surfaceLayout, type PetPosition } from './geometry';
 import { importPetPack as importPack, listPetPacks, imageDimensions, type PetPack } from './packs';
+import { petConversations } from './conversations';
 import { StableMood, withoutResolvedRequest } from './stability';
 import { configureOverlay, glassOptions } from './windows';
 import type { PetAction, PetViewState } from './bridge';
@@ -86,9 +87,9 @@ export function createPetController(deps: PetControllerDeps): PetController {
     }, 100);
   });
   glass.on('focus', () => clearTimeout(blurTimer));
-  function openSurface(next: 'panel' | 'menu'): void {
+  function openSurface(next: 'panel' | 'menu', selectedKey: string | null = null): void {
     panel = next === 'panel'; menu = next === 'menu'; detailOpen = false; mode = next; glassDismissed = false; peek = true;
-    if (panel && !targetKey) targetKey = items[0]?.key ?? recent[0]?.key ?? null;
+    if (panel) targetKey = selectedKey;
     glass.setFocusable(true); emit(); glass.show(); glass.focus();
   }
   function emit(): void {
@@ -137,15 +138,15 @@ export function createPetController(deps: PetControllerDeps): PetController {
   }
   function acknowledgeKey(key: string, capturedItem?: ActivityItem): void {
     const item = capturedItem ?? items.find(candidate => candidate.key === key);
-    const ids = bubbles.pending.flatMap(bubble => bubble.events.filter(event => event.item.key === key).map(event => event.alertId));
+    const ids = bubbles.pending.flatMap(bubble => bubble.events.filter(event => (event.item.key === key || conversationKey(event.item) === key)).map(event => event.alertId));
     if (item) ids.push(`${item.deviceId}:${item.request?.id ?? item.turnId ?? item.threadId}`);
     for (const id of new Set(ids)) deps.hub.acknowledge(id, 'pet');
   }
   async function action(value: unknown): Promise<HostCommandResult> {
     if (!value || typeof value !== 'object' || typeof (value as PetAction).type !== 'string') return { ok: false, error: t('桌宠操作无效', {}, uiLocale) };
     const action = value as PetAction;
-    const item = 'key' in action ? items.find(candidate => candidate.key === action.key) ?? targets.get(action.key) ?? recent.find(candidate => candidate.key === action.key) : undefined;
-    if (['open', 'approve', 'deny', 'reply', 'target', 'revealInMap'].includes(action.type) && !item) return { ok: false, error: t('线程已不在活动列表中。', {}, uiLocale) };
+    const item = 'key' in action ? items.find(candidate => candidate.key === action.key) ?? targets.get(action.key) ?? recent.find(candidate => candidate.key === action.key) ?? petConversations([...items, ...targets.values()]).find(group => group.key === action.key)?.root : undefined;
+    if (['open', 'approve', 'deny', 'reply', 'target', 'showConversation', 'revealInMap'].includes(action.type) && !item) return { ok: false, error: t('线程已不在活动列表中。', {}, uiLocale) };
     switch (action.type) {
       case 'open': {
         if (!item) break;
@@ -166,6 +167,7 @@ export function createPetController(deps: PetControllerDeps): PetController {
         if (item && typeof action.text === 'string' && action.text.trim() && action.text.length <= 16000) return dispatch({ type: 'reply', deviceId: item.deviceId, threadId: item.threadId, text: action.text.trim() });
         return { ok: false, error: t('请输入回复（最多16000个字符）。', {}, uiLocale) };
       case 'target': if (item) targetKey = item.key; break;
+      case 'showConversation': if (item) openSurface('panel', conversationKey('state' in item ? item as ActivityItem : { ...item, state: 'idle', since: '', unread: false, workspaceId: '' })); break;
       case 'dismiss': for (const event of [...(bubbles.current?.events ?? [])]) deps.hub.acknowledge(event.alertId, 'pet'); break;
       case 'toggleTray': case 'toggleChat': if (panel) closeSurface(); else openSurface('panel'); break;
       case 'click': moods.react('jumping', Date.now(), ANIMATIONS.jumping.durations.reduce((a, b) => a + b, 0) * (pack?.manifest.remoteCodex?.frameScale ?? 1)); openSurface('panel'); break;

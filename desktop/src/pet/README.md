@@ -32,6 +32,16 @@ defaults to true; docking translates 75% of the sprite inside an on-screen fixed
 window, slides out after 150ms hover and tucks after 800ms away. Cursor proximity
 is polled in main at 100ms, independent of alpha hit testing.
 
+The activity panel has a text-free 26px icon/close strip. Each conversation has
+one row keyed by `rootThreadKey ?? key`, with its highest-priority status and a
+robot/count tooltip listing participating child names. Selecting a conversation
+expands multiple pending requests; approval actions retain each actual request
+identity. Replies target the root until a request is explicitly selected. Inactive
+roots get a valid derived route even when only a child is active. Metadata stays
+in tooltips or the right-aligned device; no role prefix is added to panel/pill copy.
+Bubbles coalesce mixed event kinds by conversation and preserve per-request
+acknowledgements. Opening a conversation bubble acknowledges its actual alerts.
+
 Codex v1 (1536×1872) and v2 (1536×2288) are supported. The first nine rows retain
 the official hatch-pet timings; v2's last two rows are reserved for pointer-look
 poses, and idle column 6 is not played. Sources are linked in `animation.ts`.
@@ -69,3 +79,18 @@ the foreground fixture window. It never logs authentication values or restarts a
 service. Prepare ≥250 historical fixture threads before the acceptance run.
 Evidence is written under `<evidence-root>/round3/pet/`. The earlier v2/QA1 tools
 are superseded by these v3 scripts.
+
+For conversation grouping/routing and native panel/bubble captures:
+
+```sh
+POCKYMOE_DESKTOP_EVIDENCE=<evidence-root> node src/pet/tools/conversations.mjs
+POCKYMOE_DESKTOP_EVIDENCE=<evidence-root> python3 src/pet/tools/conversations-fixture.py prepare
+POCKYMOE_DESKTOP_EVIDENCE=<evidence-root> node src/pet/tools/conversations-real.mjs
+POCKYMOE_DESKTOP_EVIDENCE=<evidence-root> python3 src/pet/tools/conversations-fixture.py cleanup
+```
+
+The mock capture matrix holds virtual focus to avoid foreground contention;
+real-app capture uses native focus, actual page Settings, a real five-child fixture
+conversation and only foreground fixture-window screenshots. Both cover three
+themes × light/dark × 1440/900 × en/zh-CN. Fixture preparation/cleanup uses public
+HTTP and records only owned disposable thread ids outside the repository.

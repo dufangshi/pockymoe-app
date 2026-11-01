@@ -37,7 +37,7 @@ export interface PetViewState {
 export type PetAction =
   | { type: 'open' | 'approve' | 'deny' | 'revealInMap'; key: string }
   | { type: 'reply'; key: string; text: string }
-  | { type: 'target'; key: string }
+  | { type: 'target' | 'showConversation'; key: string }
   | { type: 'dismiss' | 'close' | 'openMap' }
   | { type: 'detail'; value: boolean }
   | { type: 'surfaceMeasure'; width: number; height: number }

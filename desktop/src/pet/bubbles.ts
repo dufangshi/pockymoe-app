@@ -11,7 +11,11 @@ export interface PetBubble {
 export function bubbleConversationCount(bubble: Pick<PetBubble, 'events'>): number {
   return new Set(bubble.events.map((event) => conversationKey(event.item))).size;
 }
-const priority = (bubble: PetBubble): number => bubble.sticky ? 3 : bubble.events[0]?.type === 'failed' ? 2 : 1;
+const priority = (bubble: PetBubble): number => bubble.sticky ? 3 : bubble.events.some(event => event.type === 'failed') ? 2 : 1;
+function withEvents(bubble: PetBubble, events: ActivityEvent[]): PetBubble {
+  const sticky = events.some(event => event.type === 'needsInput');
+  return { ...bubble, events, sticky, shownAt: bubble.sticky && !sticky ? null : bubble.shownAt };
+}
 
 export class BubbleQueue {
   private queue: PetBubble[] = [];
@@ -29,17 +33,19 @@ export class BubbleQueue {
     this.seen.set(event.alertId, now);
     if (this.threadSpoke.has(event.item.key)) return false;
     this.threadSpoke.set(event.item.key, now);
-    const conversation = conversationKey(event.item);
-    const related = event.type !== 'completed' ? this.queue.find((bubble) => bubble.events.every((existing) => existing.type === event.type && conversationKey(existing.item) === conversation)) : undefined;
-    const burst = event.type === 'completed'
-      ? this.queue.find((bubble) => !bubble.sticky && bubble.events.every((e) => e.type === 'completed') && now - bubble.createdAt <= 1200)
-      : undefined;
-    if (related) this.queue = this.queue.map((bubble) => bubble === related ? { ...bubble, events: [...bubble.events, event], shownAt: bubble.shownAt !== null && !bubble.sticky ? now : bubble.shownAt } : bubble);
-    else if (burst) this.queue = this.queue.map((bubble) => bubble === burst ? { ...bubble, events: [...bubble.events, event] } : bubble);
+    const conversation = conversationKey(event.item), previousId = this.current?.id;
+    const related = this.queue.find(bubble => bubble.events.some(existing => conversationKey(existing.item) === conversation));
+    const burst = event.type === 'completed' ? this.queue.find(bubble => !bubble.sticky && bubble.events.every(existing => existing.type === 'completed') && now - bubble.createdAt <= 1200) : undefined;
+    if (related && related.events.some(existing => conversationKey(existing.item) !== conversation) && event.type !== 'completed') {
+      // Pull this conversation out of a multi-conversation completion burst before attention preempts it.
+      const own = related.events.filter(existing => conversationKey(existing.item) === conversation);
+      this.queue = this.queue.map(bubble => bubble === related ? withEvents(bubble, bubble.events.filter(existing => conversationKey(existing.item) !== conversation)) : bubble).filter(bubble => bubble.events.length);
+      this.queue.push(withEvents({ id: event.alertId, events: [], createdAt: now, shownAt: null, sticky: false }, [...own, event]));
+    } else if (related) this.queue = this.queue.map(bubble => bubble === related ? withEvents({ ...bubble, shownAt: bubble.shownAt !== null && !bubble.sticky ? now : bubble.shownAt }, [...bubble.events, event]) : bubble);
+    else if (burst) this.queue = this.queue.map(bubble => bubble === burst ? withEvents(bubble, [...bubble.events, event]) : bubble);
     else this.queue.push({ id: event.alertId, events: [event], createdAt: now, shownAt: null, sticky: event.type === 'needsInput' });
-    const previous = this.current;
     this.queue.sort((a, b) => priority(b) - priority(a) || a.createdAt - b.createdAt);
-    if (previous && previous !== this.current) this.queue = this.queue.map((bubble) => bubble === previous ? { ...bubble, shownAt: null } : bubble);
+    if (previousId && previousId !== this.current?.id) this.queue = this.queue.map(bubble => bubble.id === previousId ? { ...bubble, shownAt: null } : bubble);
     this.tick(now);
     return true;
   }
@@ -47,7 +53,7 @@ export class BubbleQueue {
   acknowledge(alertId: string, now: number): void {
     this.queue = this.queue.flatMap((bubble) => {
       const events = bubble.events.filter((event) => event.alertId !== alertId);
-      return events.length ? [{ ...bubble, events }] : [];
+      return events.length ? [withEvents(bubble, events)] : [];
     });
     this.tick(now);
   }
@@ -55,7 +61,7 @@ export class BubbleQueue {
   resolve(threadKey: string, now: number): void {
     this.queue = this.queue.flatMap((bubble) => {
       const events = bubble.sticky ? bubble.events.filter((event) => event.item.key !== threadKey) : bubble.events;
-      return events.length ? [{ ...bubble, events }] : [];
+      return events.length ? [withEvents(bubble, events)] : [];
     });
     this.tick(now);
   }

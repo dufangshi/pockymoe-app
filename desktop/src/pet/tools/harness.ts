@@ -31,6 +31,11 @@ void app.whenReady().then(() => {
   const window = BrowserWindow.getAllWindows().find(view => !view.getParentWindow())!, glass = BrowserWindow.getAllWindows().find(view => !!view.getParentWindow())!;
   const nativeSetBounds = window.setBounds.bind(window); let spriteBoundsCalls = 0; let requestedBounds = window.getBounds();
   window.setBounds = (bounds, animate) => { spriteBoundsCalls++; requestedBounds = { ...requestedBounds, ...bounds }; nativeSetBounds(bounds, animate); };
+  let captureOnly = false;
+  const nativeFocused = glass.isFocused.bind(glass), nativeFocus = glass.focus.bind(glass), nativeShow = glass.show.bind(glass);
+  glass.isFocused = () => captureOnly || nativeFocused();
+  glass.focus = () => { if (!captureOnly) nativeFocus(); };
+  glass.show = () => { if (captureOnly) glass.showInactive(); else nativeShow(); };
   Object.assign(screen, { getCursorScreenPoint: () => cursorPoint });
   const setIgnored = window.setIgnoreMouseEvents.bind(window);
   window.setIgnoreMouseEvents = (value, options) => { ignored = value; setIgnored(value, options); };
@@ -41,6 +46,7 @@ void app.whenReady().then(() => {
     theme(value: 'light' | 'dark') { nativeTheme.themeSource = value; },
     appearance(value: Appearance) { appearance = value; for (const listener of appearanceListeners) listener(value); },
     workArea(width: number) { const area = { x: 0, y: 38, width, height: 800 }; const display = { id: 1, workArea: area }; Object.assign(screen, { getPrimaryDisplay: () => display, getAllDisplays: () => [display], getDisplayNearestPoint: () => display, getDisplayMatching: () => display }); },
+    captureOnly: (value: boolean) => { captureOnly = value; },
     cursor: (point: { x: number; y: number }) => { cursorPoint = point; },
     metrics: () => ({ spriteBoundsCalls, requestedBounds, dockVisible: app.dock?.isVisible(), sprite: window.getBounds(), glass: glass.getBounds(), glassVisible: glass.isVisible(), glassFocused: glass.isFocused() }),
     resetMetrics: () => { spriteBoundsCalls = 0; },
