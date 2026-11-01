@@ -1,8 +1,8 @@
 # Remote Codex App
 
-Independent Android and iOS clients for [Remote Codex](https://github.com/dufangshi/remoteCodex) relay mode.
+Clients for [Pockymoe](https://github.com/dufangshi/pockymoe) (formerly Remote Codex): the [desktop client for macOS and Windows](desktop/README.md), and independent Android and iOS clients for relay mode, described below.
 
-Both clients render the live relay product in a WebView, so devices, workspaces, workspace tabs, shortcuts, recent chats, thread search, Explorer, settings and the composer stay aligned with the website. Native code owns relay selection, safe areas/keyboard layout, attachment picking, saving/sharing exports and system notifications. There is no second native thread toolbar.
+The mobile clients render the live relay product in a WebView, so devices, workspaces, workspace tabs, shortcuts, recent chats, thread search, Explorer, settings and the composer stay aligned with the website. Native code owns relay selection, safe areas/keyboard layout, attachment picking, saving/sharing exports and system notifications. There is no second native thread toolbar.
 
 ## Download
 

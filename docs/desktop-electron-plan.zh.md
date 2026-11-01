@@ -239,9 +239,7 @@ relay 网页（主窗口，持有密钥与连接）
 - 代码放在 `remote-codex-app/desktop/`，技术栈为 Electron、TypeScript 和 Vite。不放进 remoteCodex，遵守那边的 50k 行限制，也不能往那边放客户端源码。
 - 不和 Windows Device Manager 合并：那是独立发版的引导程序，这是客户端，两者各自发版。
 
-**与现有 macOS SwiftUI 版的关系：需要你来决定。**
-- 建议：Electron 版成为主力桌面端，SwiftUI 版冻结，只做维护。
-- 理由：桌面和网页功能对齐的成本会降到接近零，`macos/PARITY.md` 里列的那些差距也会自然消失。
+**与旧的 macOS SwiftUI 版的关系**：已决定删除（2026-11-01）。Electron 版是唯一的桌面端。
 
 **签名**：macOS 用 Developer ID 签名、公证，并配置 APNs entitlement；Windows 做代码签名。
 
@@ -257,7 +255,6 @@ relay 网页（主窗口，持有密钥与连接）
 
 ### 待定问题
 
-1. SwiftUI macOS 版是冻结还是继续维护？
 2. 默认桌宠的形象：是自己做一个原创角色，还是去联系 @風-隐 谈白龙的授权？
 3. 第一版是否需要 Windows？如果需要，就只做 L1 加托盘常驻。
 4. 离线“等待审批”推送是否值得改 supervisor 和 relay？这一项也会惠及 iOS。
