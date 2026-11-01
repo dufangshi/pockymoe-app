@@ -121,6 +121,8 @@ export interface Appearance {
   /** Resolved accent color (any CSS color) so local windows can match the page. */
   accent: string;
   fontScale?: number;
+  /** The page's UI language (BCP 47, e.g. 'zh-CN', 'en'); local windows, tray, menus and notifications use it. */
+  locale?: string;
 }
 
 /** Exposed as window.pockymoeHost to the configured webOrigin's top frame only. */
