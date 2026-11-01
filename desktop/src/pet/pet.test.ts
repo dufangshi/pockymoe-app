@@ -7,7 +7,7 @@ import type { ActivityEvent, ActivityItem } from '../shared/contract';
 import { ANIMATIONS, frameAt, moodFor } from './animation';
 import { scrollGeometry } from './scroll';
 import { BubbleQueue } from './bubbles';
-import { clampRect, defaultPosition, dockPosition, petLayout, restorePosition } from './geometry';
+import { clampRect, defaultPosition, dockPosition, exposedRect, petLayout, restorePosition } from './geometry';
 import { importPetPack, loadPetPack, MAX_PACK_BYTES, parseManifest, unpackPetZip, validateAtlas } from './packs';
 const item = (state: ActivityItem['state'], key = 'd:t'): ActivityItem => ({ key, deviceId: 'd', deviceName: 'Mac', workspaceId: 'w', workspaceLabel: 'Project', threadId: key, title: 'Build', state, since: new Date(0).toISOString(), unread: true });
 const event = (type: ActivityEvent['type'], key = 'd:t', id = key): ActivityEvent => ({ type, alertId: id, item: item(type === 'started' ? 'running' : type === 'resolved' ? 'idle' : type, key), at: new Date(0).toISOString() });
@@ -47,6 +47,20 @@ describe('bubble delivery', () => {
 });
 describe('display and dock geometry', () => {
   const area = { x: -1440, y: 40, width: 1440, height: 860 }, primary = { id: 1, workArea: { x: 0, y: 38, width: 1512, height: 906 } };
+  it('hovers a tucked pet only on its exposed strip', () => {
+    const w = { x: 100, y: 100, width: 100, height: 100 };
+    expect(exposedRect(w, 'left')).toEqual({ x: 100, y: 100, width: 25, height: 100 });
+    expect(exposedRect(w, 'right')).toEqual({ x: 175, y: 100, width: 25, height: 100 });
+    expect(exposedRect(w, 'top')).toEqual({ x: 100, y: 100, width: 100, height: 25 });
+    expect(exposedRect(w, 'bottom')).toEqual({ x: 100, y: 175, width: 100, height: 25 });
+  });
+  it.each(['left', 'right', 'top', 'bottom'] as const)('docks %s when the drag overshoots the edge', (edge) => {
+    const width = 128 * 192 / 208, p = { displayId: 2, x: area.x + 300, y: area.y + 300, edge: null };
+    if (edge === 'left') p.x = area.x - 400; if (edge === 'right') p.x = area.x + area.width - width + 400; if (edge === 'top') p.y = area.y - 400; if (edge === 'bottom') p.y = area.y + area.height - 128 + 400;
+    const docked = dockPosition(p, area, 128);
+    expect(docked.edge).toBe(edge);
+    expect(clampRect({ ...docked, width, height: 128 }, area)).toMatchObject({ x: docked.x, y: docked.y });
+  });
   it.each(['left', 'right', 'top', 'bottom'] as const)('snaps %s within 24px', (edge) => {
     const p = { displayId: 2, x: -1200, y: 300, edge: null }, width = 128 * 192 / 208;
     if (edge === 'left') p.x = area.x + 23; if (edge === 'right') p.x = area.x + area.width - width - 23; if (edge === 'top') p.y = area.y + 23; if (edge === 'bottom') p.y = area.y + area.height - 128 - 23;

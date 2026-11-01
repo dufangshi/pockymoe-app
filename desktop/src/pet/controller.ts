@@ -6,7 +6,7 @@ import { resolveLocale, setLocale, t } from '../shared/i18n';
 import { conversationKey, conversationTitle } from '../shared/activityGroups';
 import { ANIMATIONS } from './animation';
 import { BubbleQueue } from './bubbles';
-import { dockPosition, PET_HEIGHT, petLayout, restorePosition, surfaceLayout, type PetPosition } from './geometry';
+import { dockPosition, exposedRect, PET_HEIGHT, petLayout, restorePosition, surfaceLayout, type PetPosition } from './geometry';
 import { importPetPack as importPack, listPetPacks, imageDimensions, type PetPack } from './packs';
 import { petConversations } from './conversations';
 import { StableMood, withoutResolvedRequest } from './stability';
@@ -282,7 +282,8 @@ export function createPetController(deps: PetControllerDeps): PetController {
     if (disposed) return;
     const now = Date.now(), cursor = screen.getCursorScreenPoint(), bounds = window.getBounds(), child = glass.getBounds();
     const within = (r: Electron.Rectangle, margin = 0) => cursor.x >= r.x - margin && cursor.x <= r.x + r.width + margin && cursor.y >= r.y - margin && cursor.y <= r.y + r.height + margin;
-    const close = within(bounds, 60) || glass.isVisible() && within(child, 8);
+    const tucked = position.edge && settings.petEdgeHide !== false && dockAmount === 1;
+    const close = (tucked ? within(exposedRect(bounds, position.edge!), 12) : within(bounds, 60)) || glass.isVisible() && within(child, 8);
     if (controlsPinned && !close && now - awaySince >= 4000) controlsPinned = false;
     if (close) { if (!near) glassDismissed = false; near = true; awaySince = 0; if (!hoverSince) hoverSince = now; }
     else { near = false; hoverSince = 0; if (!awaySince) awaySince = now; }

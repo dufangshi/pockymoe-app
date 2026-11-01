@@ -21,8 +21,9 @@ export function restorePosition(position: PetPosition | undefined, displays: Pet
 export function dockPosition(position: PetPosition, area: Rect, height: number): PetPosition {
   const width = height * 192 / 208;
   const bounded = clampRect({ ...position, width, height }, area);
-  const distances: [DockEdge, number][] = [['left', Math.abs(position.x - area.x)], ['right', Math.abs(position.x + width - area.x - area.width)],
-    ['top', Math.abs(position.y - area.y)], ['bottom', Math.abs(position.y + height - area.y - area.height)]];
+  // Signed: dragging hard at an edge overshoots it, which must dock rather than count as far away.
+  const distances: [DockEdge, number][] = [['left', position.x - area.x], ['right', area.x + area.width - position.x - width],
+    ['top', position.y - area.y], ['bottom', area.y + area.height - position.y - height]];
   distances.sort((a, b) => a[1] - b[1]);
   const edge = distances[0][1] <= 24 ? distances[0][0] : null;
   return { displayId: position.displayId, x: edge === 'left' ? area.x : edge === 'right' ? area.x + area.width - width : bounded.x,
@@ -36,6 +37,14 @@ export function petLayout(position: PetPosition, area: Rect, height: number, opt
   const x = position.edge === 'left' ? -width * .75 * amount : position.edge === 'right' ? width * .75 * amount : 0;
   const y = position.edge === 'top' ? -height * .75 * amount : position.edge === 'bottom' ? height * .75 * amount : 0;
   return { window, pet: { x, y, width, height }, panelAbove: window.y - area.y >= area.y + area.height - window.y - height, panelHeight: Math.min(258, area.height - 16) };
+}
+/** The strip of a tucked pet still on screen; hovering only this brings it out. */
+export function exposedRect(window: Rect, edge: DockEdge, visible = .25): Rect {
+  const width = Math.round(window.width * visible), height = Math.round(window.height * visible);
+  if (edge === 'left') return { ...window, width };
+  if (edge === 'right') return { ...window, x: window.x + window.width - width, width };
+  if (edge === 'top') return { ...window, height };
+  return { ...window, y: window.y + window.height - height, height };
 }
 /** Position the separate glass child against the body, entirely inside the work area. */
 export function surfaceLayout(sprite: Rect, area: Rect, width: number, height: number, edge: DockEdge | null): Rect {
