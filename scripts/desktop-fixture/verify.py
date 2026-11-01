@@ -8,12 +8,11 @@ import os
 from pathlib import Path
 import socket
 import struct
-import subprocess
 import time
 import urllib.request
 from urllib.parse import urlsplit
 
-from backend import FixtureError, device_api, request, trigger, PASSWORD, USERNAME, write_json
+from backend import EVIDENCE, FixtureError, device_api, request, trigger, write_json
 
 
 class WebSocket:
@@ -93,22 +92,16 @@ class WebSocket:
 
 
 def verify(state):
-    evidence = Path("/tmp/rc-desktop/evidence/fixture")
+    evidence = EVIDENCE
     evidence.mkdir(parents=True, exist_ok=True)
-    # curl receives disposable credentials on stdin; neither its argv nor our
-    # output contains auth responses, tokens or credentials.
-    config = (f'url = "{state["relayOrigin"]}/relay/auth/login"\nrequest = "POST"\n'
-              'header = "content-type: application/json"\n' +
-              'data = ' + json.dumps(json.dumps({"identifier": USERNAME, "username": USERNAME, "password": PASSWORD})) + '\n')
-    login = subprocess.run(["curl", "--silent", "--show-error", "--fail", "--config", "-"],
-                           input=config, text=True, capture_output=True, check=False)
-    if login.returncode:
-        raise FixtureError("curl relay test-account login failed")
-    token = json.loads(login.stdout)["token"]
-    with urllib.request.urlopen(state["relayOrigin"] + "/", timeout=3) as response:
+    token = state["accountToken"]
+    session = request(state["relayOrigin"], "/relay/auth/session", token=token)
+    assert session["authenticated"] and session["user"]["id"] == state["accountId"]
+    assert state["webOrigin"] != state["relayOrigin"]
+    with urllib.request.urlopen(state["webOrigin"] + "/devices/fixture/spa-fallback", timeout=3) as response:
         if b"<html" not in response.read().lower():
-            raise FixtureError("Relay root did not serve the web UI")
-    report = {"login": "curl relay auth: passed", "webUi": "relay HTML served", "devices": []}
+            raise FixtureError("Separate static web origin did not serve the SPA fallback")
+    report = {"session": "vault account session passed", "webUi": "separate web origin + SPA fallback passed", "devices": []}
     sockets = []
     try:
         total = 0
@@ -120,6 +113,10 @@ def verify(state):
             assert any(t.get("closedAt") for t in rows)
             assert any(t.get("isPinned") for t in rows)
             assert any(w.get("isFavorite") for w in workspaces)
+            activity = device_api(state, device, "/thread-activity?hours=24")["threads"]
+            heated = [row for row in activity if row["activeMs"] > 0]
+            assert len(heated) >= 10 and max(row["turns"] for row in activity) >= 10
+            assert len({row["activeMs"] // 600000 for row in heated}) >= 3
             timestamps = sorted(t["updatedAt"] for t in rows)
             total += len(rows)
             ws = WebSocket(state["relayOrigin"] + f"/relay/devices/{device['id']}/ws", token)
@@ -156,11 +153,12 @@ def verify(state):
                 assert detail.get("pendingRequests"), f"Missing seeded {scenario} request"
             report["devices"].append({"index": device["index"], "name": device["name"],
                                       "threadCount": len(rows), "workspaceCount": len(workspaces),
+                                      "heatedThreads": len(heated), "maxTurns": max(row["turns"] for row in activity),
                                       "oldestUpdatedAt": timestamps[0], "newestUpdatedAt": timestamps[-1],
                                       "relayWsEvents": seen + ["thread.request.resolved", "thread.request.created (input)",
                                                                "thread.request.resolved (input)"],
                                       "pendingApprovalAndInput": True})
-        assert total >= 150
+        assert total >= 240
         # One burst crosses all three device streams. Distinct thread identities
         # prove count and timing rather than counting unrelated traffic.
         # Round-robin to ensure each device receives burst events.

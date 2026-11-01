@@ -14,6 +14,8 @@ class IsolationTests(unittest.TestCase):
     def test_inherited_managed_thread_settings_are_removed(self):
         inherited = {"REMOTE_CODEX_DATABASE_PATH": "/production.sqlite",
                      "REMOTE_CODEX_RELAY_AGENT_TOKEN": "not-a-real-token",
+                     "POCKYMOE_DATABASE_PATH": "/production-pockymoe.sqlite",
+                     "POCKYMOE_RELAY_SERVER_URL": "https://production.invalid",
                      "POCKYMOE_THREAD_ID": "production-thread", "DATABASE_URL": "/legacy.sqlite",
                      "WORKSPACE_ROOT": "/production", "PORT": "45679", "HOST": "0.0.0.0",
                      "PATH": "/bin", "HOME": "/unchanged"}
@@ -44,6 +46,16 @@ class IsolationTests(unittest.TestCase):
             self.assertEqual(path.stat().st_mode & 0o777, 0o600)
             self.assertEqual(json.loads(path.read_text()), {"hello": "世界"})
             self.assertFalse(path.with_suffix(".tmp").exists())
+
+    def test_process_identity_survives_launcher_exec_and_ignores_zombies(self):
+        from types import SimpleNamespace
+        output = SimpleNamespace(returncode=0, stdout="Sun Nov  1 02:17:23 2026 S\n")
+        with patch.object(backend.subprocess, "run", return_value=output):
+            original = backend.identity(12345)
+            output.stdout = "Sun Nov  1 02:17:23 2026 R+\n"
+            self.assertEqual(backend.identity(12345), original)
+            output.stdout = "Sun Nov  1 02:17:23 2026 Z\n"
+            self.assertEqual(backend.identity(12345), "")
 
 
 if __name__ == "__main__":

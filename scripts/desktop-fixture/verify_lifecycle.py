@@ -21,8 +21,9 @@ def main():
     after = read_state()
     assert before["dataDir"] == after["dataDir"]
     assert before["relayProcess"] == after["relayProcess"]
+    assert before["webProcess"] == after["webProcess"]
     assert [d["process"] for d in before["devices"]] == [d["process"] for d in after["devices"]]
-    report["idempotentStart"] = "same data directory and all four process identities"
+    report["idempotentStart"] = "same data directory and all five process identities"
     env = json.loads(run("env"))
     assert env["username"] == "desktop" and env["password"]
     assert len(env["devices"]) == 3 and "accountToken" not in env
@@ -64,7 +65,7 @@ def main():
         assert device_api(after, third, f"/threads/{third['scenarios'][name]}")["pendingRequests"]
     assert json.loads(run("status"))["connectedSupervisors"] == 3
     report["restart"] = "same device ID, 81 threads, restored pending requests and working /ws"
-    write_json(Path("/tmp/rc-desktop/evidence/fixture/lifecycle.json"), report)
+    write_json(Path("/tmp/rc-desktop/evidence/fixture/v2/lifecycle.json"), report)
     print(json.dumps(report, indent=2))
 
 
