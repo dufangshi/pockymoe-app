@@ -94,7 +94,10 @@ export type HostCommand =
 
 export interface HostCommandResult {
   ok: boolean;
+  /** Localized, user-facing reason. */
   error?: string;
+  /** Machine-readable reason; 'needsThread' means the request must be answered inside the thread. */
+  code?: 'needsThread';
 }
 
 export interface DesktopSettings {
