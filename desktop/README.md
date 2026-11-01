@@ -24,6 +24,29 @@ Defaults are Web `https://app.lnz-study.com` and Relay
 app profile. Setting Web origin bypasses first run. HTTPS is required except on
 loopback (`localhost`, `127.0.0.1`, `[::1]`).
 
+## Install and use
+
+macOS: open the DMG and copy **Pockymoe.app** to Applications, or extract the ZIP.
+Windows: run the NSIS installer, choose an install directory if needed, then open
+Pockymoe from the Start menu. The development-signed macOS builds produced by the
+QA command below are **not notarized** and are for local developer testing;
+normal distribution requires a Developer ID signature and notarization. Windows
+builds without an Authenticode certificate are unsigned.
+
+On first launch, enter your Pockymoe address. The normal hosted Web address is
+`https://app.lnz-study.com`; its Relay is `https://remote.lnz-study.com`. For a
+self-hosted installation, use **Advanced** to enter Web and Relay separately, or
+use the same origin for both when the Relay also serves the UI. Sign in with your
+existing account; this client does not install or replace a device Supervisor.
+
+Use **Pockymoe → Preferences…** (Cmd/Ctrl+,) or the tray's Preferences entry to
+change the connection, launch at login, alerts, pet and shortcut. In Pet settings,
+Import… accepts a Codex pet folder or ZIP containing `pet.json` and its sprite
+sheet. Show pet, size, mini mode and sound take effect immediately. Alt+Space
+opens the quick window by default; choose another accelerator in Shortcuts if
+that key is already used. Closing the main window keeps the app in the menu bar
+or tray. Cmd/Ctrl+Q or Quit Pockymoe exits.
+
 ## Connection discovery
 
 First run asks for **Pockymoe 地址**, accepting a Web origin or Relay origin.
@@ -116,6 +139,111 @@ Screenshots: `/tmp/rc-desktop/evidence/shell/v2/` (three packs, light/dark, nati
 utility-window sizes plus 900/1440 width stress checks). The normal quick window
 remains 640×420. Pet-specific checks belong to the pet module.
 
+## Packaging, signing and packaged-app QA
+
+The architecture comes from the CLI. `dist:mac` / `dist:win` intentionally request
+both supported architectures; use a single flag for a focused local build.
+Artifacts are named `Pockymoe-<version>-<os>-<arch>.<ext>`. Local outputs are under
+`desktop/release/`, which is ignored by git. These commands never publish.
+
+For a local Apple Development identity already present in Keychain (substitute
+your own identity; no personal identity is committed):
+
+```sh
+pnpm build
+export CSC_NAME='Apple Development: Your Name (TEAMID)'
+pnpm exec electron-builder --mac --arm64 --dir --publish never \
+  -c.mac.identity="$CSC_NAME" -c.mac.notarize=false
+pnpm exec electron-builder --mac dmg zip --arm64 \
+  --prepackaged release/mac-arm64/Pockymoe.app --publish never \
+  -c.mac.identity="$CSC_NAME" -c.mac.notarize=false
+codesign --verify --deep --strict --verbose=2 release/mac-arm64/Pockymoe.app
+spctl -a -vv release/mac-arm64/Pockymoe.app
+```
+
+Hardened runtime remains enabled. `build/entitlements.mac.plist` grants Electron's
+JIT/executable-memory requirements and deliberately has **no APNs entitlement**
+or provisioning profile. APNs stays disabled unless explicitly configured for a
+provisioned build. Notarization is explicitly off in these development commands;
+Gatekeeper rejects this Apple Development build for distribution even when
+`codesign` verifies it. Do not disable Gatekeeper or remove quarantine to turn a
+QA build into a production release. Production signing/notarization needs its
+own release configuration.
+
+Run a local development-signed bundle directly for QA, without changing a running
+Supervisor:
+
+```sh
+POCKYMOE_DESKTOP_WEB_ORIGIN=http://127.0.0.1:18894 \
+POCKYMOE_DESKTOP_RELAY_ORIGIN=http://127.0.0.1:18890 \
+release/mac-arm64/Pockymoe.app/Contents/MacOS/Pockymoe
+```
+
+The packaged Playwright driver uses the existing isolated fixture's private
+`.local/e2e-desktop-env.json`, a fresh temporary application profile and the real
+signed executable. It reads credentials only inside the sign-in flow; no auth
+body, trace, storage state, credential log or authentication screenshot is saved.
+It checks map home, tray/badge, bundled Moe asset hash, new approval notification
+construction, quick shortcut callback, settings/session persistence and light/
+dark screenshots. It never restarts the fixture or a Supervisor.
+
+```sh
+# From desktop/, with scripts/e2e-desktop-backend.sh already running:
+node test/packaged-qa.mjs
+# Or use a different signed bundle executable:
+POCKYMOE_PACKAGED_EXECUTABLE=/absolute/Pockymoe.app/Contents/MacOS/Pockymoe \
+  node test/packaged-qa.mjs
+```
+
+The automated shortcut assertion captures the callback while forwarding actual
+`globalShortcut.register` to the OS, verifies registration, then invokes that
+exact callback. For a separate physical-key check, set
+`POCKYMOE_PACKAGED_NATIVE_KEY=1`: the driver pauses for the native
+Control+Option+Shift+P chord. App-scoped CUA injection did not activate the global
+hotkey in this environment, so physical HID delivery is not claimed by the
+callback test. The temporary profile is removed on exit. Safe evidence goes to
+`/tmp/rc-desktop/evidence/shell/packaged/`.
+
+### Windows build on a Windows runner
+
+Windows x64 directory and NSIS builds also work on this Mac with electron-builder
+26.18; no Wine/system installation was required. Windows execution, Mica, tray,
+notifications and installer behavior still need a Windows machine. For a native
+runner, the following GitHub Actions job is ready to adapt (not dispatched here):
+
+```yaml
+jobs:
+  windows-desktop:
+    runs-on: windows-2022
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: desktop/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm build
+      - run: pnpm exec electron-builder --win nsis --x64 --publish never
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pockymoe-win-x64
+          path: desktop/release/*.exe
+```
+
+Use a separate `--arm64` job for an ARM64 installer. Production Windows signing
+credentials belong in the runner's secret/environment configuration, never in
+the repository. `USE_SYSTEM_WINE=true` can prevent automatic Wine toolset
+retrieval during a macOS cross-build; it was not needed by the successful native
+resource/NSIS build steps here.
+
 ## Distribution and platform gates
 
 ```sh
@@ -142,5 +270,5 @@ Windows Mica/fallback, startup, toast actions, overlays and installers require
 Windows validation. Notification Center/APNs and replacement of an APNs notice
 with the matching local ID require a signed macOS build. Electron has no portable
 public DND/Focus query: system notifications respect OS Focus, while the pet
-currently uses focused-thread, idle and snooze signals. No publish, release,
-installer signing or deployment is performed by these checks.
+currently uses focused-thread, idle and snooze signals. The packaged QA build is development-signed locally; no publish, release or
+deployment is performed by these checks.

@@ -9,6 +9,7 @@ import type { Windows } from './windows';
 export const itemPath = (item: ActivityItem): string => `/devices/${encodeURIComponent(item.deviceId)}/threads/${encodeURIComponent(item.threadId)}`;
 export class Notifications {
   private active = new Map<string, Notification>();
+  readonly constructed: { alertId: string; key: string; type: string; at: string; events: { alertId: string; key: string; type: string }[] }[] = [];
   readonly decisions: { alertId: string; system: boolean; pet: boolean }[] = [];
   private batch: EventCoalescer;
   private delivered = new Map<Notification, ActivityEvent[]>();
@@ -63,6 +64,10 @@ export class Notifications {
       // Map every underlying alert id so acknowledgement closes the batch.
       ...(process.platform === 'win32' ? { timeoutType: 'default' as const } : {})
     });
+    if (process.env.POCKYMOE_DESKTOP_E2E === '1') {
+      this.constructed.push({ alertId: first.alertId, key: item.key, type: first.type, at: new Date().toISOString(), events: events.map(event => ({ alertId: event.alertId, key: event.item.key, type: event.type })) });
+      if (this.constructed.length > 100) this.constructed.shift();
+    }
     for (const event of events) { this.close(event.alertId); this.active.set(event.alertId, notification); }
     const acknowledge = (): void => { for (const event of events) this.hub.acknowledge(event.alertId, 'notification'); };
     notification.on('click', () => {

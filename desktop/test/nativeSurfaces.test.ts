@@ -21,7 +21,7 @@ vi.mock('electron', () => ({
   }
 }));
 import { Notifications } from '../src/main/notifications';
-import { activityCounts, trayTemplate } from '../src/main/tray';
+import { activityCounts, taskbarBadge, trayTemplate } from '../src/main/tray';
 beforeEach(() => { setLocale('zh-CN'); vi.useFakeTimers(); notices.length = 0; });
 afterEach(() => vi.useRealTimers());
 it('uses stable native IDs, includes map actions and labels interruptions', async () => {
@@ -91,4 +91,26 @@ it('refreshes already delivered notification actions in the page language with t
   setLocale('en'); notifications.refreshLocale();
   expect(notices.at(-1)!.options).toMatchObject({ id: 'mac:translate-request', body: 'User request text', actions: [{ type: 'button', text: 'Approve' }, { type: 'button', text: 'Deny' }, { type: 'button', text: 'Show in map' }] });
   notifications.dispose();
+});
+
+it('records actual notification construction only in E2E mode', () => {
+  vi.stubEnv('POCKYMOE_DESKTOP_E2E', '1');
+  try {
+    const hub = new ActivityHub();
+    const settings = { get: () => ({ ...defaults, alertMode: 'system' }), onChange: () => () => undefined } as unknown as SettingsStore;
+    const notifications = new Notifications(hub, settings, { relay: new Set(), dispatch: vi.fn() } as unknown as Windows, () => undefined, () => null);
+    hub.sync(snapshot([item({ state: 'needsInput', request: { id: 'constructed', kind: 'approval', summary: 'Run fixture checks' } })]));
+    vi.advanceTimersByTime(1500);
+    expect(notifications.constructed).toEqual([expect.objectContaining({ alertId: 'mac:constructed', key: 'mac:thread-1', type: 'needsInput' })]);
+    notifications.dispose();
+  } finally { vi.unstubAllEnvs(); }
+});
+
+it('matches the Web waiting badge, excluding unread failures and counting conversations', () => {
+  const a = item({ key: 'mac:a', threadId: 'a', rootThreadKey: 'mac:root', state: 'needsInput' });
+  const b = { ...a, key: 'mac:b', threadId: 'b' };
+  const failed = item({ state: 'failed', unread: true });
+  expect(taskbarBadge(snapshot([a, b, failed]))).toEqual({ count: 1, style: 'attention' });
+  expect(taskbarBadge(snapshot([failed, item({ key: 'mac:run', threadId: 'run' })]))).toEqual({ count: 1, style: 'running' });
+  expect(taskbarBadge(snapshot([failed]))).toEqual({ count: 0, style: 'none' });
 });

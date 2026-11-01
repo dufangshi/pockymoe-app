@@ -12,6 +12,11 @@ export function activityCounts(snapshot: ActivitySnapshot | null): { attention: 
   return { attention: new Set(snapshot?.items.filter(i => i.state === 'needsInput' || ['failed', 'interrupted'].includes(i.state) && i.unread).map(conversationKey)).size,
     running: new Set(snapshot?.items.filter(i => i.state === 'running').map(conversationKey)).size };
 }
+export function taskbarBadge(snapshot: ActivitySnapshot | null): { count: number; style: 'attention' | 'running' | 'none' } {
+  const waiting = new Set(snapshot?.items.filter(item => item.state === 'needsInput').map(conversationKey)).size;
+  const running = new Set(snapshot?.items.filter(item => item.state === 'running').map(conversationKey)).size;
+  return { count: waiting || running, style: waiting ? 'attention' : running ? 'running' : 'none' };
+}
 export function trayTemplate(snapshot: ActivitySnapshot | null, settings: DesktopSettings, open: (i: ActivityItem) => void, actions: { pet: () => void; snooze: () => void; main: () => void; settings: () => void; quit: () => void; map: () => void; reveal: (item: ActivityItem) => void }): MenuItemConstructorOptions[] {
   const all = snapshot?.items || [];
   const needs = groupActivities(all.filter(i => i.state === 'needsInput' || ['failed', 'interrupted'].includes(i.state) && i.unread), all);
@@ -65,7 +70,8 @@ export class DesktopTray {
     const state = attention ? 'attention' : running ? 'running' : 'none';
     this.tray.setImage(this.icon(state));
     this.tray.setToolTip(`Pockymoe · ${t('{count} 需要你', { count: attention })} · ${t('{count} 进行中', { count: running })}`);
-    this.setBadge(attention || running, state);
+    const badge = taskbarBadge(snapshot);
+    this.setBadge(badge.count, badge.style);
     const template = trayTemplate(snapshot, settings, item => {
       this.hub.acknowledge(alertId(item), 'tray');
       void this.windows.dispatch({ type: 'navigate', path: itemPath(item) }).then(() => this.windows.dispatch({ type: 'markRead', key: item.key }, false));

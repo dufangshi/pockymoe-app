@@ -1,5 +1,6 @@
 appId: com.pockymoe.desktop
 productName: Pockymoe
+artifactName: ${productName}-${version}-${os}-${arch}.${ext}
 directories:
   buildResources: build
   output: release
@@ -20,14 +21,11 @@ mac:
   entitlementsInherit: build/entitlements.mac.plist
   target:
     - target: dmg
-      arch: [arm64, x64]
     - target: zip
-      arch: [arm64, x64]
 win:
   icon: build/icon.ico
   target:
     - target: nsis
-      arch: [x64, arm64]
 nsis:
   oneClick: false
   perMachine: false
