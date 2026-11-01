@@ -21,7 +21,9 @@ export function mountSelect(trigger: HTMLButtonElement, options: SelectOption[],
     popup.style.width = `${width}px`; popup.style.left = `${Math.min(Math.max(8, box.right - width), innerWidth - width - 8)}px`;
     const below = innerHeight - box.bottom - 12, above = box.top - 12;
     const down = below >= Math.min(popup.scrollHeight, 240) || below >= above;
-    popup.style.maxHeight = `${Math.max(40, Math.min(320, down ? below : above))}px`;
+    const maxHeight = Math.max(40, Math.min(320, down ? below : above));
+    popup.style.maxHeight = `${maxHeight}px`;
+    popup.style.setProperty('--select-max-height', `${maxHeight - 10}px`);
     popup.style.top = down ? `${box.bottom + 4}px` : 'auto'; popup.style.bottom = down ? 'auto' : `${innerHeight - box.top + 4}px`;
   };
   const outside = (event: PointerEvent): void => { if (!popup?.contains(event.target as Node) && !trigger.contains(event.target as Node)) close(); };

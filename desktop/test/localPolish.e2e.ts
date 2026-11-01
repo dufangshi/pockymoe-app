@@ -1,6 +1,6 @@
 import { test, expect, _electron as electron, type ElectronApplication, type Page } from '@playwright/test';
 import { createServer, type Server } from 'node:http';
-import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
+import { copyFileSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { Appearance, PockymoeHost } from '../src/shared/contract';
@@ -18,6 +18,11 @@ test.beforeAll(async () => {
 test.afterAll(async () => { await new Promise<void>(done => server.close(() => done())); });
 test.beforeEach(async () => {
   profile = mkdtempSync(join(tmpdir(), 'pockymoe-polish-'));
+  if (test.info().title.startsWith('long pickers')) for (let index = 0; index < 12; index++) {
+    const id = `extra-${index}`, directory = join(profile, 'pets', id); mkdirSync(directory, { recursive: true });
+    writeFileSync(join(directory, 'pet.json'), JSON.stringify({ id, displayName: `Extra ${index}`, description: '', spritesheetPath: 'spritesheet.png' }));
+    copyFileSync('assets/pets/placeholder/spritesheet.png', join(directory, 'spritesheet.png'));
+  }
   const env: Record<string, string> = {};
   for (const key of ['PATH', 'HOME', 'TMPDIR', 'USER', 'LOGNAME', 'DISPLAY']) if (process.env[key]) env[key] = process.env[key]!;
   Object.assign(env, { POCKYMOE_DESKTOP_E2E: '1', POCKYMOE_DESKTOP_USER_DATA: profile, POCKYMOE_DESKTOP_WEB_ORIGIN: origin, POCKYMOE_DESKTOP_RELAY_ORIGIN: origin });
@@ -74,6 +79,19 @@ test('custom pickers support keyboard, pet thumbnails/credits and recent quick t
   await expect.poll(() => web.evaluate(() => window.commands)).toEqual(expect.arrayContaining([expect.objectContaining({ type: 'reply', deviceId: 'old', threadId: 'recent' })]));
   await quick.getByRole('option').click();
   await expect.poll(() => web.evaluate(() => window.commands)).toEqual(expect.arrayContaining([expect.objectContaining({ type: 'navigate', path: '/devices/old/threads/recent' })]));
+});
+test('long pickers scroll within the overlay and keep keyboard options visible', async () => {
+  await pageAt(origin); await mode();
+  await app.evaluate(() => { globalThis.__pockymoeDesktopTest.settings.set({ petVisible: false }); globalThis.__pockymoeDesktopTest.windows.createLocal('preferences'); });
+  const prefs = await pageAt('view=preferences'); await prefs.getByRole('button', { name: 'Pet', exact: true }).click();
+  await prefs.getByRole('button', { name: 'Choose pet', exact: true }).click();
+  expect(await prefs.locator('.select-options').evaluate(element => element.scrollHeight > element.clientHeight)).toBe(true);
+  await prefs.keyboard.press('End'); await expect(prefs.getByRole('option').last()).toBeFocused();
+  await expect(prefs.getByRole('option').last()).toBeInViewport({ ratio: 1 });
+  await prefs.keyboard.press('Home'); await expect(prefs.getByRole('option').first()).toBeInViewport({ ratio: 1 });
+  for (const pack of ['classic', 'plum-pocket', 'terminal']) for (const effective of ['light', 'dark'] as const) {
+    await mode(pack, effective); await capture(prefs, `preferences-long-picker-${pack}-${effective}`);
+  }
 });
 
 test('compact local surfaces in all packs, modes and desktop/narrow widths', async () => {
