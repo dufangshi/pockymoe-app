@@ -9,6 +9,7 @@ import { showError } from './errorMark';
 import { applyAppearance } from '../shared/appearance';
 import { statusMarkStyles } from '../shared/statusMarks';
 import { enhanceScrollbars } from './scrollbars';
+import { mountSelect, type SelectOption } from './select';
 
 const icons: Record<string, string> = {
   general: '<rect x="4" y="4" width="16" height="16" rx="4"/><path d="M4 10h16M10 10v10"/>',
@@ -27,6 +28,7 @@ const view = new URLSearchParams(location.search).get('view') || 'relay';
 let state: LocalState;
 let section = 'general';
 let lastToast: { message: string; error: boolean } | null = null;
+let selectCleanups: (() => void)[] = [];
 let connecting = false;
 let connectionError = '';
 let toastTimer: ReturnType<typeof setTimeout>;
@@ -43,16 +45,25 @@ export async function action(value: LocalAction): Promise<boolean> {
   try { const result = await localBridge().action(value); if (!result.ok) toast(result.error || t('操作失败'), true); return result.ok; }
   catch { toast(t('连接暂时不可用，请重试'), true); return false; }
 }
-const toggle = (id: keyof DesktopSettings, title: string, description: string, checked: boolean, disabled = false): string => `<div class="setting-row"><div><label for="${id}">${title}</label><p>${description}</p></div><input class="switch" type="checkbox" id="${id}" ${checked ? 'checked' : ''} ${disabled ? 'disabled' : ''}/></div>`;
+const toggle = (id: keyof DesktopSettings, title: string, description: string, checked: boolean, disabled = false): string => `<div class="setting-row"><div><label for="${id}">${title}</label>${description ? `<p>${description}</p>` : ''}</div><input class="switch" type="checkbox" id="${id}" ${checked ? 'checked' : ''} ${disabled ? 'disabled' : ''}/></div>`;
 function renderRelay(): void {
   const savedFields = new Map(['origin', 'web-origin', 'relay-origin'].map(id => [id, root.querySelector<HTMLInputElement>(`#${id}`)?.value]));
   const wasAdvanced = root.querySelector<HTMLDetailsElement>('#advanced')?.open || false;
   const image = root.querySelector('.app-icon');
   root.className = 'relay-page';
-  root.innerHTML = `<div class="drag-zone"></div><div class="relay-content" data-scroll><img class="app-icon" src="${appIcon}" alt="Pockymoe"/><div class="eyebrow">POCKYMOE</div><h1>${t("你的设备，随时在手边。")}</h1><p class="intro">${t("连接 Pockymoe，继续每一段工作。")}<br/>${t("线程、设备与进展，在这里汇合。")}</p><form id="relay-form"><label for="origin">${t("Pockymoe 地址")}</label><div class="origin-field">${icon('link')}<input id="origin" type="url" required spellcheck="false" autocomplete="url" value="${escapeHtml(state.settings.webOrigin)}" placeholder="https://app.lnz-study.com"/></div><p class="hint">${t("填写网页或 Relay 地址，自动发现连接。")}</p><details id="advanced"><summary>${t("高级")}</summary><div class="advanced-fields"><label for="web-origin">${t("网页地址")}</label><input id="web-origin" type="url" spellcheck="false" value="${escapeHtml(state.settings.webOrigin)}"/><label for="relay-origin">${t("Relay 地址")}</label><input id="relay-origin" type="url" spellcheck="false" value="${escapeHtml(state.settings.relayOrigin)}"/><p class="hint">${t("分别指定网页与 API 地址；同源部署可填写相同地址。")}</p></div></details><button class="primary connect" type="submit">${t("连接")} <span aria-hidden="true">→</span></button><p id="relay-error" class="inline-error" role="alert"></p></form><div class="relay-footer"><span class="secure-dot"></span> ${t("端到端加密 · 密钥保留在你的设备上")}</div></div>`;
+  root.innerHTML = `<div class="drag-zone"></div><div class="relay-content" data-scroll>
+    <header class="connection-heading"><img class="app-icon" src="${appIcon}" alt=""/><h1>${t('连接 Pockymoe')}</h1></header>
+    <form id="relay-form" novalidate><label for="origin">${t('Pockymoe 地址')}</label>
+      <div class="origin-field">${icon('link')}<input id="origin" type="url" required spellcheck="false" autocomplete="url" value="${escapeHtml(state.settings.webOrigin)}" placeholder="https://app.lnz-study.com"/></div>
+      <p class="hint">${t('填写网页或 Relay 地址，自动发现连接。')}</p>
+      <details id="advanced"><summary>${t('高级')}</summary><div class="advanced-fields"><label for="web-origin">${t('网页地址')}</label><input id="web-origin" type="url" spellcheck="false" value="${escapeHtml(state.settings.webOrigin)}"/><label for="relay-origin">${t('Relay 地址')}</label><input id="relay-origin" type="url" spellcheck="false" value="${escapeHtml(state.settings.relayOrigin)}"/><p class="hint">${t('分别指定网页与 API 地址；同源部署可填写相同地址。')}</p></div></details>
+    </form></div><div class="connection-action"><button class="primary connect" type="submit" form="relay-form">${t('连接')} <span aria-hidden="true">→</span></button><p id="relay-error" class="inline-error" role="alert"></p></div>`;
   if (image) root.querySelector('.app-icon')!.replaceWith(image);
   for (const [id, value] of savedFields) if (value !== undefined) root.querySelector<HTMLInputElement>(`#${id}`)!.value = value;
   root.querySelector<HTMLDetailsElement>('#advanced')!.open = wasAdvanced;
+  root.querySelector<HTMLDetailsElement>('#advanced')!.ontoggle = event => {
+    void localBridge().action({ type: 'connectionSize', expanded: (event.currentTarget as HTMLDetailsElement).open });
+  };
   root.querySelector<HTMLElement>('#relay-error')!.textContent = localizeMessage(connectionError);
   const currentButton = root.querySelector<HTMLButtonElement>('.connect')!; currentButton.disabled = connecting;
   if (connecting) currentButton.textContent = t('正在连接…');
@@ -74,43 +85,71 @@ function renderRelay(): void {
   };
 }
 function renderPreferences(): void {
-  const brand = root.querySelector('.pref-brand');
+  for (const cleanup of selectCleanups) cleanup(); selectCleanups = [];
   const active = root.contains(document.activeElement) ? document.activeElement as HTMLElement : null;
-  const activeId = active?.id;
-  const activeSection = active?.dataset.section;
+  const activeId = active?.id, activeSection = active?.dataset.section;
   const draft = active instanceof HTMLInputElement && active.type === 'text' ? { value: active.value, start: active.selectionStart, end: active.selectionEnd } : null;
+  const scroll = root.querySelector('.pref-main')?.scrollTop || 0;
   root.className = 'preferences';
-  root.innerHTML = `<aside class="pref-sidebar"><div class="pref-brand"><img src="${appIcon}" alt=""/><div>Pockymoe<small>${t("桌面设置")}</small></div></div><nav aria-label="${t("设置分类")}">${[['general', 'general', t('通用')], ['pet', 'pet', t('桌宠')], ['shortcuts', 'keyboard', t('快捷键')]].map(([id, glyph, label]) => `<button data-section="${id}" aria-pressed="${section === id}" class="nav-item ${section === id ? 'selected' : ''}">${icon(glyph)}${label}</button>`).join('')}</nav><div class="sidebar-bottom">${t('版本 {version}', { version: escapeHtml(state.version) })}<button id="update">${t('检查更新')} ${icon('arrow')}</button></div></aside><main class="pref-main" data-scroll><div class="drag-zone"></div><header><h1>${section === 'general' ? t('通用') : section === 'pet' ? t('桌宠') : t('快捷键')}</h1><p>${section === 'general' ? t('让 Pockymoe 融入你的工作方式。') : section === 'pet' ? t('一个安静的伙伴，替你留意工作的进展。') : t('少一点切换，多一点专注。')}</p></header><div id="pref-content"></div><div class="pref-saved">${icon('check')} ${t('更改会自动保存')}</div></main>`;
-  if (brand) { root.querySelector('.pref-brand')!.replaceWith(brand); brand.querySelector('small')!.textContent = t('桌面设置'); }
+  root.innerHTML = `<div class="drag-zone"></div><aside class="pref-sidebar"><div class="pref-brand"><img src="${appIcon}" alt=""/><div>Pockymoe<small>${t('桌面设置')}</small></div></div>
+    <nav aria-label="${t('设置分类')}">${[['general', 'general', t('通用')], ['pet', 'pet', t('桌宠')], ['shortcuts', 'keyboard', t('快捷键')]].map(([id, glyph, label]) => `<button data-section="${id}" aria-label="${label}" aria-pressed="${section === id}" class="nav-item ${section === id ? 'selected' : ''}">${icon(glyph)}<span>${label}</span></button>`).join('')}</nav>
+    <div class="sidebar-bottom"><span>${t('版本 {version}', { version: escapeHtml(state.version) })}</span><button id="update">${t('检查更新')} ${icon('arrow')}</button></div></aside>
+    <main class="pref-main" data-scroll><header><h1>${section === 'general' ? t('通用') : section === 'pet' ? t('桌宠') : t('快捷键')}</h1></header><div id="pref-content"></div></main>`;
   document.querySelectorAll<HTMLButtonElement>('[data-section]').forEach(button => { button.onclick = () => { section = button.dataset.section!; renderPreferences(); }; });
   document.querySelector<HTMLButtonElement>('#update')!.onclick = () => { void action({ type: 'checkUpdate' }); };
-  const content = document.querySelector<HTMLDivElement>('#pref-content')!, s = state.settings;
-  if (section === 'general') content.innerHTML = `<h2>${t("连接")}</h2><div class="setting-card"><div class="connection-row"><div><label>${t("网页地址")}</label><p class="origin-value">${escapeHtml(s.webOrigin)}</p><label>${t("Relay 地址")}</label><p class="origin-value">${escapeHtml(s.relayOrigin)}</p></div><button id="change-relay">${t("更改…")}</button></div></div><h2>${t("启动")}</h2><div class="setting-card">${toggle('launchAtLogin', t('登录时启动'), t('关闭窗口后仍在菜单栏或托盘中运行。'), s.launchAtLogin)}</div><h2>${t("提醒")}</h2><div class="setting-card"><div class="setting-row"><div><label for="alertMode">${t("提醒方式")}</label><p>${t("当前正在查看的线程不会打扰你。")}</p></div><select id="alertMode"><option value="petFirst">${t("桌宠优先")}</option><option value="system">${t("系统通知")}</option><option value="both">${t("两者都用")}</option></select></div><div class="setting-row"><div><label>${t("暂停提醒")}</label><p>${Date.parse(s.snoozeUntil || '') > Date.now() ? t('暂停至 {time}', { time: new Date(s.snoozeUntil!).toLocaleTimeString(getLocale(), { hour: '2-digit', minute: '2-digit' }) }) : t('暂时收起气泡和系统通知。')}</p></div><button id="snooze">${Date.parse(s.snoozeUntil || '') > Date.now() ? t('恢复提醒') : t('暂停 1 小时')}</button></div></div>`;
-  else if (section === 'pet') content.innerHTML = `<div class="pet-preview"><div class="pet-orbit">${icon('pet')}</div><div><strong>${t("工作有进展，它会告诉你。")}</strong><p>${t("需要你时提醒，专注时安静陪伴。")}</p></div></div><div class="setting-card">${toggle('petVisible', t('显示桌宠'), state.petAvailable ? t('桌宠会出现在桌面上，不抢走焦点。') : t('桌宠模块尚未安装。'), s.petVisible, !state.petAvailable)}<div class="setting-row"><label for="petId">${t("选择宠物")}</label><div class="inline-controls"><select id="petId" ${!state.petAvailable ? 'disabled' : ''}>${(state.petPacks.length ? state.petPacks : [{ id: s.petId, name: t('默认宠物') }]).map(p => `<option value="${escapeHtml(p.id)}">${escapeHtml(p.name)}</option>`).join('')}</select><button id="import-pet" ${!state.petAvailable ? 'disabled' : ''}>${t("导入…")}</button></div></div><div class="setting-row"><label for="petSize">${t("大小")}</label><select id="petSize"><option value="S">${t("小 · 96 px")}</option><option value="M">${t("中 · 128 px")}</option><option value="L">${t("大 · 160 px")}</option></select></div>${toggle('petMini', t('Mini 模式'), t('只显示控制条和活动托盘。'), s.petMini)}${toggle('petSound', t('提示音'), t('在有新提醒时播放轻声提示。'), s.petSound)}</div><p class="hint">${t("支持 Codex 宠物包（pet.json 与精灵图），也支持 ZIP。")}</p>`;
-  else content.innerHTML = `<h2>${t("全局快捷键")}</h2><div class="setting-card"><label for="quickWindowShortcut">${t("唤起快捷窗口")}</label><p>${t("在任意应用中查看任务，或快速回复。")}</p><div class="shortcut-field"><input id="quickWindowShortcut" value="${escapeHtml(s.quickWindowShortcut)}" spellcheck="false" aria-label="${t("快捷窗口快捷键")}"/><button id="save-shortcut">${t("保存")}</button></div></div><h2>${t("在 Pockymoe 中")}</h2><div class="setting-card key-list">${[[t('搜索'), '⌘ / Ctrl F'], [t('打开地图'), '⌘ / Ctrl 0'], [t('新建线程'), '⌘ / Ctrl N'], [t('设置'), '⌘ / Ctrl ,'], [t('显示 / 隐藏桌宠'), '⌘ / Ctrl ⇧ P'], [t('退出应用'), '⌘ / Ctrl Q']].map(([label, key]) => `<div class="setting-row"><span>${label}</span><kbd>${key}</kbd></div>`).join('')}</div>`;
-  for (const id of ['alertMode', 'petId', 'petSize']) { const el = document.getElementById(id) as HTMLSelectElement | null; if (el) { el.value = String(s[id as keyof DesktopSettings]); el.onchange = () => { void save({ [id]: el.value }); }; } }
-  document.querySelectorAll<HTMLInputElement>('.switch').forEach(el => { el.onchange = () => { void save({ [el.id]: el.checked }); }; });
-  const snooze = document.querySelector<HTMLButtonElement>('#snooze'); if (snooze) snooze.onclick = () => { void save({ snoozeUntil: Date.parse(s.snoozeUntil || '') > Date.now() ? null : new Date(Date.now() + 3600_000).toISOString() }); };
-  const relay = document.querySelector<HTMLButtonElement>('#change-relay'); if (relay) relay.onclick = () => { void action({ type: 'changeConnection' }); };
-  const shortcut = document.querySelector<HTMLButtonElement>('#save-shortcut'); if (shortcut) shortcut.onclick = () => { void save({ quickWindowShortcut: document.querySelector<HTMLInputElement>('#quickWindowShortcut')!.value }); };
-  enhanceScrollbars(root);
-  const importer = document.querySelector<HTMLButtonElement>('#import-pet'); if (importer) importer.onclick = () => { void action({ type: 'importPet' }); };
+  const content = root.querySelector<HTMLDivElement>('#pref-content')!, s = state.settings;
+  const picker = (id: string, label: string, disabled = false): string => `<button type="button" id="${id}" aria-label="${label}" ${disabled ? 'disabled' : ''}></button>`;
+  if (section === 'general') content.innerHTML = `<h2>${t('连接')}</h2><section class="settings-group"><div class="connection-row"><div><label>${t('网页地址')}</label><p class="origin-value">${escapeHtml(s.webOrigin)}</p><label>${t('Relay 地址')}</label><p class="origin-value">${escapeHtml(s.relayOrigin)}</p></div><button id="change-relay">${t('更改…')}</button></div></section>
+    <h2>${t('启动')}</h2><section class="settings-group">${toggle('launchAtLogin', t('登录时启动'), t('关闭窗口后仍在菜单栏或托盘中运行。'), s.launchAtLogin)}</section>
+    <h2>${t('提醒')}</h2><section class="settings-group"><div class="setting-row"><div><label for="alertMode">${t('提醒方式')}</label><p>${t('当前正在查看的线程不会打扰你。')}</p></div>${picker('alertMode', t('提醒方式'))}</div>
+    <div class="setting-row"><div><label>${t('暂停提醒')}</label><p>${Date.parse(s.snoozeUntil || '') > Date.now() ? t('暂停至 {time}', { time: new Date(s.snoozeUntil!).toLocaleTimeString(getLocale(), { hour: '2-digit', minute: '2-digit' }) }) : t('暂时收起气泡和系统通知。')}</p></div><button id="snooze">${Date.parse(s.snoozeUntil || '') > Date.now() ? t('恢复提醒') : t('暂停 1 小时')}</button></div></section>`;
+  else if (section === 'pet') {
+    const pack = state.petPacks.find(pack => pack.id === s.petId);
+    content.innerHTML = `<section class="settings-group">${toggle('petVisible', t('显示桌宠'), state.petAvailable ? '' : t('桌宠模块尚未安装。'), s.petVisible, !state.petAvailable)}
+      <div class="setting-row pet-picker-row"><label for="petId">${t('选择宠物')}</label><div class="inline-controls">${picker('petId', t('选择宠物'), !state.petAvailable)}<button id="import-pet" title="${t('导入…')}" aria-label="${t('导入…')}" ${!state.petAvailable ? 'disabled' : ''}>＋</button></div></div>
+      ${pack?.thumbnail ? `<div class="pet-credit"><span class="pet-thumbnail"><img src="${escapeHtml(pack.thumbnail)}" style="height:${(pack.rows || 9) * 100}%" alt="${escapeHtml(pack.name)}"/></span><span><strong>${escapeHtml(pack.name)}</strong><small>${escapeHtml(pack.author || '')}${pack.license ? ` · <button class="text-link" data-external="${escapeHtml(pack.licenseUrl!)}">${escapeHtml(pack.license)}</button>` : ''}${pack.source ? ` · <button class="text-link" data-external="${escapeHtml(pack.source)}">${t('来源')}</button>` : ''}</small></span></div>` : ''}
+      <div class="setting-row"><label for="petSize">${t('大小')}</label>${picker('petSize', t('宠物大小'))}</div>
+      ${toggle('petEdgeHide', t('贴边自动隐藏'), t('靠近屏幕边缘时收起，指针靠近时探出。'), s.petEdgeHide)}
+      ${toggle('petMini', t('Mini 模式'), t('只显示控制条和活动托盘。'), s.petMini)}
+      ${toggle('petSound', t('提示音'), '', s.petSound)}</section>`;
+  } else content.innerHTML = `<h2>${t('全局快捷键')}</h2><section class="settings-group"><label for="quickWindowShortcut">${t('唤起快捷窗口')}</label><div class="shortcut-field"><input id="quickWindowShortcut" value="${escapeHtml(s.quickWindowShortcut)}" spellcheck="false" aria-label="${t('快捷窗口快捷键')}"/><button id="save-shortcut">${t('保存')}</button></div></section>
+    <h2>${t('在 Pockymoe 中')}</h2><section class="settings-group key-list">${[[t('搜索'), '⌘ / Ctrl F'], [t('打开地图'), '⌘ / Ctrl 0'], [t('新建线程'), '⌘ / Ctrl N'], [t('设置'), '⌘ / Ctrl ,'], [t('显示 / 隐藏桌宠'), '⌘ / Ctrl ⇧ P'], [t('退出应用'), '⌘ / Ctrl Q']].map(([label, key]) => `<div class="setting-row"><span>${label}</span><kbd>${key}</kbd></div>`).join('')}</section>`;
+  const bindPicker = (id: keyof DesktopSettings, options: SelectOption[]): void => {
+    const trigger = document.getElementById(id) as HTMLButtonElement | null;
+    if (trigger) selectCleanups.push(mountSelect(trigger, options, String(s[id]), value => { void save({ [id]: value }); }));
+  };
+  bindPicker('alertMode', [{ value: 'petFirst', label: t('桌宠优先') }, { value: 'system', label: t('系统通知') }, { value: 'both', label: t('两者都用') }]);
+  bindPicker('petSize', [{ value: 'S', label: t('小 · 96 px') }, { value: 'M', label: t('中 · 128 px') }, { value: 'L', label: t('大 · 160 px') }]);
+  bindPicker('petId', state.petPacks.map(pack => ({ value: pack.id, label: pack.name, description: [pack.author, pack.license].filter(Boolean).join(' · '), image: pack.thumbnail, rows: pack.rows })));
+  root.querySelectorAll<HTMLInputElement>('.switch').forEach(el => { el.onchange = () => { void save({ [el.id]: el.checked }); }; });
+  const snooze = root.querySelector<HTMLButtonElement>('#snooze'); if (snooze) snooze.onclick = () => { void save({ snoozeUntil: Date.parse(s.snoozeUntil || '') > Date.now() ? null : new Date(Date.now() + 3600_000).toISOString() }); };
+  const relay = root.querySelector<HTMLButtonElement>('#change-relay'); if (relay) relay.onclick = () => { void action({ type: 'changeConnection' }); };
+  const shortcut = root.querySelector<HTMLButtonElement>('#save-shortcut'); if (shortcut) shortcut.onclick = () => { void save({ quickWindowShortcut: root.querySelector<HTMLInputElement>('#quickWindowShortcut')!.value }); };
+  const importer = root.querySelector<HTMLButtonElement>('#import-pet'); if (importer) importer.onclick = () => { void action({ type: 'importPet' }); };
+  root.querySelectorAll<HTMLButtonElement>('[data-external]').forEach(button => { button.onclick = () => { void action({ type: 'external', url: button.dataset.external! }); }; });
+  enhanceScrollbars(root); root.querySelector('.pref-main')!.scrollTop = scroll;
   const replacement = activeId ? document.getElementById(activeId) : activeSection ? root.querySelector<HTMLElement>(`[data-section="${activeSection}"]`) : null;
   if (replacement && active) {
     replacement.focus({ preventScroll: true });
     if (draft && replacement instanceof HTMLInputElement) { replacement.value = draft.value; replacement.setSelectionRange(draft.start, draft.end); }
   }
 }
+function renderAbout(): void {
+  root.className = 'about-page';
+  root.innerHTML = `<div class="drag-zone"></div><img class="app-icon" src="${appIcon}" alt=""/><h1>Pockymoe</h1><p>${t('版本 {version}', { version: escapeHtml(state.version) })}</p><section><h2>${t('宠物署名')}</h2>${state.petPacks.filter(pack => pack.author).map(pack => `<p><strong>${escapeHtml(pack.name)}</strong> · ${escapeHtml(pack.author!)}${pack.license ? ` · <button class="text-link" data-external="${escapeHtml(pack.licenseUrl!)}">${escapeHtml(pack.license)}</button>` : ''}${pack.source ? ` · <button class="text-link" data-external="${escapeHtml(pack.source)}">${t('来源')}</button>` : ''}</p>`).join('')}</section>`;
+  root.querySelectorAll<HTMLButtonElement>('[data-external]').forEach(button => { button.onclick = () => { void action({ type: 'external', url: button.dataset.external! }); }; });
+}
 async function save(patch: Partial<DesktopSettings>): Promise<void> { if (await action({ type: 'settings', patch })) toast(t('已保存')); else { state = await localBridge().getState(); renderPreferences(); } }
 async function init(): Promise<void> {
   state = await localBridge().getState();
+  document.documentElement.dataset.view = view;
   setLocale(state.locale);
   section = state.preferencesSection;
   applyAppearance(state.appearance);
   const marks = document.createElement('style'); marks.textContent = statusMarkStyles; document.head.append(marks);
   localBridge().onState(next => { setLocale(next.locale); applyAppearance(next.appearance); });
   if (view === 'quick') { mountQuick(root, state); return; }
-  if (view === 'preferences') renderPreferences(); else renderRelay();
+  if (view === 'preferences') renderPreferences(); else if (view === 'about') renderAbout(); else renderRelay();
   localBridge().onState(next => {
     // A repeated request must still reveal its section after the user changed tabs.
     const localeChanged = next.locale !== state.locale;
@@ -120,6 +159,7 @@ async function init(): Promise<void> {
     state = next;
     if (view === 'preferences' && changed) renderPreferences();
     if (view === 'relay' && localeChanged) renderRelay();
+    if (view === 'about' && changed) renderAbout();
     if (localeChanged && lastToast && document.querySelector('#toast.visible')) toast(localizeMessage(lastToast.message), lastToast.error);
   });
 }

@@ -1,6 +1,16 @@
 /** One source for app-owned desktop strings. Thread titles, summaries and names
  * are user content and are intentionally never translated. */
 export const english = {
+  "活动面板": "Activity panel",
+  "一切就绪": "All caught up",
+  "回复 {title}…": "Reply to {title}…",
+  "发送中…": "Sending…",
+  "{count} 完成": "{count} completed",
+  "连接 Pockymoe": "Connect to Pockymoe",
+  "贴边自动隐藏": "Auto-hide at screen edges",
+  "靠近屏幕边缘时收起，指针靠近时探出。": "Tuck away at the screen edge; peek out when the pointer approaches.",
+  "来源": "Source",
+  "宠物署名": "Pet credits",
   "正在批准…": "Approving…",
   "正在拒绝…": "Denying…",
   "未发送": "Not sent",

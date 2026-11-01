@@ -26,3 +26,13 @@ it('migrates a v1 relay-only configuration to the origin pair', () => {
     expect(new SettingsStore(path).get()).toMatchObject({ webOrigin: 'https://custom.example.com', relayOrigin: 'https://custom.example.com' });
   } finally { rmSync(dir, { recursive: true }); }
 });
+it('persists unchanged defaults without recursively publishing identical settings', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'pockymoe-noop-'));
+  try {
+    const path = join(dir, 'settings.json'), store = new SettingsStore(path); let changes = 0;
+    store.onChange(next => { changes++; store.set({ petVisible: next.petVisible }); });
+    store.set({ petVisible: true });
+    expect(new SettingsStore(path).firstRun).toBe(false); expect(changes).toBe(0);
+    store.set({ petVisible: false }); expect(changes).toBe(1);
+  } finally { rmSync(dir, { recursive: true }); }
+});

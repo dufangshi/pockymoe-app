@@ -92,7 +92,7 @@ test('split origins bridge, activity delivery, tray and quick-window command rou
   const active = item({ state: 'needsInput', request: { id: 'req-1', kind: 'approval', summary: '运行 cargo test -p runtime' } });
   const running = item({ key: 'pc:thread-2', deviceId: 'pc', deviceName: 'Windows Studio', threadId: 'thread-2', turnId: 'turn-2', title: '完善设备统计视图', workspaceLabel: 'supervisor-web' });
   const completed = item({ key: 'mac:thread-3', threadId: 'thread-3', turnId: 'turn-3', title: '优化工作区树形导航', state: 'completed', unread: true, resultSummary: '键盘导航与过滤已完成' });
-  await page.evaluate(s => window.pockymoeHost!.activity.sync(s), snapshot([active, running, completed]));
+  await page.evaluate(s => { window.pockymoeHost!.activity.sync({ ...s, items: [], generatedAt: '2026-11-01T05:59:00.000Z', syncedDeviceIds: ['mac', 'pc'] }); window.pockymoeHost!.activity.sync(s); }, snapshot([active, running, completed]));
   await expect.poll(() => app.evaluate(() => globalThis.__pockymoeDesktopTest.tray.menuLabels)).toContain('修复登录状态同步 — MacBook Pro');
   expect(await app.evaluate(() => globalThis.__pockymoeDesktopTest.notifications.decisions)).toEqual(expect.arrayContaining([expect.objectContaining({ alertId: 'mac:req-1', system: true })]));
   await app.evaluate(({ globalShortcut }) => { if (!globalShortcut.isRegistered('Alt+Space')) throw new Error('Quick shortcut not registered'); globalThis.__pockymoeDesktopTest.windows.toggleQuick(); });
@@ -106,7 +106,7 @@ test('split origins bridge, activity delivery, tray and quick-window command rou
   await expect.poll(() => page.evaluate(() => window.commands)).toEqual(expect.arrayContaining([expect.objectContaining({ type: 'navigate', path: '/devices/mac/threads/thread-1' })]));
   // A focused thread must be suppressed even when focus changes in the same sync.
   await app.evaluate(() => globalThis.__pockymoeDesktopTest.windows.focusMain());
-  await page.evaluate(s => window.pockymoeHost!.activity.sync(s), snapshot([item({ state: 'completed', turnId: 'focused-turn', unread: true })], { focusedThreadKey: 'mac:thread-1', generatedAt: '2026-11-01T06:02:00.000Z' }));
+  await page.evaluate(s => { window.pockymoeHost!.activity.sync({ ...s, items: [], generatedAt: '2026-11-01T05:59:00.000Z', syncedDeviceIds: ['mac', 'pc'] }); window.pockymoeHost!.activity.sync(s); }, snapshot([item({ state: 'completed', turnId: 'focused-turn', unread: true })], { focusedThreadKey: 'mac:thread-1', generatedAt: '2026-11-01T06:02:00.000Z' }));
   await expect.poll(() => app.evaluate(() => globalThis.__pockymoeDesktopTest.notifications.decisions.find(d => d.alertId === 'mac:focused-turn'))).toMatchObject({ system: false, pet: false });
   await page.evaluate(() => window.pockymoeHost!.window.openThread('/devices/pc/threads/thread-2', { newWindow: true }));
   const second = await pageAt(app, '/devices/pc/threads/thread-2');
@@ -166,7 +166,7 @@ for (const pack of packs) for (const theme of ['light', 'dark'] as const) test(`
   await app.evaluate((_electron, value) => globalThis.__pockymoeDesktopTest.appearance.sync(value), appearance);
   await expect(setup.locator('html')).toHaveAttribute('data-theme-preset', pack);
   await expect(setup.locator('html')).toHaveAttribute('data-theme-effective', theme);
-  await expect(setup.getByRole('heading', { name: '你的设备，随时在手边。' })).toBeVisible();
+  await expect(setup.getByRole('heading', { name: '连接 Pockymoe' })).toBeVisible();
   await capture(app, setup, 'relay', pack, theme);
   await setup.getByText('高级', { exact: true }).click();
   await capture(app, setup, 'relay-advanced', pack, theme);
@@ -183,7 +183,8 @@ for (const pack of packs) for (const theme of ['light', 'dark'] as const) test(`
   await expect(preferences.getByRole('heading', { name: '通用', exact: true })).toBeVisible();
   await expect(preferences.locator('html')).toHaveAttribute('data-theme-effective', theme);
   await capture(app, preferences, 'preferences', pack, theme);
-  await preferences.getByLabel('提醒方式').selectOption('both');
+  await preferences.getByRole('button', { name: '提醒方式', exact: true }).click();
+  await preferences.getByRole('option', { name: '两者都用', exact: true }).click();
   await expect.poll(() => app.evaluate(() => globalThis.__pockymoeDesktopTest.settings.get().alertMode)).toBe('both');
   await preferences.getByRole('button', { name: '桌宠', exact: true }).click();
   await capture(app, preferences, 'preferences-pet', pack, theme);
@@ -192,11 +193,11 @@ for (const pack of packs) for (const theme of ['light', 'dark'] as const) test(`
   await preferences.getByRole('textbox', { name: '快捷窗口快捷键' }).fill('CommandOrControl+Shift+Space'); await preferences.getByRole('button', { name: '保存', exact: true }).click();
   await expect.poll(() => app.evaluate(({ globalShortcut }) => globalShortcut.isRegistered('CommandOrControl+Shift+Space'))).toBe(true);
   const items = [item({ state: 'needsInput', request: { id: `request-${theme}`, kind: 'input', summary: '请选择部署环境' } }), item({ key: 'mac:thread-2', threadId: 'thread-2', turnId: `run-${theme}`, title: '完善桌面端交互细节', since: new Date(Date.now() - 65_000).toISOString() }), item({ key: 'mac:thread-3', threadId: 'thread-3', turnId: `done-${theme}`, title: '检查跨设备索引缓存', state: 'completed', unread: true, resultSummary: '离线恢复验证通过' })];
-  await page.evaluate(s => window.pockymoeHost!.activity.sync(s), snapshot(items));
+  await page.evaluate(s => { window.pockymoeHost!.activity.sync({ ...s, items: [], generatedAt: '2026-11-01T05:59:00.000Z', syncedDeviceIds: ['mac', 'pc'] }); window.pockymoeHost!.activity.sync(s); }, snapshot(items));
   await app.evaluate(() => globalThis.__pockymoeDesktopTest.windows.createLocal('quick'));
   const quick = await pageAt(app, 'view=quick'); await expect(quick.getByRole('option')).toHaveCount(3);
   await expect(quick.locator('.elapsed')).toHaveText(/^01:0[5-9]$/);
-  expect((await quick.getByRole('option').first().boundingBox())!.height).toBe(44);
+  expect((await quick.getByRole('option').first().boundingBox())!.height).toBe(34);
   expect(await quick.locator('svg[data-status=running] circle').count()).toBe(2);
   await capture(app, quick, 'quick', pack, theme);
   const before = await quick.locator('.elapsed').textContent();
@@ -209,13 +210,13 @@ for (const pack of packs) for (const theme of ['light', 'dark'] as const) test(`
   await page.evaluate(a => window.pockymoeHost!.appearance.sync(a), appearanceFor(pack, theme));
   const root = item({ key: 'mac:root', threadId: 'root', title: '完善 Pockymoe 桌面体验', since: new Date(Date.now() - 70_000).toISOString() });
   const agent = (id: string, name: string) => item({ key: `mac:${id}`, threadId: id, title: `子任务 ${name}`, agentName: name, rootThreadKey: root.key, rootThreadTitle: '旧根标题', state: 'needsInput', request: { id: `request-${id}`, kind: 'approval', summary: '运行定向测试' } });
-  await page.evaluate(s => window.pockymoeHost!.activity.sync(s), snapshot([root, agent('a', 'Planner'), agent('b', 'Reviewer')]));
+  await page.evaluate(s => { window.pockymoeHost!.activity.sync({ ...s, items: [], generatedAt: '2026-11-01T05:59:00.000Z', syncedDeviceIds: ['mac', 'pc'] }); window.pockymoeHost!.activity.sync(s); }, snapshot([root, agent('a', 'Planner'), agent('b', 'Reviewer')]));
   await expect.poll(() => app.evaluate(() => globalThis.__pockymoeDesktopTest.tray.menuLabels)).toContain('需要你 · 1');
   await page.evaluate(async () => { window.pockymoeHost!.badge.set(99, 'attention'); await window.pockymoeHost!.settings.get(); });
   if (process.platform === 'darwin') expect(await app.evaluate(({ app }) => app.dock!.getBadge())).toBe('1');
   await app.evaluate(() => globalThis.__pockymoeDesktopTest.windows.createLocal('quick'));
   const quick = await pageAt(app, 'view=quick');
-  await expect(quick.getByRole('option')).toHaveCount(2);
+  await expect(quick.getByRole('option')).toHaveCount(1);
   await expect(quick.locator('[data-key="mac:a"] strong')).toContainText(root.title);
   await expect(quick.locator('[data-key="mac:a"] .row-copy>span')).toHaveText('智能体 Planner · MacBook Pro · remoteCodex');
   await capture(app, quick, 'root-groups-collapsed', pack, theme);
@@ -239,7 +240,7 @@ for (const pack of packs) for (const theme of ['light', 'dark'] as const) test(`
   const page = await pageAt(app, origin);
   await page.evaluate(a => { window.pockymoeHost!.appearance.sync(a); }, appearanceFor(pack, theme));
   const rows = [item({ title: 'Review desktop shell', state: 'needsInput', request: { id: 'locale-request', kind: 'approval', summary: 'Approve targeted tests' }, workspaceLabel: 'pockymoe' }), item({ key: 'mac:locale-running', threadId: 'locale-running', title: 'Verify activity updates', workspaceLabel: 'pockymoe', since: new Date(Date.now() - 65_000).toISOString() })];
-  await page.evaluate(s => window.pockymoeHost!.activity.sync(s), snapshot(rows));
+  await page.evaluate(s => { window.pockymoeHost!.activity.sync({ ...s, items: [], generatedAt: '2026-11-01T05:59:00.000Z', syncedDeviceIds: ['mac', 'pc'] }); window.pockymoeHost!.activity.sync(s); }, snapshot(rows));
   await page.evaluate(() => window.pockymoeHost!.window.openPreferences('general'));
   const prefs = await pageAt(app, 'view=preferences');
   await app.evaluate(() => globalThis.__pockymoeDesktopTest.windows.createLocal('quick'));

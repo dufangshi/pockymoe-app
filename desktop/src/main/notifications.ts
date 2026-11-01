@@ -6,7 +6,7 @@ import type { ActivityHub } from './activity';
 import { deliveryPolicy, EventCoalescer } from './delivery';
 import type { SettingsStore } from './store';
 import type { Windows } from './windows';
-export const itemPath = (item: ActivityItem): string => `/devices/${encodeURIComponent(item.deviceId)}/threads/${encodeURIComponent(item.threadId)}`;
+export const itemPath = (item: Pick<ActivityItem, 'deviceId' | 'threadId'>): string => `/devices/${encodeURIComponent(item.deviceId)}/threads/${encodeURIComponent(item.threadId)}`;
 export class Notifications {
   private active = new Map<string, Notification>();
   readonly constructed: { alertId: string; key: string; type: string; at: string; events: { alertId: string; key: string; type: string }[] }[] = [];

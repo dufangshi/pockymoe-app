@@ -89,7 +89,10 @@ palettes, Windows tray variants and titlebar controls follow the effective mode,
 and pet dependencies expose `appearance()` and `onAppearance()`. The shared
 `statusMarks.ts` mirrors upstream shapes; running uses a complete faint track
 with a rotating arc, waiting a filled speech bubble, interruption an amber
-square and failure a red diamond. Quick-window rows are 44 px with live timers.
+square and failure a red diamond. Quick-window rows are 34 px with live timers, without group headings. The
+560 px quick window fits one to seven rows, then scrolls; it shows recent threads
+when there is no activity. Native HUD vibrancy/acrylic remains visible through
+the transparent renderer.
 Activity snapshots preserve optional `rootThreadKey` / `rootThreadTitle`. Tray, quick
 window and badges count conversations (`rootThreadKey ?? key`) per activity group;
 agent members fold beneath the root title with their role, device and workspace.
@@ -98,7 +101,13 @@ actual alert IDs. Replies, approvals and thread opening keep the selected member
 key/threadId/requestId. The shared `activityGroups.ts` helpers also serve the pet.
 Local DOM controls follow the approved Electron utility-window exception in
 upstream `docs/ui-principles.md`, including keyboard/focus behavior, ErrorMark
-feedback and custom overlay scrollbars.
+feedback and custom overlay scrollbars. Local forms use drawn switches and a
+root-level DOM picker with arrows, Home/End, typeahead, Enter/Space, Escape and
+focus restoration. A source guard prevents native selects in shell renderers.
+Preferences uses compact divided rows; Pet includes atlas thumbnails, attribution,
+license/source links and edge auto-hide. About includes bundled artwork credits.
+Atlas files are served on demand through the local session's `pockymoe-pet:`
+handler, never sent as full sprite data with every activity snapshot.
 
 ActivityHub owns connection baselines per device. A completed first device read
 (`syncedDeviceIds`, including devices without threads) establishes its cutoff;
@@ -137,9 +146,10 @@ for the pet's matching action.
 ```sh
 pnpm typecheck
 pnpm lint
-pnpm test test/activity.test.ts test/delivery.test.ts test/security.test.ts test/store.test.ts test/discovery.test.ts test/appearance.test.ts test/nativeSurfaces.test.ts test/activityGroups.test.ts test/i18n.test.ts
+pnpm test test/activityBaseline.test.ts test/nativeControls.test.ts test/petCatalog.test.ts test/activity.test.ts test/delivery.test.ts test/security.test.ts test/store.test.ts test/discovery.test.ts test/appearance.test.ts test/nativeSurfaces.test.ts test/activityGroups.test.ts test/i18n.test.ts
 pnpm build
-pnpm exec playwright test test/shell.e2e.ts --project=electron
+pnpm exec playwright test test/localPolish.e2e.ts --project=electron
+pnpm exec playwright test test/shell.e2e.ts --project=electron --grep 'split origins bridge|agent conversations preserve targets \(classic light\)|one language across surfaces \(classic light\)'
 ```
 
 Fixtures use fresh temporary profiles, a Web server and a separate fake Relay,

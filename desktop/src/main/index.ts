@@ -1,7 +1,7 @@
 import { t, getLocale, setLocale } from '../shared/i18n';
 import { app, BrowserWindow, dialog, globalShortcut, ipcMain, nativeTheme, Notification, session, shell, type IpcMainEvent, type IpcMainInvokeEvent } from 'electron';
 import { basename, join } from 'node:path';
-import { mkdirSync, readdirSync, readFileSync, writeFileSync, existsSync, copyFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync, existsSync, copyFileSync } from 'node:fs';
 import type { HostCapabilities, PetController, PetControllerDeps } from '../shared/contract';
 import type { LocalAction, LocalState } from '../shared/local';
 import { channels as c } from '../shared/channels';
@@ -16,6 +16,7 @@ import { DesktopTray } from './tray';
 import { installMenu } from './menu';
 import { apnsEnabled, registerApns } from './apns';
 import { checkUpdate, configureUpdates } from './updates';
+import { PetCatalog } from './petCatalog';
 
 app.setName('Pockymoe');
 app.setPath('userData', process.env.POCKYMOE_DESKTOP_USER_DATA || join(app.getPath('appData'), 'Pockymoe'));
@@ -53,6 +54,8 @@ else {
     });
     const petDirectories = [app.isPackaged ? join(process.resourcesPath, 'pets') : join(app.getAppPath(), 'assets/pets'), join(dataDir, 'pets')];
     mkdirSync(petDirectories[1], { recursive: true });
+    const petCatalog = new PetCatalog(petDirectories);
+    session.defaultSession.protocol.handle('pockymoe-pet', request => petCatalog.asset(request.url));
     const petModules = import.meta.glob('../pet/controller.ts', { eager: true }) as Record<string, { createPetController(deps: PetControllerDeps): PetController }>;
     const petModule = Object.values(petModules)[0];
     if (petModule) {
@@ -137,16 +140,7 @@ else {
       }
       return settings.set(next);
     }
-    function packs(): LocalState['petPacks'] {
-      const entries = new Map<string, string>();
-      for (const dir of petDirectories) {
-        try { for (const entry of readdirSync(dir, { withFileTypes: true })) if (entry.isDirectory()) {
-          try { const json = JSON.parse(readFileSync(join(dir, entry.name, 'pet.json'), 'utf8')); entries.set(entry.name, typeof json.displayName === 'string' ? json.displayName : typeof json.name === 'string' ? json.name : entry.name); } catch { /* Ignore incomplete packs. */ }
-        } } catch { /* No installed packs yet. */ }
-      }
-      return [...entries].map(([id, name]) => ({ id, name }));
-    }
-    const localState = (): LocalState => ({ locale: getLocale(), preferencesRequestId, preferencesSection, settings: settings.get(), appearance: appearance.get(), snapshot: hub.snapshot(), petAvailable: !!pet, petPacks: packs(), version: app.getVersion() });
+    const localState = (): LocalState => ({ locale: getLocale(), preferencesRequestId, preferencesSection, settings: settings.get(), appearance: appearance.get(), snapshot: hub.snapshot(), petAvailable: !!pet, petPacks: petCatalog.list(), version: app.getVersion() });
     const broadcast = (): void => { for (const w of manager.local.keys()) if (!w.isDestroyed()) w.webContents.send(c.localState, localState()); };
     let nativeLocale = getLocale();
     appearance.onChange(next => {
@@ -175,15 +169,25 @@ else {
           }
           case 'changeConnection': manager.createLocal('relay'); break;
           case 'hide': w.hide(); break;
+          case 'quickSize': manager.fitQuick(w, action.height); break;
+          case 'connectionSize': {
+            if (manager.local.get(w) === 'relay' && typeof action.expanded === 'boolean') {
+              const [width, height] = w.getContentSize(), next = action.expanded ? 500 : 320;
+              if (height !== next) w.setContentSize(width, next);
+            }
+            break;
+          }
           case 'open': case 'reply': {
-            const item = hub.snapshot()?.items.find(i => i.key === action.key);
+            const snapshot = hub.snapshot();
+            const active = snapshot?.items.find(i => i.key === action.key);
+            const item = active || snapshot?.recent?.find(i => i.key === action.key);
             if (!item) throw new Error(t('线程已不在活动列表中'));
             if (action.type === 'reply') {
               if (typeof action.text !== 'string' || !action.text.trim() || action.text.length > 10_000) throw new Error(t('请输入回复'));
               const result = await manager.dispatch({ type: 'reply', deviceId: item.deviceId, threadId: item.threadId, text: action.text.trim() }, false);
               if (!result.ok) return result;
             } else {
-              w.hide(); hub.acknowledge(alertId(item), 'quick');
+              w.hide(); if (active) hub.acknowledge(alertId(active), 'quick');
               const result = await manager.dispatch({ type: 'navigate', path: itemPath(item) });
               if (!result.ok) return result;
               void manager.dispatch({ type: 'markRead', key: item.key }, false);
@@ -194,7 +198,11 @@ else {
             // Pet module owns pack validation/import and its native file dialog.
             const importer = petModule as typeof petModule & { importPetPack?: (deps: { petDirectories: string[]; settings: SettingsStore; parent: BrowserWindow }) => Promise<void> };
             if (!importer?.importPetPack) throw new Error(t('当前桌宠模块不支持导入'));
-            await importer.importPetPack({ petDirectories, settings, parent: w }); broadcast(); break;
+            await importer.importPetPack({ petDirectories, settings, parent: w }); petCatalog.refresh(); broadcast(); break;
+          }
+          case 'external': {
+            const safe = externalUrl(action.url); if (!safe) throw new Error(t('操作无效'));
+            await shell.openExternal(safe); break;
           }
           case 'checkUpdate': await checkUpdate(); break;
           default: throw new Error(t('未知桌面操作'));
@@ -204,7 +212,8 @@ else {
     });
     let old = settings.get();
     settings.onChange(next => {
-      pet?.setVisible(next.petVisible);
+      // The pet observes SettingsStore itself; calling setVisible here would
+      // write settings a second time and can recursively publish the same value.
       if (next.launchAtLogin !== old.launchAtLogin && process.env.POCKYMOE_DESKTOP_E2E !== '1') app.setLoginItemSettings({ openAtLogin: next.launchAtLogin });
       if (next.webOrigin !== old.webOrigin || next.relayOrigin !== old.relayOrigin) {
         for (const w of [...manager.relay]) w.destroy();

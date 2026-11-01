@@ -8,7 +8,7 @@ import { deepLinkPath, externalUrl, isSignInUrl, isWebFrame, threadPath } from '
 import { readJson, writeJson, type SettingsStore } from './store';
 
 export type CommandInput = HostCommand extends infer T ? T extends HostCommand ? Omit<T, 'id'> : never : never;
-export type LocalRole = 'quick' | 'preferences' | 'relay';
+export type LocalRole = 'quick' | 'preferences' | 'relay' | 'about';
 export class Windows {
   readonly relay = new Set<BrowserWindow>();
   readonly local = new Map<BrowserWindow, LocalRole>();
@@ -18,13 +18,14 @@ export class Windows {
   private pending = new Map<number, (() => void)[]>();
   private positionTimer?: ReturnType<typeof setTimeout>;
   private signInWindow?: BrowserWindow;
+  private shownQuick = new WeakSet<BrowserWindow>();
   quitting = false;
   private appearance: Appearance | null = null;
   setAppearance(appearance: Appearance): void {
     this.appearance = { ...appearance };
     if (process.platform === 'win32') for (const w of this.relay) w.setTitleBarOverlay(this.overlay());
     for (const [w, role] of this.local) {
-      w.setBackgroundColor(appearance.effective === 'dark' ? '#232325' : '#f8f8f7');
+      w.setBackgroundColor(role === 'quick' ? '#00000000' : appearance.effective === 'dark' ? '#232325' : '#f8f8f7');
       w.setTitle(role === 'preferences' ? t('设置 — Pockymoe') : role === 'relay' ? t('连接 — Pockymoe') : 'Pockymoe');
     }
   }
@@ -137,22 +138,32 @@ export class Windows {
     const existing = [...this.local].find(([w, r]) => r === role && !w.isDestroyed())?.[0];
     if (existing) { existing.show(); existing.focus(); return existing; }
     const quick = role === 'quick';
-    const w = new BrowserWindow({ width: quick ? 640 : role === 'relay' ? 520 : 740, height: quick ? 420 : role === 'relay' ? 520 : 640,
-      show: false, resizable: !quick && role !== 'relay', maximizable: false, minimizable: false, frame: !quick,
+    const w = new BrowserWindow({ width: quick ? 560 : role === 'preferences' ? 660 : 460, height: quick ? 340 : role === 'preferences' ? 500 : role === 'about' ? 330 : 320,
+      minWidth: quick ? 360 : 380, minHeight: quick ? 100 : 300,
+      show: false, resizable: !quick, maximizable: false, minimizable: false, frame: !quick,
       title: role === 'preferences' ? t('设置 — Pockymoe') : role === 'relay' ? t('连接 — Pockymoe') : 'Pockymoe',
       titleBarStyle: process.platform === 'darwin' && !quick ? 'hiddenInset' : undefined,
-      vibrancy: process.platform === 'darwin' ? 'popover' : undefined, visualEffectState: 'active',
-      backgroundColor: nativeTheme.shouldUseDarkColors ? '#202022' : '#f8f8f7',
+      vibrancy: process.platform === 'darwin' ? quick ? 'hud' : 'popover' : undefined, visualEffectState: 'active',
+      ...(quick ? { transparent: process.platform === 'darwin', ...(process.platform === 'win32' ? { backgroundMaterial: 'acrylic' as const } : {}) } : {}),
+      backgroundColor: quick ? '#00000000' : nativeTheme.shouldUseDarkColors ? '#202022' : '#f8f8f7',
       webPreferences: { preload: join(__dirname, '../preload/local.js'), contextIsolation: true, sandbox: true, nodeIntegration: false,
         additionalArguments: process.env.ELECTRON_RENDERER_URL ? ['--pockymoe-local-dev'] : [] }
     });
     this.local.set(w, role); this.secure(w, false);
     w.on('closed', () => this.local.delete(w));
     if (quick) { w.setAlwaysOnTop(true, 'floating'); w.on('blur', () => { if (process.env.POCKYMOE_DESKTOP_E2E !== '1') w.hide(); }); }
-    w.once('ready-to-show', () => w.show());
+    w.once('ready-to-show', () => { if (!quick) w.show(); });
     if (process.env.ELECTRON_RENDERER_URL) void w.loadURL(`${process.env.ELECTRON_RENDERER_URL}/local/index.html?view=${role}`);
     else void w.loadFile(join(__dirname, '../renderer/local/index.html'), { query: { view: role } });
     return w;
+  }
+  fitQuick(window: BrowserWindow, height: number): void {
+    if (this.local.get(window) !== 'quick' || !Number.isInteger(height) || height < 100 || height > 420) return;
+    const [width, previous] = window.getContentSize();
+    if (previous !== height) window.setContentSize(width, height);
+    // Show once the first populated render has its final size; later background
+    // activity updates must never reopen a quick window the user hid.
+    if (!this.shownQuick.has(window)) { this.shownQuick.add(window); window.show(); window.focus(); }
   }
   toggleQuick(): void {
     const w = [...this.local].find(([, r]) => r === 'quick')?.[0];

@@ -46,9 +46,11 @@ export class SettingsStore implements SettingsStoreLike {
   }
   get(): DesktopSettings { return { ...this.value }; }
   set(patch: Partial<DesktopSettings>): DesktopSettings {
-    this.value = { ...this.value, ...validateSettings(patch) };
+    const next = { ...this.value, ...validateSettings(patch) };
+    const changed = Object.keys(next).some(key => next[key as keyof DesktopSettings] !== this.value[key as keyof DesktopSettings]);
+    this.value = next;
     writeJson(this.path, this.value);
-    for (const listener of this.listeners) listener(this.get());
+    if (changed) for (const listener of this.listeners) listener(this.get());
     return this.get();
   }
   onChange(listener: (settings: DesktopSettings) => void): () => void { this.listeners.add(listener); return () => this.listeners.delete(listener); }
