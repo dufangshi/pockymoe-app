@@ -1,0 +1,44 @@
+{
+  "name": "@remote-codex/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Remote Codex desktop client",
+  "author": "Remote Codex",
+  "license": "MIT",
+  "main": "out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:e2e": "pnpm build && playwright test --project=electron",
+    "dist:mac": "pnpm build && electron-builder --mac --arm64 --x64 --publish never",
+    "dist:win": "pnpm build && electron-builder --win --x64 --arm64 --publish never"
+  },
+  "dependencies": {
+    "electron-updater": "^6.6.2"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.0",
+    "@playwright/test": "^1.56.1",
+    "@types/node": "^24.10.0",
+    "@types/pngjs": "^6.0.5",
+    "electron": "45.2.1",
+    "electron-builder": "^26.0.12",
+    "electron-vite": "^6.0.0",
+    "eslint": "^9.39.0",
+    "globals": "^16.5.0",
+    "pngjs": "^7.0.0",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.46.2",
+    "vite": "^7.1.12",
+    "vitest": "^4.0.6"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "electron",
+      "esbuild"
+    ]
+  }
+}
