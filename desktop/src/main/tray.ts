@@ -1,3 +1,4 @@
+import { t } from '../shared/i18n';
 import { app, Menu, nativeImage, nativeTheme, Tray, type MenuItemConstructorOptions } from 'electron';
 import { join } from 'node:path';
 import type { ActivityItem, ActivitySnapshot, Appearance, DesktopSettings } from '../shared/contract';
@@ -16,19 +17,19 @@ export function trayTemplate(snapshot: ActivitySnapshot | null, settings: Deskto
   const needs = groupActivities(all.filter(i => i.state === 'needsInput' || ['failed', 'interrupted'].includes(i.state) && i.unread), all);
   const running = groupActivities(all.filter(i => i.state === 'running'), all);
   const items: MenuItemConstructorOptions[] = [];
-  for (const [title, group] of [['需要你', needs], ['进行中', running]] as const) {
+  for (const [title, group] of [[t('需要你'), needs], [t('进行中'), running]] as const) {
     items.push({ label: `${title} · ${group.length}`, enabled: false });
     for (const conversation of group.slice(0, 5)) {
-      const menuFor = (item: ActivityItem): MenuItemConstructorOptions[] => [{ label: '打开线程', click: () => open(item) }, { label: '在地图中显示', click: () => actions.reveal(item) }];
+      const menuFor = (item: ActivityItem): MenuItemConstructorOptions[] => [{ label: t('打开线程'), click: () => open(item) }, { label: t('在地图中显示'), click: () => actions.reveal(item) }];
       const first = conversation.items[0];
       const rootOnly = conversation.items.length === 1 && first.key === conversation.key;
       items.push({ label: `${conversation.title.slice(0, 48)} — ${first.deviceName}`, submenu: rootOnly ? menuFor(first) : conversation.items.map(item => ({ label: activitySecondary(item), submenu: menuFor(item) })) });
     }
   }
-  items.push({ type: 'separator' }, { label: '显示桌宠', type: 'checkbox', checked: settings.petVisible, click: actions.pet },
-    { label: Date.parse(settings.snoozeUntil || '') > Date.now() ? '恢复提醒' : '暂停提醒 1 小时', click: actions.snooze },
-    { type: 'separator' }, { label: '打开地图', click: actions.map }, { label: '打开 Pockymoe', click: actions.main }, { label: '设置…', click: actions.settings },
-    { type: 'separator' }, { label: '退出 Pockymoe', accelerator: 'CommandOrControl+Q', click: actions.quit });
+  items.push({ type: 'separator' }, { label: t('显示桌宠'), type: 'checkbox', checked: settings.petVisible, click: actions.pet },
+    { label: Date.parse(settings.snoozeUntil || '') > Date.now() ? t('恢复提醒') : t('暂停提醒 1 小时'), click: actions.snooze },
+    { type: 'separator' }, { label: t('打开地图'), click: actions.map }, { label: t('打开 Pockymoe'), click: actions.main }, { label: t('设置…'), click: actions.settings },
+    { type: 'separator' }, { label: t('退出 Pockymoe'), accelerator: 'CommandOrControl+Q', click: actions.quit });
   return items;
 }
 export class DesktopTray {
@@ -55,7 +56,7 @@ export class DesktopTray {
     if (process.platform === 'darwin') app.dock?.setBadge(n && style !== 'none' ? `${style === 'running' ? '◦' : ''}${n}` : '');
     if (process.platform === 'win32') {
       const icon = n && style !== 'none' ? nativeImage.createFromPath(join(app.getAppPath(), 'build', `overlay-${style}-${n > 9 ? 'many' : n}.png`)) : null;
-      for (const w of this.windows.relay) w.setOverlayIcon(icon, n ? `${n} ${style === 'attention' ? '需要你' : '进行中'}` : '');
+      for (const w of this.windows.relay) w.setOverlayIcon(icon, n ? `${n} ${style === 'attention' ? t('需要你') : t('进行中')}` : '');
     }
   }
   update(): void {
@@ -63,7 +64,7 @@ export class DesktopTray {
     const { attention, running } = activityCounts(snapshot);
     const state = attention ? 'attention' : running ? 'running' : 'none';
     this.tray.setImage(this.icon(state));
-    this.tray.setToolTip(`Pockymoe · ${attention} 需要你 · ${running} 进行中`);
+    this.tray.setToolTip(`Pockymoe · ${t('{count} 需要你', { count: attention })} · ${t('{count} 进行中', { count: running })}`);
     this.setBadge(attention || running, state);
     const template = trayTemplate(snapshot, settings, item => {
       this.hub.acknowledge(alertId(item), 'tray');

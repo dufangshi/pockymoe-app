@@ -1,3 +1,4 @@
+import { t } from '../shared/i18n';
 // Approved local-UI exception: docs/ui-principles.md (Electron utility windows).
 // Local DOM equivalent of the upstream overlay scrollbar. Native Electron
 // utility windows stay independent of the remote React runtime.
@@ -8,7 +9,7 @@ export function enhanceScrollbars(root: HTMLElement): void {
     element.before(frame); frame.append(element);
     const track = document.createElement('div'); track.className = 'scroll-track';
     const thumb = document.createElement('div'); thumb.className = 'scroll-thumb'; thumb.tabIndex = 0; thumb.role = 'scrollbar';
-    thumb.setAttribute('aria-label', '滚动内容'); thumb.setAttribute('aria-orientation', 'vertical');
+    thumb.setAttribute('aria-label', t('滚动内容')); thumb.setAttribute('aria-orientation', 'vertical');
     track.append(thumb); frame.append(track);
     element.style.scrollbarWidth = 'none';
     const update = (): void => {

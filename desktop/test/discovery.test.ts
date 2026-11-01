@@ -1,5 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { setLocale } from '../src/shared/i18n';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { discoverOrigins, type Fetcher } from '../src/main/discovery';
+beforeEach(() => setLocale('zh-CN'));
 const web = 'https://app.example.test', relay = 'https://relay.example.test';
 const fixture = (routes: Record<string, [string, number?, Record<string, string>?]>): Fetcher => async (url, init) => {
   expect(init?.credentials).toBe('omit'); expect(init?.redirect).toBe('manual');

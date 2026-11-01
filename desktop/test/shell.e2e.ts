@@ -1,6 +1,6 @@
 import { test, expect, _electron as electron, type ElectronApplication, type Page } from '@playwright/test';
 import { createServer, type Server, type RequestListener } from 'node:http';
-import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { ActivityHub } from '../src/main/activity';
@@ -10,9 +10,10 @@ import type { DesktopTray } from '../src/main/tray';
 import type { Notifications } from '../src/main/notifications';
 import type { AppearanceStore } from '../src/main/appearance';
 import type { Appearance, PockymoeHost } from '../src/shared/contract';
+import { resolveLocale } from '../src/shared/i18n';
 import { item, snapshot } from './fixtures';
 
-type Runtime = { appearance: AppearanceStore; hub: ActivityHub; settings: SettingsStore; windows: Windows; tray: DesktopTray; notifications: Notifications };
+type Runtime = { lastDialog?: Electron.MessageBoxOptions; lastSave?: Electron.SaveDialogOptions; appearance: AppearanceStore; hub: ActivityHub; settings: SettingsStore; windows: Windows; tray: DesktopTray; notifications: Notifications };
 declare global { var __pockymoeDesktopTest: Runtime }
 declare global { interface Window { pockymoeHost?: PockymoeHost; commands: unknown[] } }
 const evidence = '/tmp/rc-desktop/evidence/shell/v2';
@@ -56,9 +57,9 @@ test.beforeAll(async () => {
     if (req.url === '/healthz') { res.writeHead(404); res.end('{}'); return; }
     if (req.url === '/STATIC_HOSTING.txt') { res.setHeader('Content-Type', 'text/plain'); res.end(`Relay API origin: ${relayOriginValue}\n`); return; }
     if (req?.url === '/frame') { res.end('<!doctype html><title>Frame</title><script>parent.postMessage({sameFrameBridge:!!window.pockymoeHost},"*")</script>'); return; }
-    res.end(`<!doctype html><html><head><title>Fixture Pockymoe Web</title></head><body style="font:14px system-ui;padding:60px"><h1>Relay fixture</h1><p id="status">Connected</p><iframe title="same origin" src="/frame"></iframe><iframe title="other origin" src="${otherOrigin}"></iframe><script>
-      window.commands=[]; window.searchKeys=0; window.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='f'){e.preventDefault();window.searchKeys++;}}); window.frameResults={}; window.addEventListener('message',e=>Object.assign(window.frameResults,e.data));
-      window.pockymoeHost?.onCommand(command=>{window.commands.push(command); if(command.type==='navigate'){history.pushState({},'',command.path);document.getElementById('status').textContent=command.path;} window.pockymoeHost.commandResult(command.id,{ok:true});});
+    res.end(`<!doctype html><html><head><title>Fixture Pockymoe Web</title></head><body style="font:14px system-ui;padding:60px"><h1>Pockymoe fixture</h1><details open><summary id="settings-title">Settings</summary><label id="language-label" for="language">Interface language</label><select id="language"><option value="zh-CN">简体中文</option><option value="en">English</option></select></details><p id="status">Connected</p><iframe title="same origin" src="/frame"></iframe><iframe title="other origin" src="${otherOrigin}"></iframe><script>
+      window.commands=[]; window.uiLocale='zh-CN'; window.needsThread=false; window.syncLocale=()=>{document.documentElement.lang=window.uiLocale;window.pockymoeHost?.appearance.sync({effective:matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light',pack:'classic',accent:'#a57224',locale:window.uiLocale});};document.getElementById('language').onchange=e=>{window.uiLocale=e.target.value;window.syncLocale();}; window.syncLocale(); window.searchKeys=0; window.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='f'){e.preventDefault();window.searchKeys++;}}); window.frameResults={}; window.addEventListener('message',e=>Object.assign(window.frameResults,e.data));
+      window.pockymoeHost?.onCommand(command=>{window.commands.push(command); if(command.type==='navigate'){history.pushState({},'',command.path);document.getElementById('status').textContent=command.path;} window.pockymoeHost.commandResult(command.id,command.type==='reply'&&window.needsThread?{ok:false,code:'needsThread',error:window.uiLocale==='en'?'Open this thread before replying.':'请在线程中打开后回复。'}:{ok:true});});
     </script></body></html>`);
   }); relay = fixture.server; origin = fixture.origin;
 });
@@ -127,7 +128,7 @@ test('split origins bridge, activity delivery, tray and quick-window command rou
 
 const packs = ['classic', 'plum-pocket', 'terminal'] as const;
 function appearanceFor(pack: string, effective: 'light' | 'dark'): Appearance {
-  return { effective, pack, accent: pack === 'terminal' ? effective === 'dark' ? '#4de3a2' : '#0a47c4' : pack === 'plum-pocket' ? '#e8a93a' : '#a57224' };
+  return { effective, pack, locale: 'zh-CN', accent: pack === 'terminal' ? effective === 'dark' ? '#4de3a2' : '#0a47c4' : pack === 'plum-pocket' ? '#e8a93a' : '#a57224' };
 }
 async function capture(app: ElectronApplication, page: Page, name: string, pack: string, mode: string): Promise<void> {
   await page.screenshot({ animations: 'disabled', path: join(evidence, `${name}-${pack}-${mode}-native.png`) });
@@ -212,4 +213,64 @@ for (const pack of packs) for (const theme of ['light', 'dark'] as const) test(`
   await expect.poll(() => page.evaluate(() => window.commands)).toEqual(expect.arrayContaining([expect.objectContaining({ type: 'reply', threadId: 'b', text: '请继续审查' })]));
   await quick.locator('[data-key="mac:b"]').click();
   await expect(page).toHaveURL(`${origin}/devices/mac/threads/b`);
+});
+
+for (const pack of packs) for (const theme of ['light', 'dark'] as const) test(`one language across surfaces (${pack} ${theme})`, async () => {
+  const app = await launch(theme, true);
+  const first = await pageAt(app, 'view=relay');
+  const fallback = resolveLocale(await app.evaluate(({ app }) => app.getLocale()));
+  await expect(first.locator('html')).toHaveAttribute('lang', fallback);
+  await app.evaluate((_electron, pair) => { globalThis.__pockymoeDesktopTest.settings.set(pair); }, { webOrigin: origin, relayOrigin: relayOriginValue, petVisible: false });
+  const page = await pageAt(app, origin);
+  await page.evaluate(a => { window.pockymoeHost!.appearance.sync(a); }, appearanceFor(pack, theme));
+  const rows = [item({ title: 'Review desktop shell', state: 'needsInput', request: { id: 'locale-request', kind: 'approval', summary: 'Approve targeted tests' }, workspaceLabel: 'pockymoe' }), item({ key: 'mac:locale-running', threadId: 'locale-running', title: 'Verify activity updates', workspaceLabel: 'pockymoe', since: new Date(Date.now() - 65_000).toISOString() })];
+  await page.evaluate(s => window.pockymoeHost!.activity.sync(s), snapshot(rows));
+  await page.evaluate(() => window.pockymoeHost!.window.openPreferences('general'));
+  const prefs = await pageAt(app, 'view=preferences');
+  await app.evaluate(() => globalThis.__pockymoeDesktopTest.windows.createLocal('quick'));
+  const quick = await pageAt(app, 'view=quick'); await expect(quick.getByRole('option')).toHaveCount(2);
+  await first.locator('#origin').fill('https://draft.example.test');
+  await quick.locator('#reply').fill('Draft text must survive language changes');
+  await app.evaluate(({ dialog }) => {
+    dialog.showMessageBox = (async (...args: unknown[]) => { globalThis.__pockymoeDesktopTest.lastDialog = args.at(-1) as Electron.MessageBoxOptions; return { response: 0, checkboxChecked: false }; }) as typeof dialog.showMessageBox;
+    dialog.showSaveDialog = (async (...args: unknown[]) => { globalThis.__pockymoeDesktopTest.lastSave = args.at(-1) as Electron.SaveDialogOptions; return { canceled: true, filePath: '' }; }) as typeof dialog.showSaveDialog;
+  });
+  const timings: { locale: string; milliseconds: number }[] = [];
+  for (const locale of ['en', 'zh-CN'] as const) {
+    const switchedAt = Date.now();
+    // The fixture Web Settings control uses the same appearance.sync path as Web i18n.
+    await page.selectOption('#language', locale);
+    await page.evaluate(a => window.pockymoeHost!.appearance.sync(a), { ...appearanceFor(pack, theme), locale });
+    const expected = locale === 'en' ? 'General' : '通用';
+    await expect(prefs.getByRole('heading', { name: expected, exact: true })).toBeVisible({ timeout: 1000 });
+    await expect(quick.locator('html')).toHaveAttribute('lang', locale, { timeout: 1000 });
+    await expect(first.locator('html')).toHaveAttribute('lang', locale, { timeout: 1000 });
+    await expect(quick.locator('#search')).toHaveAttribute('placeholder', locale === 'en' ? 'Search active threads…' : '搜索活动线程…', { timeout: 1000 });
+    await expect(quick.locator('#reply')).toHaveValue('Draft text must survive language changes');
+    await expect(first.locator('#origin')).toHaveValue('https://draft.example.test');
+    await expect.poll(() => app.evaluate(() => globalThis.__pockymoeDesktopTest.tray.menuLabels), { timeout: 1000 }).toContain(locale === 'en' ? 'Open map' : '打开地图');
+    const menu = await app.evaluate(({ Menu }) => Menu.getApplicationMenu()!.items.map(item => ({ label: item.label, submenu: item.submenu?.items.map(child => child.label) })));
+    expect(menu.map(item => item.label)).toContain(locale === 'en' ? 'Edit' : '编辑');
+    timings.push({ locale, milliseconds: Date.now() - switchedAt });
+    expect(timings.at(-1)!.milliseconds).toBeLessThan(1000);
+    writeFileSync(join(evidence, `menu-${locale}.json`), JSON.stringify(menu, null, 2));
+    await prefs.locator('#update').click();
+    await expect.poll(() => app.evaluate(() => globalThis.__pockymoeDesktopTest.lastDialog?.message)).toBe(locale === 'en' ? 'Development builds do not check for updates' : '开发版本不检查更新');
+    expect(await page.evaluate(() => window.pockymoeHost!.files.saveAs('locale.txt', new ArrayBuffer(0)))).toEqual({ saved: false });
+    expect(await app.evaluate(() => globalThis.__pockymoeDesktopTest.lastSave?.buttonLabel)).toBe(locale === 'en' ? 'Save' : '保存');
+    await capture(app, first, `locale-${locale}-setup`, pack, theme);
+    await capture(app, prefs, `locale-${locale}-preferences`, pack, theme);
+    await prefs.locator('[data-section=pet]').click(); await capture(app, prefs, `locale-${locale}-pet`, pack, theme);
+    await prefs.locator('[data-section=shortcuts]').click(); await capture(app, prefs, `locale-${locale}-shortcuts`, pack, theme);
+    await prefs.locator('[data-section=general]').click();
+    await capture(app, quick, `locale-${locale}-quick`, pack, theme);
+  }
+  writeFileSync(join(evidence, `locale-timings-${pack}-${theme}.json`), JSON.stringify(timings, null, 2));
+  await page.evaluate(() => { (window as unknown as { needsThread: boolean }).needsThread = true; });
+  await quick.locator('#reply').fill('Please continue'); await quick.locator('#send').click();
+  await expect(quick.getByRole('button', { name: '在线程中打开', exact: true })).toBeVisible();
+  await page.selectOption('#language', 'en');
+  await expect(quick.getByRole('button', { name: 'Open in thread', exact: true })).toBeVisible({ timeout: 1000 });
+  await quick.getByRole('button', { name: 'Open in thread', exact: true }).click();
+  await expect(page).toHaveURL(`${origin}/devices/mac/threads/thread-1`);
 });

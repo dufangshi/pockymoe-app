@@ -1,6 +1,6 @@
 import type { ActivitySnapshot, Appearance, DesktopSettings, HostCommandResult } from './contract';
 export interface LocalState {
-  preferencesRequestId: number; preferencesSection: 'general' | 'pet' | 'shortcuts'; settings: DesktopSettings; appearance: Appearance | null; snapshot: ActivitySnapshot | null;
+  locale: string; preferencesRequestId: number; preferencesSection: 'general' | 'pet' | 'shortcuts'; settings: DesktopSettings; appearance: Appearance | null; snapshot: ActivitySnapshot | null;
   petAvailable: boolean; petPacks: { id: string; name: string }[]; version: string;
 }
 export type LocalAction =

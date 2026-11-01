@@ -1,7 +1,9 @@
-import { expect, it } from 'vitest';
+import { setLocale } from '../src/shared/i18n';
+import { beforeEach, expect, it } from 'vitest';
 import { activitySecondary, conversationKey, conversationTitle, groupActivities } from '../src/shared/activityGroups';
 import { validateSnapshot } from '../src/main/activity';
 import { item, snapshot } from './fixtures';
+beforeEach(() => setLocale('zh-CN'));
 const agent = (name: string) => item({ key: `mac:${name}`, threadId: name, agentName: name, rootThreadKey: 'mac:root', rootThreadTitle: '根对话', title: `智能体自己的任务 ${name}` });
 it('groups agents under their root while preserving their action keys and stable ordering', () => {
   const a = agent('A'), b = agent('B'), root = item({ key: 'mac:root', threadId: 'root', title: '当前根标题' });

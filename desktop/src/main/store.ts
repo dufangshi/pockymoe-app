@@ -1,3 +1,4 @@
+import { t } from '../shared/i18n';
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { DesktopSettings, SettingsStoreLike } from '../shared/contract';
@@ -15,19 +16,19 @@ export function writeJson(path: string, data: unknown): void {
   renameSync(`${path}.tmp`, path);
 }
 export function validateSettings(patch: unknown): Partial<DesktopSettings> {
-  if (!patch || typeof patch !== 'object' || Array.isArray(patch)) throw new Error('Invalid settings');
+  if (!patch || typeof patch !== 'object' || Array.isArray(patch)) throw new Error(t('设置无效'));
   const out: Partial<DesktopSettings> = {};
   for (const [key, value] of Object.entries(patch)) {
     switch (key) {
       case 'webOrigin': case 'relayOrigin': out[key] = relayOrigin(value); break;
-      case 'alertMode': if (!['petFirst', 'system', 'both'].includes(String(value))) throw new Error('Invalid alert mode'); out.alertMode = value as DesktopSettings['alertMode']; break;
-      case 'petSize': if (!['S', 'M', 'L'].includes(String(value))) throw new Error('Invalid pet size'); out.petSize = value as DesktopSettings['petSize']; break;
-      case 'petId': if (typeof value !== 'string' || !/^[\w.-]{1,100}$/.test(value)) throw new Error('Invalid pet id'); out.petId = value; break;
-      case 'quickWindowShortcut': if (typeof value !== 'string' || value.length < 3 || value.length > 80) throw new Error('Invalid shortcut'); out.quickWindowShortcut = value; break;
-      case 'snoozeUntil': if (value !== null && (typeof value !== 'string' || !Number.isFinite(Date.parse(value)))) throw new Error('Invalid snooze'); out.snoozeUntil = value as string | null; break;
+      case 'alertMode': if (!['petFirst', 'system', 'both'].includes(String(value))) throw new Error(t('提醒方式无效')); out.alertMode = value as DesktopSettings['alertMode']; break;
+      case 'petSize': if (!['S', 'M', 'L'].includes(String(value))) throw new Error(t('宠物大小无效')); out.petSize = value as DesktopSettings['petSize']; break;
+      case 'petId': if (typeof value !== 'string' || !/^[\w.-]{1,100}$/.test(value)) throw new Error(t('宠物标识无效')); out.petId = value; break;
+      case 'quickWindowShortcut': if (typeof value !== 'string' || value.length < 3 || value.length > 80) throw new Error(t('快捷键无效')); out.quickWindowShortcut = value; break;
+      case 'snoozeUntil': if (value !== null && (typeof value !== 'string' || !Number.isFinite(Date.parse(value)))) throw new Error(t('暂停时间无效')); out.snoozeUntil = value as string | null; break;
       case 'petVisible': case 'petMini': case 'petSound': case 'launchAtLogin':
-        if (typeof value !== 'boolean') throw new Error('Invalid toggle'); out[key] = value; break;
-      default: throw new Error('Unknown setting');
+        if (typeof value !== 'boolean') throw new Error(t('开关值无效')); out[key] = value; break;
+      default: throw new Error(t('未知设置'));
     }
   }
   return out;

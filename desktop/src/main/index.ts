@@ -1,3 +1,4 @@
+import { t, getLocale, setLocale } from '../shared/i18n';
 import { app, BrowserWindow, dialog, globalShortcut, ipcMain, nativeTheme, Notification, session, shell, type IpcMainEvent, type IpcMainInvokeEvent } from 'electron';
 import { basename, join } from 'node:path';
 import { mkdirSync, readdirSync, readFileSync, writeFileSync, existsSync, copyFileSync } from 'node:fs';
@@ -32,6 +33,7 @@ else {
   app.on('second-instance', (_event, argv) => { windows?.focusMain(); for (const arg of argv) if (/^(pockymoe|remotecodex):/.test(arg)) windows?.openDeepLink(arg); });
   app.on('window-all-closed', () => { /* Tray presence keeps the app running. */ });
   void app.whenReady().then(async () => {
+    setLocale(app.getLocale());
     if (process.platform === 'win32') app.setAppUserModelId('com.pockymoe.desktop');
     if (process.env.POCKYMOE_DESKTOP_THEME === 'dark' || process.env.POCKYMOE_DESKTOP_THEME === 'light') nativeTheme.themeSource = process.env.POCKYMOE_DESKTOP_THEME;
     const dataDir = app.getPath('userData');
@@ -101,18 +103,18 @@ else {
     listen(c.petSet, (_e, visible) => { if (typeof visible === 'boolean') settings.set({ petVisible: visible }); });
     handle(c.petGet, () => pet?.isVisible() ?? false);
     listen(c.badge, (_e, count, style) => { if (typeof count === 'number' && Number.isFinite(count) && ['attention', 'running', 'none'].includes(String(style))) { if (hub.snapshot()) tray.update(); else tray.setBadge(count, style as 'attention' | 'running' | 'none'); } });
-    const savedNotifications = new Set<Notification>();
-    const savedNotification = (path: string): void => {
+    const savedNotifications = new Map<Notification, string>();
+    const savedNotification = (path: string, id?: string): void => {
       if (!Notification.isSupported()) return;
-      const n = new Notification({ title: '文件已保存', body: `${basename(path)} · 点按以在${process.platform === 'darwin' ? ' Finder ' : '资源管理器'}中显示` });
-      savedNotifications.add(n);
+      const n = new Notification({ ...(id ? { id } : {}), title: t('文件已保存'), body: t(process.platform === 'darwin' ? '{name} · 点按以在 Finder 中显示' : '{name} · 点按以在资源管理器中显示', { name: basename(path) }) });
+      savedNotifications.set(n, path);
       n.on('close', () => savedNotifications.delete(n));
       n.on('click', () => shell.showItemInFolder(path)); n.show();
     };
     handle(c.save, async (e, name, data) => {
-      if (typeof name !== 'string' || !(data instanceof ArrayBuffer) || data.byteLength > 64 * 1024 * 1024) throw new Error('Invalid file (maximum 64 MB)');
+      if (typeof name !== 'string' || !(data instanceof ArrayBuffer) || data.byteLength > 64 * 1024 * 1024) throw new Error(t('文件无效（最大 64 MB）'));
       const parent = BrowserWindow.fromWebContents(e.sender)!;
-      const result = await dialog.showSaveDialog(parent, { defaultPath: basename(name).slice(0, 255) || 'download' });
+      const result = await dialog.showSaveDialog(parent, { title: t('保存文件'), buttonLabel: t('保存'), nameFieldLabel: t('文件名'), defaultPath: basename(name).slice(0, 255) || 'download' });
       if (result.canceled || !result.filePath) return { saved: false };
       writeFileSync(result.filePath, Buffer.from(data)); savedNotification(result.filePath);
       return { saved: true, path: result.filePath };
@@ -130,7 +132,7 @@ else {
     function applySettings(patch: unknown): ReturnType<SettingsStore['get']> {
       const next = validateSettings(patch);
       if (next?.quickWindowShortcut && next.quickWindowShortcut !== settings.get().quickWindowShortcut) {
-        if (!globalShortcut.register(next.quickWindowShortcut, () => manager.toggleQuick())) throw new Error('快捷键已被占用或无效');
+        if (!globalShortcut.register(next.quickWindowShortcut, () => manager.toggleQuick())) throw new Error(t('快捷键已被占用或无效'));
         globalShortcut.unregister(settings.get().quickWindowShortcut);
       }
       return settings.set(next);
@@ -144,14 +146,20 @@ else {
       }
       return [...entries].map(([id, name]) => ({ id, name }));
     }
-    const localState = (): LocalState => ({ preferencesRequestId, preferencesSection, settings: settings.get(), appearance: appearance.get(), snapshot: hub.snapshot(), petAvailable: !!pet, petPacks: packs(), version: app.getVersion() });
+    const localState = (): LocalState => ({ locale: getLocale(), preferencesRequestId, preferencesSection, settings: settings.get(), appearance: appearance.get(), snapshot: hub.snapshot(), petAvailable: !!pet, petPacks: packs(), version: app.getVersion() });
     const broadcast = (): void => { for (const w of manager.local.keys()) if (!w.isDestroyed()) w.webContents.send(c.localState, localState()); };
-    appearance.onChange(next => { manager.setAppearance(next); tray.setAppearance(next); broadcast(); });
+    let nativeLocale = getLocale();
+    appearance.onChange(next => {
+      manager.setAppearance(next); tray.setAppearance(next);
+      if (nativeLocale !== getLocale()) { nativeLocale = getLocale(); installMenu(manager, settings); notifications.refreshLocale();
+        for (const [notice, path] of [...savedNotifications]) { notice.close(); savedNotification(path, notice.id); } }
+      broadcast();
+    });
     ipcMain.handle(c.localGet, e => { guardLocal(e); return localState(); });
     ipcMain.handle(c.localAction, async (e, value: unknown) => {
       try {
         const w = guardLocal(e);
-        if (!value || typeof value !== 'object') throw new Error('Invalid action');
+        if (!value || typeof value !== 'object') throw new Error(t('操作无效'));
         const action = value as LocalAction;
         switch (action.type) {
           case 'settings': applySettings(action.patch); break;
@@ -169,9 +177,9 @@ else {
           case 'hide': w.hide(); break;
           case 'open': case 'reply': {
             const item = hub.snapshot()?.items.find(i => i.key === action.key);
-            if (!item) throw new Error('线程已不在活动列表中');
+            if (!item) throw new Error(t('线程已不在活动列表中'));
             if (action.type === 'reply') {
-              if (typeof action.text !== 'string' || !action.text.trim() || action.text.length > 10_000) throw new Error('请输入回复');
+              if (typeof action.text !== 'string' || !action.text.trim() || action.text.length > 10_000) throw new Error(t('请输入回复'));
               const result = await manager.dispatch({ type: 'reply', deviceId: item.deviceId, threadId: item.threadId, text: action.text.trim() }, false);
               if (!result.ok) return result;
             } else {
@@ -185,14 +193,14 @@ else {
           case 'importPet': {
             // Pet module owns pack validation/import and its native file dialog.
             const importer = petModule as typeof petModule & { importPetPack?: (deps: { petDirectories: string[]; settings: SettingsStore; parent: BrowserWindow }) => Promise<void> };
-            if (!importer?.importPetPack) throw new Error('当前桌宠模块不支持导入');
+            if (!importer?.importPetPack) throw new Error(t('当前桌宠模块不支持导入'));
             await importer.importPetPack({ petDirectories, settings, parent: w }); broadcast(); break;
           }
           case 'checkUpdate': await checkUpdate(); break;
-          default: throw new Error('Unknown desktop action');
+          default: throw new Error(t('未知桌面操作'));
         }
         return { ok: true };
-      } catch (error) { return { ok: false, error: error instanceof Error ? error.message : '操作失败' }; }
+      } catch (error) { return { ok: false, error: error instanceof Error ? error.message : t('操作失败') }; }
     });
     let old = settings.get();
     settings.onChange(next => {
@@ -224,7 +232,7 @@ else {
     if (process.env.POCKYMOE_DESKTOP_E2E === '1') Object.assign(globalThis, { __pockymoeDesktopTest: { hub, settings, appearance, windows: manager, tray, notifications, capabilities } });
   }).catch(error => {
     if (process.env.POCKYMOE_DESKTOP_E2E === '1') console.error(error);
-    else dialog.showErrorBox('Pockymoe 无法启动', '请检查桌面应用的本地配置后重试。');
+    else dialog.showErrorBox(t('Pockymoe 无法启动'), t('请检查桌面应用的本地配置后重试。'));
     app.quit();
   });
 }

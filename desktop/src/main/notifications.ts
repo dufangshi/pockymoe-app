@@ -1,3 +1,4 @@
+import { t, formatList } from '../shared/i18n';
 import { Notification, powerMonitor } from 'electron';
 import type { ActivityEvent, ActivityItem, PetController } from '../shared/contract';
 import { activitySecondary, conversationKey, conversationTitle, groupActivities } from '../shared/activityGroups';
@@ -10,6 +11,11 @@ export class Notifications {
   private active = new Map<string, Notification>();
   readonly decisions: { alertId: string; system: boolean; pet: boolean }[] = [];
   private batch: EventCoalescer;
+  private delivered = new Map<Notification, ActivityEvent[]>();
+  refreshLocale(): void {
+    const groups = [...this.delivered.entries()];
+    for (const [notification, events] of groups) { notification.close(); this.show(events); }
+  }
   constructor(private hub: ActivityHub, private settings: SettingsStore, private windows: Windows, private pet: () => PetController | undefined, private focusedKey: () => string | null) {
     this.batch = new EventCoalescer(events => this.show(events));
     hub.onEvent(event => {
@@ -46,13 +52,13 @@ export class Notifications {
     const notification = new Notification({
       id: first.alertId,
       groupId: `pockymoe:${conversationKey(item)}`,
-      title: multiple && conversations.length > 1 ? `${conversations.length} 个对话${allComplete ? '完成' : '有新进展'}` : conversationTitle(item, this.hub.snapshot()?.items),
+      title: multiple && conversations.length > 1 ? t(allComplete ? '{count} 个对话完成' : '{count} 个对话有新进展', { count: conversations.length }) : conversationTitle(item, this.hub.snapshot()?.items),
       subtitle: multiple && conversations.length > 1 ? 'Pockymoe' : activitySecondary(item),
-      body: multiple ? conversations.map(group => `${group.title} · ${group.items.map(activitySecondary).join('、')}`).slice(0, 3).join('；') : item.state === 'interrupted' ? `已中断${item.resultSummary ? ` · ${item.resultSummary}` : ''}` : item.request?.summary || item.resultSummary || (first.type === 'failed' ? '任务遇到了问题' : '任务已完成'),
+      body: multiple ? formatList(conversations.map(group => `${group.title} · ${formatList(group.items.map(activitySecondary))}`).slice(0, 3)) : item.state === 'interrupted' ? `${t('已中断')}${item.resultSummary ? ` · ${item.resultSummary}` : ''}` : item.request?.summary || item.resultSummary || (first.type === 'failed' ? t('任务遇到了问题') : t('已完成')),
       silent: !this.settings.get().petSound,
       ...(['darwin', 'win32'].includes(process.platform) && !multiple ? { actions: [
-        ...(item.request?.kind === 'approval' ? [{ type: 'button' as const, text: '批准' }, { type: 'button' as const, text: '拒绝' }] : []),
-        { type: 'button' as const, text: '在地图中显示' }
+        ...(item.request?.kind === 'approval' ? [{ type: 'button' as const, text: t('批准') }, { type: 'button' as const, text: t('拒绝') }] : []),
+        { type: 'button' as const, text: t('在地图中显示') }
       ] } : {}),
       // Map every underlying alert id so acknowledgement closes the batch.
       ...(process.platform === 'win32' ? { timeoutType: 'default' as const } : {})
@@ -69,7 +75,8 @@ export class Notifications {
       }
       void this.windows.dispatch({ type: 'resolveRequest', deviceId: item.deviceId, threadId: item.threadId, requestId: item.request.id, decision: index === 0 ? 'approve' : 'deny' }).then(result => { if (result.ok) acknowledge(); });
     });
-    notification.on('close', () => { for (const event of events) if (this.active.get(event.alertId) === notification) this.active.delete(event.alertId); });
+    this.delivered.set(notification, events);
+    notification.on('close', () => { this.delivered.delete(notification); for (const event of events) if (this.active.get(event.alertId) === notification) this.active.delete(event.alertId); });
     notification.show();
   }
   dispose(): void { this.batch.dispose(); for (const n of new Set(this.active.values())) n.close(); }

@@ -50,10 +50,12 @@ export const english = {
   "隐藏桌宠": "Hide pet",
   "操作失败，请重试": "Action failed. Try again.",
   "发送失败，请重试": "Could not send. Try again.",
+  "请在线程中打开后回复。": "Open this thread before replying.",
+  "在线程中打开": "Open in thread",
   "通用": "General",
   "桌宠": "Pet",
   "快捷键": "Shortcuts",
-  "桌面设置": "Desktop preferences",
+  "桌面设置": "Preferences",
   "设置分类": "Preference sections",
   "版本 {version}": "Version {version}",
   "检查更新": "Check for updates",
@@ -249,3 +251,11 @@ export function t(key: MessageKey, values: Record<string, string | number> = {},
   const template: string = resolveLocale(language) === 'zh-CN' ? key : english[key];
   return template.replace(/\{(\w+)\}/g, (match, name: string) => Object.hasOwn(values, name) ? String(values[name]) : match);
 }
+
+/** Re-localize app-owned static errors/statuses already returned by an action. */
+export function localizeMessage(message: string): string {
+  if (Object.hasOwn(english, message)) return t(message as MessageKey);
+  const key = (Object.keys(english) as MessageKey[]).find(key => english[key] === message);
+  return key ? t(key) : message;
+}
+export function formatList(items: string[]): string { return new Intl.ListFormat(locale, { style: 'short', type: 'conjunction' }).format(items); }

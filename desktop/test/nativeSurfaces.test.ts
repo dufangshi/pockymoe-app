@@ -1,3 +1,4 @@
+import { setLocale } from '../src/shared/i18n';
 import { EventEmitter } from 'node:events';
 import { beforeEach, afterEach, expect, it, vi } from 'vitest';
 import { ActivityHub } from '../src/main/activity';
@@ -21,7 +22,7 @@ vi.mock('electron', () => ({
 }));
 import { Notifications } from '../src/main/notifications';
 import { activityCounts, trayTemplate } from '../src/main/tray';
-beforeEach(() => { vi.useFakeTimers(); notices.length = 0; });
+beforeEach(() => { setLocale('zh-CN'); vi.useFakeTimers(); notices.length = 0; });
 afterEach(() => vi.useRealTimers());
 it('uses stable native IDs, includes map actions and labels interruptions', async () => {
   const hub = new ActivityHub(), dispatch = vi.fn().mockResolvedValue({ ok: true });
@@ -79,4 +80,15 @@ it('counts conversations in a completion burst rather than each agent event', ()
   vi.advanceTimersByTime(1500);
   expect(notices).toHaveLength(1); expect(notices[0].options).toMatchObject({ id: 'mac:turn-a', title: '根对话', groupId: 'pockymoe:mac:root' });
   expect(String(notices[0].options.title)).not.toContain('3'); notifications.dispose();
+});
+
+it('refreshes already delivered notification actions in the page language with the same ID', () => {
+  const hub = new ActivityHub(), dispatch = vi.fn().mockResolvedValue({ ok: true });
+  const settings = { get: () => ({ ...defaults, alertMode: 'system' }), onChange: () => () => undefined } as unknown as SettingsStore;
+  const notifications = new Notifications(hub, settings, { relay: new Set(), dispatch } as unknown as Windows, () => undefined, () => null);
+  hub.sync(snapshot([item({ state: 'needsInput', request: { id: 'translate-request', kind: 'approval', summary: 'User request text' } })]));
+  vi.advanceTimersByTime(1500); expect(notices[0].options.id).toBe('mac:translate-request');
+  setLocale('en'); notifications.refreshLocale();
+  expect(notices.at(-1)!.options).toMatchObject({ id: 'mac:translate-request', body: 'User request text', actions: [{ type: 'button', text: 'Approve' }, { type: 'button', text: 'Deny' }, { type: 'button', text: 'Show in map' }] });
+  notifications.dispose();
 });

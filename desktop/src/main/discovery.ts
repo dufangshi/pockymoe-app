@@ -1,3 +1,4 @@
+import { t } from '../shared/i18n';
 import { relayOrigin as origin } from './security';
 export interface OriginPair { webOrigin: string; relayOrigin: string }
 export type Fetcher = (input: string, init?: RequestInit) => Promise<Response>;
@@ -32,7 +33,7 @@ async function healthy(fetcher: Fetcher, base: string): Promise<boolean> {
 export async function discoverOrigins(input: string, fetcher: Fetcher = fetch): Promise<OriginPair> {
   const entered = origin(input);
   const page = await read(fetcher, `${entered}/`);
-  if (!page || !/<(?:html|script|head)\b/i.test(page.text)) throw new Error('无法识别此 Pockymoe 地址，请检查连接或在“高级”中填写两个地址。');
+  if (!page || !/<(?:html|script|head)\b/i.test(page.text)) throw new Error(t('无法识别此 Pockymoe 地址，请检查连接或在“高级”中填写两个地址。'));
   const webOrigin = origin(new URL(page.url).origin);
   const metadata = await read(fetcher, `${webOrigin}/STATIC_HOSTING.txt`);
   const configured = metadata?.text.match(/^Relay API origin:\s*(https?:\/\/[^\s]+)\s*$/m)?.[1];
@@ -48,5 +49,5 @@ export async function discoverOrigins(input: string, fetcher: Fetcher = fetch): 
   if (webOrigin !== entered) candidates.add(entered);
   candidates.add(webOrigin);
   for (const relay of [...candidates].slice(0, 6)) if (await healthy(fetcher, relay)) return { webOrigin, relayOrigin: relay };
-  throw new Error('无法发现 Relay。请在“高级”中填写网页地址与 Relay 地址。');
+  throw new Error(t('无法发现 Relay。请在“高级”中填写网页地址与 Relay 地址。'));
 }

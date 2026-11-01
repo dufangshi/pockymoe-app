@@ -1,11 +1,13 @@
+import { setLocale } from '../shared/i18n';
 import type { Appearance } from '../shared/contract';
 export function validateAppearance(value: unknown): Appearance {
   if (!value || typeof value !== 'object') throw new Error('Invalid appearance');
   const a = value as Appearance;
   if (!['light', 'dark'].includes(a.effective) || typeof a.pack !== 'string' || !/^[a-z0-9][a-z0-9-]{0,79}$/.test(a.pack) ||
       typeof a.accent !== 'string' || !a.accent.trim() || a.accent.length > 200 || /[;{}<>"\\]/.test(a.accent) || /url\s*\(|var\s*\(/i.test(a.accent) ||
+      (a.locale !== undefined && (typeof a.locale !== 'string' || a.locale.length > 80 || !/^[a-zA-Z]{2,8}(?:-[a-zA-Z0-9]{1,8})*$/.test(a.locale))) ||
       (a.fontScale !== undefined && (!Number.isFinite(a.fontScale) || a.fontScale < .5 || a.fontScale > 2))) throw new Error('Invalid appearance');
-  return { effective: a.effective, pack: a.pack, accent: a.accent.trim(), ...(a.fontScale === undefined ? {} : { fontScale: a.fontScale }) };
+  return { effective: a.effective, pack: a.pack, accent: a.accent.trim(), ...(a.fontScale === undefined ? {} : { fontScale: a.fontScale }), ...(a.locale === undefined ? {} : { locale: a.locale }) };
 }
 export class AppearanceStore {
   private current: Appearance | null = null;
@@ -14,6 +16,7 @@ export class AppearanceStore {
   sync(value: unknown): void {
     const next = validateAppearance(value);
     if (JSON.stringify(next) === JSON.stringify(this.current)) return;
+    if (next.locale) setLocale(next.locale);
     this.current = next; for (const listener of this.listeners) listener({ ...next });
   }
   onChange = (listener: (appearance: Appearance) => void): (() => void) => { this.listeners.add(listener); return () => this.listeners.delete(listener); };

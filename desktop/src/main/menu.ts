@@ -1,32 +1,48 @@
-import { app, Menu, shell, type MenuItemConstructorOptions } from 'electron';
+import { Menu, shell, type MenuItemConstructorOptions } from 'electron';
+import { t } from '../shared/i18n';
 import type { SettingsStore } from './store';
 import type { Windows } from './windows';
 export function installMenu(windows: Windows, settings: SettingsStore): void {
   const command = (type: 'openMap' | 'newThread' | 'openDevices') => (): void => { void windows.dispatch({ type }); };
-  const pageKey = (keyCode: string, modifiers: NonNullable<Electron.KeyboardInputEvent['modifiers']>) => (): void => {
+  const search = (): void => {
     const wc = windows.focusMain().webContents;
-    wc.sendInputEvent({ type: 'keyDown', keyCode, modifiers }); wc.sendInputEvent({ type: 'keyUp', keyCode, modifiers });
+    const modifiers: Electron.KeyboardInputEvent['modifiers'] = [process.platform === 'darwin' ? 'meta' : 'control'];
+    wc.sendInputEvent({ type: 'keyDown', keyCode: 'F', modifiers }); wc.sendInputEvent({ type: 'keyUp', keyCode: 'F', modifiers });
   };
-  const mod = process.platform === 'darwin' ? 'meta' : 'control';
-  const appMenu: MenuItemConstructorOptions = { label: app.name, submenu: [
-    { role: 'about' }, { type: 'separator' }, { label: '设置…', accelerator: 'CommandOrControl+,', click: () => windows.createLocal('preferences') },
-    { label: '更改 Pockymoe 地址…', click: () => windows.createLocal('relay') }, { type: 'separator' },
-    ...(process.platform === 'darwin' ? [{ role: 'services' as const }, { type: 'separator' as const }, { role: 'hide' as const }, { role: 'hideOthers' as const }, { role: 'unhide' as const }, { type: 'separator' as const }] : []),
-    { role: 'quit', accelerator: 'CommandOrControl+Q' }
+  const application: MenuItemConstructorOptions = { label: 'Pockymoe', submenu: [
+    { role: 'about', label: t('关于 Pockymoe') }, { type: 'separator' },
+    { label: t('设置…'), accelerator: 'CommandOrControl+,', click: () => windows.createLocal('preferences') },
+    { label: t('更改 Pockymoe 地址…'), click: () => windows.createLocal('relay') }, { type: 'separator' },
+    ...(process.platform === 'darwin' ? [{ role: 'services' as const, label: t('服务') }, { type: 'separator' as const },
+      { role: 'hide' as const, label: t('隐藏 Pockymoe') }, { role: 'hideOthers' as const, label: t('隐藏其他') },
+      { role: 'unhide' as const, label: t('全部显示') }, { type: 'separator' as const }] : []),
+    { role: 'quit', label: t('退出 Pockymoe'), accelerator: 'CommandOrControl+Q' }
   ] };
   const navigation: MenuItemConstructorOptions[] = [
-    // Upstream MatterWorkbench owns Cmd/Ctrl+F, including editor exclusions.
-    // Cmd/Ctrl+K is only a native alias; leave F itself to the page.
-    { id: 'pockymoe-search', label: '搜索', accelerator: 'CommandOrControl+K', click: pageKey('F', [mod]) },
-    { id: 'pockymoe-open-map', label: '打开地图', accelerator: 'CommandOrControl+0', click: command('openMap') },
-    { label: '新线程', accelerator: 'CommandOrControl+N', click: command('newThread') },
-    { label: '设备总览', click: command('openDevices') }, { type: 'separator' },
-    { label: '显示 / 隐藏桌宠', accelerator: 'CommandOrControl+Shift+P', click: () => settings.set({ petVisible: !settings.get().petVisible }) },
-    { label: '后退', accelerator: 'CommandOrControl+[', click: () => { const history = windows.focusMain().webContents.navigationHistory; if (history.canGoBack()) history.goBack(); } },
-    { label: '前进', accelerator: 'CommandOrControl+]', click: () => { const history = windows.focusMain().webContents.navigationHistory; if (history.canGoForward()) history.goForward(); } },
-
+    // The Web owns Cmd/Ctrl+F, including terminal/editor exclusions; K is an alias.
+    { id: 'pockymoe-search', label: t('搜索'), accelerator: 'CommandOrControl+K', click: search },
+    { id: 'pockymoe-open-map', label: t('打开地图'), accelerator: 'CommandOrControl+0', click: command('openMap') },
+    { label: t('新线程'), accelerator: 'CommandOrControl+N', click: command('newThread') },
+    { label: t('设备总览'), click: command('openDevices') }, { type: 'separator' },
+    { label: t('显示 / 隐藏桌宠'), accelerator: 'CommandOrControl+Shift+P', click: () => settings.set({ petVisible: !settings.get().petVisible }) },
+    { label: t('后退'), accelerator: 'CommandOrControl+[', click: () => { const h = windows.focusMain().webContents.navigationHistory; if (h.canGoBack()) h.goBack(); } },
+    { label: t('前进'), accelerator: 'CommandOrControl+]', click: () => { const h = windows.focusMain().webContents.navigationHistory; if (h.canGoForward()) h.goForward(); } }
   ];
-  Menu.setApplicationMenu(Menu.buildFromTemplate([appMenu, { label: '文件', submenu: navigation }, { role: 'editMenu' }, { role: 'viewMenu' }, { role: 'windowMenu' },
-    { role: 'help', submenu: [{ label: 'Pockymoe 帮助', click: () => { void shell.openExternal('https://github.com/dufangshi/pockymoe-app'); } }] }
+  Menu.setApplicationMenu(Menu.buildFromTemplate([application, { label: t('文件'), submenu: navigation },
+    { label: t('编辑'), submenu: [
+      { role: 'undo', label: t('撤销') }, { role: 'redo', label: t('重做') }, { type: 'separator' },
+      { role: 'cut', label: t('剪切') }, { role: 'copy', label: t('复制') }, { role: 'paste', label: t('粘贴') },
+      { role: 'pasteAndMatchStyle', label: t('粘贴并匹配样式') }, { role: 'delete', label: t('删除') }, { role: 'selectAll', label: t('全选') }
+    ] },
+    { label: t('视图'), submenu: [
+      { role: 'reload', label: t('重新载入') }, { role: 'forceReload', label: t('强制重新载入') }, { role: 'toggleDevTools', label: t('开发者工具') },
+      { type: 'separator' }, { role: 'resetZoom', label: t('实际大小') }, { role: 'zoomIn', label: t('放大') }, { role: 'zoomOut', label: t('缩小') },
+      { type: 'separator' }, { role: 'togglefullscreen', label: t('切换全屏') }
+    ] },
+    { role: 'windowMenu', label: t('窗口'), submenu: [
+      { role: 'minimize', label: t('最小化') }, { role: 'zoom', label: t('缩放窗口') }, { role: 'close', label: t('关闭窗口') },
+      ...(process.platform === 'darwin' ? [{ type: 'separator' as const }, { role: 'front' as const, label: t('全部置前') }] : [])
+    ] },
+    { role: 'help', label: t('帮助'), submenu: [{ label: t('Pockymoe 帮助'), click: () => { void shell.openExternal('https://github.com/dufangshi/pockymoe-app'); } }] }
   ]));
 }

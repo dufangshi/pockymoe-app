@@ -62,3 +62,5 @@
 :root[data-theme-preset=plum-pocket] .pref-brand small,:root[data-theme-preset=plum-pocket] .sidebar-bottom,:root[data-theme-preset=plum-pocket] .sidebar-bottom button,:root[data-theme-preset=plum-pocket] .nav-item svg{color:#b79cc0}
 :root[data-theme-preset=plum-pocket] .nav-item.selected{color:#f6e9d2;background:color-mix(in srgb,var(--theme-accent-solid) 22%,transparent)}
 :root[data-theme-preset=plum-pocket] .nav-item.selected svg{color:var(--theme-accent-solid)}
+
+@media(hover:hover){:root[data-theme-preset=plum-pocket] .pref-sidebar .nav-item:hover,:root[data-theme-preset=plum-pocket] .sidebar-bottom button:hover{background:color-mix(in srgb,#f6e9d2 8%,transparent);color:#f6e9d2}:root[data-theme-preset=plum-pocket] .pref-sidebar .nav-item.selected:hover{background:color-mix(in srgb,var(--theme-accent-solid) 22%,transparent)}}

@@ -81,12 +81,30 @@ Notifications and tray items support **在地图中显示** (`revealInMap`). The
 Cmd/Ctrl+0 open the map (`openMap`). Cmd/Ctrl+K aliases the Web's existing
 Cmd/Ctrl+F search binding; the shell does not register F a second time.
 
+## UI language
+
+The Web page is the language source: `appearance.sync` carries `locale` and all
+open utility windows, tray/app menus and app-owned notifications follow it.
+Before the first page sync, the shell resolves `app.getLocale()` to English or
+Simplified Chinese. All app-owned desktop strings live in `src/shared/i18n.ts`;
+status and agent labels use the same table. Language switches preserve input
+values, the selected preferences section and quick-window selection. Existing
+activity notices refresh with the same native alert ID. Native dialog titles and
+app-supplied buttons use the current language; OS-owned file-picker chrome still
+follows the operating system. User thread titles, summaries, names and external
+diagnostics are content and are never machine-translated.
+
+A `needsThread` result is preserved through main-process command handling. The
+quick window keeps the reason next to an “Open in thread” action, targeting the
+original thread. The local ErrorMark helper accepts an optional `actionLabel`
+for the pet's matching action.
+
 ## Validation
 
 ```sh
 pnpm typecheck
 pnpm lint
-pnpm test test/activity.test.ts test/delivery.test.ts test/security.test.ts test/store.test.ts test/discovery.test.ts test/appearance.test.ts test/nativeSurfaces.test.ts test/activityGroups.test.ts
+pnpm test test/activity.test.ts test/delivery.test.ts test/security.test.ts test/store.test.ts test/discovery.test.ts test/appearance.test.ts test/nativeSurfaces.test.ts test/activityGroups.test.ts test/i18n.test.ts
 pnpm build
 pnpm exec playwright test test/shell.e2e.ts --project=electron
 ```

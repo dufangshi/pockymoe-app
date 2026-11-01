@@ -1,10 +1,11 @@
+import { t, type MessageKey } from './i18n';
 import type { ActivityItem } from './contract';
 
 // Mirrors upstream StatusMark / docs/ui-principles.md §6 and desktop design v2.
 // Approved local-UI exception: docs/ui-principles.md (Electron utility windows).
 // Local sandboxed windows cannot import the relay's React component or CSS.
 export type StatusMark = 'running' | 'unread' | 'failed' | 'interrupted' | 'waiting' | 'idle' | 'agents-running' | 'unknown';
-const labels: Record<StatusMark, string> = {
+const labels: Record<StatusMark, MessageKey> = {
   running: '运行中', unread: '已完成，未读', failed: '失败', interrupted: '已中断',
   waiting: '等待你', idle: '已读，空闲', 'agents-running': '智能体线程运行中', unknown: '状态未知'
 };
@@ -30,7 +31,7 @@ export function statusMarkSvg(status: StatusMark, label?: string): string {
     'agents-running': '<circle cx="8" cy="8" r="5" fill="none" stroke="currentColor" stroke-width="1.4"/><circle cx="8" cy="8" r="1.5" fill="currentColor"/>',
     unknown: '<circle cx="8" cy="8" r="4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-dasharray="2 2"/>'
   };
-  return `<svg class="pockymoe-status-mark" data-status="${kind}" width="16" height="16" viewBox="0 0 16 16" role="img" aria-label="${escape(label || labels[kind])}">${shapes[kind]}</svg>`;
+  return `<svg class="pockymoe-status-mark" data-status="${kind}" width="16" height="16" viewBox="0 0 16 16" role="img" aria-label="${escape(label || t(labels[kind]))}">${shapes[kind]}</svg>`;
 }
 export const statusMarkStyles = `
 .pockymoe-status-mark{display:inline-block;flex:0 0 16px;vertical-align:middle;color:var(--theme-fg-muted,#888)}
