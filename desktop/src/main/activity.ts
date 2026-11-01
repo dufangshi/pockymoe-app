@@ -116,7 +116,10 @@ export class ActivityHub implements ActivityHubLike {
       if (item.state === 'idle') continue;
       const baseline = this.baselines.get(item.deviceId);
       if (baseline === undefined || Date.parse(item.since) < baseline) continue;
-      if (old?.state === item.state && alertId(old) === alertId(item)) continue;
+      // State and unread can arrive on separate updates. A terminal state first
+      // seen as read must still announce once its unread flag catches up.
+      const newlyUnread = old && !old.unread && item.unread && ['completed', 'failed', 'interrupted'].includes(item.state);
+      if (old?.state === item.state && alertId(old) === alertId(item) && !newlyUnread) continue;
       const type = item.state === 'running' ? 'started' : item.state === 'interrupted' ? 'failed' : item.state;
       const event: ActivityEvent = { type, alertId: alertId(item), item, at: next.generatedAt };
       if (type !== 'started') {

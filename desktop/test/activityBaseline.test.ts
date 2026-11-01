@@ -50,6 +50,14 @@ describe('per-device connection baselines', () => {
     hub.sync(snapshot([activity(0, 0, { since: at(2000), turnId: 'fresh' })], { generatedAt: at(2000) }));
     expect(events.map(event => event.alertId)).toEqual(['device-0:fresh']); hub.dispose();
   });
+  it('keeps delayed unread flags on historical terminal states silent', () => {
+    const hub = new ActivityHub(), events: ActivityEvent[] = []; hub.onEvent(event => events.push(event));
+    hub.sync(snapshot([], { generatedAt: at(), syncedDeviceIds: ['device-0'] }));
+    const history = ['failed', 'completed', 'interrupted'].map((state, index) => activity(0, index, { state: state as ActivityItem['state'], unread: false }));
+    hub.sync(snapshot(history, { generatedAt: at(1000), syncedDeviceIds: ['device-0'] }));
+    hub.sync(snapshot(history.map(item => ({ ...item, unread: true })), { generatedAt: at(2000), syncedDeviceIds: ['device-0'] }));
+    expect(events).toHaveLength(0); hub.dispose();
+  });
   it('retains a flapping request for 60 seconds without resolve, acknowledge or repeat events', () => {
     const hub = new ActivityHub(), events: ActivityEvent[] = [], acknowledgements: string[] = [];
     hub.onEvent(event => events.push(event)); hub.onAcknowledge(id => acknowledgements.push(id));

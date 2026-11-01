@@ -7,6 +7,13 @@ import type { ActivityEvent } from '../src/shared/contract';
 import { connected, item, snapshot } from './fixtures';
 
 describe('ActivityHub', () => {
+  it.each(['failed', 'completed', 'interrupted'] as const)('emits fresh %s when unread arrives after the terminal state', state => {
+    const hub = connected(new ActivityHub()), events: ActivityEvent[] = []; hub.onEvent(event => events.push(event));
+    hub.sync(snapshot([item({ state, unread: false })])); expect(events).toHaveLength(0);
+    hub.sync(snapshot([item({ state, unread: true })])); hub.sync(snapshot([item({ state, unread: true })]));
+    expect(events.map(event => [event.type, event.alertId])).toEqual([[state === 'completed' ? 'completed' : 'failed', 'mac:turn-1']]);
+    hub.dispose();
+  });
   it('diffs turns, requests and explicit resolutions without duplicating snapshots', () => {
     const hub = connected(new ActivityHub()), events: ActivityEvent[] = [];
     hub.onEvent(e => events.push(e));
