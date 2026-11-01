@@ -1,3 +1,4 @@
+import { t } from '../shared/i18n';
 import { BrowserWindow, nativeTheme, screen, shell, type Rectangle } from 'electron';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -21,7 +22,10 @@ export class Windows {
   setAppearance(appearance: Appearance): void {
     this.appearance = { ...appearance };
     if (process.platform === 'win32') for (const w of this.relay) w.setTitleBarOverlay(this.overlay());
-    for (const w of this.local.keys()) w.setBackgroundColor(appearance.effective === 'dark' ? '#232325' : '#f8f8f7');
+    for (const [w, role] of this.local) {
+      w.setBackgroundColor(appearance.effective === 'dark' ? '#232325' : '#f8f8f7');
+      w.setTitle(role === 'preferences' ? t('设置 — Pockymoe') : role === 'relay' ? t('连接 — Pockymoe') : 'Pockymoe');
+    }
   }
   constructor(private settings: SettingsStore, private dataDir: string) {
     const stored = readJson(join(dataDir, 'window-bounds.json'));
@@ -57,7 +61,7 @@ export class Windows {
     w.on('closed', () => {
       this.relay.delete(w); this.ready.delete(webContentsId); this.pending.delete(webContentsId);
       for (const [id, pending] of this.waiters) if (pending.sender === webContentsId) {
-        clearTimeout(pending.timer); pending.resolve({ ok: false, error: 'Pockymoe 窗口已关闭' }); this.waiters.delete(id);
+        clearTimeout(pending.timer); pending.resolve({ ok: false, error: t('Pockymoe 窗口已关闭') }); this.waiters.delete(id);
       }
     });
     w.webContents.on('did-start-navigation', (_e, _url, inPlace, isMain) => { if (isMain && !inPlace) this.ready.delete(w.webContents.id); });
@@ -103,7 +107,7 @@ export class Windows {
     const quick = role === 'quick';
     const w = new BrowserWindow({ width: quick ? 640 : role === 'relay' ? 520 : 740, height: quick ? 420 : role === 'relay' ? 520 : 640,
       show: false, resizable: !quick && role !== 'relay', maximizable: false, minimizable: false, frame: !quick,
-      title: role === 'preferences' ? '设置 — Pockymoe' : role === 'relay' ? '连接 — Pockymoe' : 'Pockymoe',
+      title: role === 'preferences' ? t('设置 — Pockymoe') : role === 'relay' ? t('连接 — Pockymoe') : 'Pockymoe',
       titleBarStyle: process.platform === 'darwin' && !quick ? 'hiddenInset' : undefined,
       vibrancy: process.platform === 'darwin' ? 'popover' : undefined, visualEffectState: 'active',
       backgroundColor: nativeTheme.shouldUseDarkColors ? '#202022' : '#f8f8f7',
@@ -134,7 +138,7 @@ export class Windows {
     const command = { ...input, id: randomUUID() } as HostCommand;
     return new Promise(resolve => {
       const id = w.webContents.id;
-      const timer = setTimeout(() => { this.waiters.delete(command.id); resolve({ ok: false, error: 'Pockymoe 页面未响应，请确认已登录并重试' }); }, 15_000);
+      const timer = setTimeout(() => { this.waiters.delete(command.id); resolve({ ok: false, error: t('Pockymoe 页面未响应，请确认已登录并重试') }); }, 15_000);
       this.waiters.set(command.id, { sender: id, resolve, timer });
       const send = (): void => { if (!w.isDestroyed() && this.waiters.has(command.id)) w.webContents.send(c.command, command); };
       if (this.ready.has(id)) send();
@@ -147,8 +151,8 @@ export class Windows {
     if (!pending || pending.sender !== sender) return;
     clearTimeout(pending.timer); this.waiters.delete(id);
     const r = result as HostCommandResult;
-    pending.resolve({ ok: r.ok, error: typeof r.error === 'string' ? r.error.slice(0, 500) : undefined });
+    pending.resolve({ ok: r.ok, error: typeof r.error === 'string' ? r.error.slice(0, 500) : undefined, ...(r.code === 'needsThread' ? { code: r.code } : {}) });
   }
   openDeepLink(url: string): void { const path = deepLinkPath(url); if (path) void this.dispatch({ type: 'navigate', path }); }
-  dispose(): void { clearTimeout(this.positionTimer); for (const p of this.waiters.values()) { clearTimeout(p.timer); p.resolve({ ok: false, error: 'App is quitting' }); } }
+  dispose(): void { clearTimeout(this.positionTimer); for (const p of this.waiters.values()) { clearTimeout(p.timer); p.resolve({ ok: false, error: t('应用正在退出') }); } }
 }

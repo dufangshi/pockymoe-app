@@ -1,9 +1,10 @@
+import { t } from '../shared/i18n';
 // Approved Electron local-UI exception in docs/ui-principles.md: same ErrorMark
 // behavior as upstream, without importing the remote React runtime.
-export function showError(container: HTMLElement, message: string, retry?: () => void): void {
-  const label = document.createElement('span'); label.textContent = '操作失败';
+export function showError(container: HTMLElement, message: string, retry?: () => void, options?: { actionLabel?: string }): void {
+  const label = document.createElement('span'); label.textContent = t('操作失败');
   const button = document.createElement('button'); button.className = 'error-mark'; button.type = 'button'; button.textContent = '!';
-  button.setAttribute('aria-label', `查看错误原因：${message}`); button.setAttribute('aria-expanded', 'false');
+  button.setAttribute('aria-label', t('查看错误原因：{message}', { message })); button.setAttribute('aria-expanded', 'false');
   container.replaceChildren(label, button);
   let popup: HTMLDivElement | undefined;
   const close = (restore = false): void => {
@@ -24,7 +25,7 @@ export function showError(container: HTMLElement, message: string, retry?: () =>
     if (popup) { close(); return; }
     popup = document.createElement('div'); popup.className = 'error-popover'; popup.role = 'note';
     const detail = document.createElement('p'); detail.textContent = message; popup.append(detail);
-    if (retry) { const again = document.createElement('button'); again.textContent = '重试'; again.onclick = () => { close(); retry(); }; popup.append(again); }
+    if (retry) { const again = document.createElement('button'); again.textContent = options?.actionLabel ?? t('重试'); again.onclick = () => { close(); retry(); }; popup.append(again); }
     document.body.append(popup); button.setAttribute('aria-expanded', 'true'); position();
     document.addEventListener('click', outside); document.addEventListener('keydown', key, true);
     window.addEventListener('resize', position); window.addEventListener('scroll', position, true); observer.observe(document.body, { childList: true, subtree: true });
