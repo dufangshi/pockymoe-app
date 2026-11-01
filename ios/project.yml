@@ -56,6 +56,8 @@ targets:
           - com.remotecodex.app.watch
     entitlements:
       path: RemoteCodex/RemoteCodex.entitlements
+      properties:
+        aps-environment: $(APS_ENVIRONMENT)
   RemoteCodexUITests:
     type: bundle.ui-testing
     platform: iOS

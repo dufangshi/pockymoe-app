@@ -1,0 +1,173 @@
+import { constants } from 'node:fs';
+import { lstat, mkdir, open, readdir, rename, rm, writeFile } from 'node:fs/promises';
+import { basename, join } from 'node:path';
+import { inflateRawSync } from 'node:zlib';
+import { randomUUID } from 'node:crypto';
+
+export const MAX_PACK_BYTES = 8 * 1024 * 1024;
+const MAX_MANIFEST_BYTES = 16 * 1024;
+export interface SleepingStrip { path: 'sleeping.webp' | 'sleeping.png'; frames: number; durationsMs: number[] }
+export interface PetManifest { id: string; displayName: string; description: string; spritesheetPath: 'spritesheet.png' | 'spritesheet.webp'; spriteVersionNumber?: number; remoteCodex?: { sleeping: SleepingStrip } }
+export interface PetPack { manifest: PetManifest; directory: string; image: Buffer; sleepingImage?: Buffer }
+function fail(message: string): never { throw new Error(`Invalid pet pack: ${message}`); }
+export function parseManifest(data: Buffer): PetManifest {
+  if (data.length > MAX_MANIFEST_BYTES) fail('pet.json exceeds 16 KB');
+  let value: unknown;
+  try { value = JSON.parse(data.toString('utf8')); } catch { return fail('pet.json must be valid JSON'); }
+  if (!value || typeof value !== 'object') fail('pet.json must be an object');
+  const manifest = value as Record<string, unknown>;
+  if (typeof manifest.id !== 'string' || !/^[a-z0-9][a-z0-9_-]{0,63}$/.test(manifest.id)) fail('id must be 1–64 lowercase letters, digits, hyphens or underscores');
+  if (typeof manifest.displayName !== 'string' || !manifest.displayName.trim() || manifest.displayName.length > 100) fail('displayName must contain 1–100 characters');
+  if (typeof manifest.description !== 'string' || manifest.description.length > 500) fail('description must be at most 500 characters');
+  if (!['spritesheet.png', 'spritesheet.webp'].includes(String(manifest.spritesheetPath))) fail('spritesheetPath must be spritesheet.png or spritesheet.webp');
+  if (manifest.spriteVersionNumber !== undefined && manifest.spriteVersionNumber !== 1) fail('only Codex atlas v1 is documented and supported; v2 (8×11) is not yet supported');
+  let remoteCodex: PetManifest['remoteCodex'];
+  const extension = (manifest.remoteCodex as { sleeping?: SleepingStrip } | undefined)?.sleeping;
+  if (extension && ['sleeping.webp', 'sleeping.png'].includes(extension.path) && Number.isInteger(extension.frames) && extension.frames >= 1 && extension.frames <= 8 && Array.isArray(extension.durationsMs) && extension.durationsMs.length === extension.frames && extension.durationsMs.every((duration) => Number.isFinite(duration) && duration >= 100 && duration <= 5000)) remoteCodex = { sleeping: extension };
+  return { id: manifest.id, displayName: manifest.displayName, description: manifest.description,
+    spritesheetPath: manifest.spritesheetPath as PetManifest['spritesheetPath'], spriteVersionNumber: manifest.spriteVersionNumber as number | undefined, ...(remoteCodex ? { remoteCodex } : {}) };
+}
+export function imageDimensions(bytes: Buffer): { width: number; height: number; format: 'png' | 'webp' } {
+  if (bytes.length > MAX_PACK_BYTES) fail('spritesheet exceeds 8 MB');
+  if (bytes.length >= 24 && bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) && bytes.toString('ascii', 12, 16) === 'IHDR')
+    return { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20), format: 'png' };
+  if (bytes.length >= 30 && bytes.toString('ascii', 0, 4) === 'RIFF' && bytes.toString('ascii', 8, 12) === 'WEBP') {
+    const type = bytes.toString('ascii', 12, 16);
+    if (type === 'VP8X') return { width: 1 + bytes.readUIntLE(24, 3), height: 1 + bytes.readUIntLE(27, 3), format: 'webp' };
+    if (type === 'VP8L' && bytes[20] === 0x2f) return { width: 1 + ((bytes[22] & 63) << 8 | bytes[21]), height: 1 + ((bytes[24] & 15) << 10 | bytes[23] << 2 | bytes[22] >> 6), format: 'webp' };
+    if (type === 'VP8 ' && bytes[23] === 0x9d && bytes[24] === 1 && bytes[25] === 0x2a)
+      return { width: bytes.readUInt16LE(26) & 0x3fff, height: bytes.readUInt16LE(28) & 0x3fff, format: 'webp' };
+  }
+  return fail('spritesheet must be a PNG or WebP image');
+}
+export function validateAtlas(bytes: Buffer, manifest: PetManifest): void {
+  const dimensions = imageDimensions(bytes);
+  if (!manifest.spritesheetPath.endsWith(dimensions.format)) fail('image format does not match its extension');
+  if (dimensions.width !== 1536 || dimensions.height !== 1872) fail(`v1 atlas must be 1536×1872 (8×9), received ${dimensions.width}×${dimensions.height}`);
+}
+function validateSleeping(bytes: Buffer, manifest: PetManifest): void {
+  const size = imageDimensions(bytes), strip = manifest.remoteCodex!.sleeping;
+  if (size.width !== 192 * strip.frames || size.height !== 208 || !strip.path.endsWith(size.format)) fail('invalid sleeping strip dimensions or format');
+}
+async function safeRead(path: string, limit: number): Promise<Buffer> {
+  const stat = await lstat(path);
+  if (!stat.isFile() || stat.isSymbolicLink()) fail('symlinks and non-regular files are not allowed');
+  if (stat.size > limit) fail(`${basename(path)} exceeds its size limit`);
+  const handle = await open(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+  try {
+    const opened = await handle.stat();
+    if (!opened.isFile() || opened.size > limit) fail('file changed during import or exceeds its size limit');
+    const data = await handle.readFile();
+    if (data.length > limit) fail(`${basename(path)} exceeds its size limit`);
+    return data;
+  } finally { await handle.close(); }
+}
+export async function loadPetPack(directory: string): Promise<PetPack> {
+  const stat = await lstat(directory);
+  if (!stat.isDirectory() || stat.isSymbolicLink()) fail('pack must be a regular directory');
+  const manifest = parseManifest(await safeRead(join(directory, 'pet.json'), MAX_MANIFEST_BYTES));
+  const image = await safeRead(join(directory, manifest.spritesheetPath), MAX_PACK_BYTES);
+  validateAtlas(image, manifest);
+  const sleepingImage = manifest.remoteCodex ? await safeRead(join(directory, manifest.remoteCodex.sleeping.path), MAX_PACK_BYTES) : undefined;
+  if (sleepingImage) validateSleeping(sleepingImage, manifest);
+  if (image.length + (sleepingImage?.length ?? 0) > MAX_PACK_BYTES) fail('combined spritesheets exceed 8 MB');
+  return { manifest, image, directory, sleepingImage };
+}
+function crc32(bytes: Buffer): number {
+  let crc = 0xffffffff;
+  for (const byte of bytes) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; bit++) crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1));
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+// Inspect the central directory first; never materialize archive paths on disk.
+export function unpackPetZip(bytes: Buffer): Map<string, Buffer> {
+  if (bytes.length > MAX_PACK_BYTES + 65536) fail('zip exceeds 8 MB plus metadata');
+  let end = -1;
+  for (let i = bytes.length - 22; i >= Math.max(0, bytes.length - 65557); i--)
+    if (bytes.readUInt32LE(i) === 0x06054b50 && i + 22 + bytes.readUInt16LE(i + 20) === bytes.length) { end = i; break; }
+  if (end < 0) fail('zip end record missing');
+  const count = bytes.readUInt16LE(end + 10), centralSize = bytes.readUInt32LE(end + 12), centralOffset = bytes.readUInt32LE(end + 16);
+  if (bytes.readUInt16LE(end + 4) || bytes.readUInt16LE(end + 6) || bytes.readUInt16LE(end + 8) !== count || count > 32 || centralOffset + centralSize !== end) fail('multi-volume, ZIP64 or oversized archives are not supported');
+  const entries = new Map<string, Buffer>();
+  let offset = centralOffset, total = 0;
+  for (let i = 0; i < count; i++) {
+    if (offset + 46 > end || bytes.readUInt32LE(offset) !== 0x02014b50) fail('invalid central directory');
+    const flags = bytes.readUInt16LE(offset + 8), method = bytes.readUInt16LE(offset + 10), crc = bytes.readUInt32LE(offset + 16);
+    const compressed = bytes.readUInt32LE(offset + 20), size = bytes.readUInt32LE(offset + 24);
+    const nameLength = bytes.readUInt16LE(offset + 28), extraLength = bytes.readUInt16LE(offset + 30), commentLength = bytes.readUInt16LE(offset + 32);
+    const mode = bytes.readUInt32LE(offset + 38) >>> 16, localOffset = bytes.readUInt32LE(offset + 42);
+    const next = offset + 46 + nameLength + extraLength + commentLength;
+    if (next > end) fail('truncated directory');
+    const name = bytes.toString('utf8', offset + 46, offset + 46 + nameLength);
+    if (!name || name.includes('\\') || name.includes('\0') || name.startsWith('/') || /^[a-z]:/i.test(name) || name.split('/').some((part) => part === '..' || part === '.')) fail('unsafe zip path');
+    const kind = mode & 0xf000;
+    if (kind && kind !== 0x8000 && kind !== 0x4000) fail('zip symlinks and special files are not allowed');
+    if (flags & 1 || ![0, 8].includes(method)) fail('encrypted or unsupported zip compression');
+    if (size > MAX_PACK_BYTES || (total += size) > MAX_PACK_BYTES + MAX_MANIFEST_BYTES) fail('expanded zip exceeds size limit');
+    if (localOffset + 30 > centralOffset || bytes.readUInt32LE(localOffset) !== 0x04034b50) fail('invalid local header');
+    const localNameLength = bytes.readUInt16LE(localOffset + 26), localExtraLength = bytes.readUInt16LE(localOffset + 28);
+    const start = localOffset + 30 + localNameLength + localExtraLength;
+    if (start + compressed > centralOffset || bytes.toString('utf8', localOffset + 30, localOffset + 30 + localNameLength) !== name) fail('inconsistent local path');
+    if (entries.has(name)) fail('duplicate archive entry');
+    if (!name.endsWith('/')) {
+      let data: Buffer;
+      try { data = method === 0 ? Buffer.from(bytes.subarray(start, start + compressed)) : inflateRawSync(bytes.subarray(start, start + compressed), { maxOutputLength: Math.max(1, size) }); }
+      catch { return fail('invalid or oversized compressed entry'); }
+      if (data.length !== size || crc32(data) !== crc) fail('zip size or checksum mismatch');
+      entries.set(name, data);
+    }
+    offset = next;
+  }
+  if (offset !== end) fail('invalid central directory size');
+  return entries;
+}
+export async function importPetPack(source: string, userPetsDirectory: string, decode?: (bytes: Buffer) => boolean | Promise<boolean>, reservedIds: readonly string[] = []): Promise<PetPack> {
+  const stat = await lstat(source);
+  if (stat.isSymbolicLink()) fail('symlink sources are not allowed');
+  let manifest: PetManifest, image: Buffer, sleepingImage: Buffer | undefined;
+  if (stat.isDirectory()) ({ manifest, image, sleepingImage } = await loadPetPack(source));
+  else {
+    if (!source.toLowerCase().endsWith('.zip')) fail('choose a pet folder or .zip');
+    const files = unpackPetZip(await safeRead(source, MAX_PACK_BYTES + 65536));
+    const manifests = [...files.keys()].filter((name) => /(^|\/)pet\.json$/.test(name));
+    if (manifests.length !== 1) fail('zip must contain exactly one pet.json');
+    const root = manifests[0].slice(0, -'pet.json'.length);
+    manifest = parseManifest(files.get(manifests[0])!);
+    const atlas = files.get(root + manifest.spritesheetPath);
+    sleepingImage = manifest.remoteCodex ? files.get(root + manifest.remoteCodex.sleeping.path) : undefined;
+    if (!atlas || files.size !== (manifest.remoteCodex ? 3 : 2) || manifest.remoteCodex && !sleepingImage) fail('zip must contain only pet.json and its declared spritesheets');
+    if (sleepingImage) validateSleeping(sleepingImage, manifest);
+    image = atlas;
+    validateAtlas(image, manifest);
+  }
+  if (reservedIds.includes(manifest.id)) fail(`pet id ${manifest.id} is already installed`);
+  if (image.length + (sleepingImage?.length ?? 0) > MAX_PACK_BYTES) fail('combined spritesheets exceed 8 MB');
+  if (decode && (!await decode(image) || sleepingImage && !await decode(sleepingImage))) fail('cannot decode spritesheet pixels');
+  await mkdir(userPetsDirectory, { recursive: true });
+  const destination = join(userPetsDirectory, manifest.id), staging = join(userPetsDirectory, `.import-${randomUUID()}`);
+  await mkdir(staging);
+  try {
+    await writeFile(join(staging, 'pet.json'), JSON.stringify(manifest, null, 2));
+    await writeFile(join(staging, manifest.spritesheetPath), image);
+    if (sleepingImage && manifest.remoteCodex) await writeFile(join(staging, manifest.remoteCodex.sleeping.path), sleepingImage);
+    // Existing packs are immutable: an import may never replace a bundled/custom pack silently.
+    try { await lstat(destination); fail(`pet id ${manifest.id} is already installed`); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+    await rename(staging, destination);
+    return { manifest, image, directory: destination, sleepingImage };
+  } finally { await rm(staging, { recursive: true, force: true }); }
+}
+export async function listPetPacks(directories: string[]): Promise<PetPack[]> {
+  const packs = new Map<string, PetPack>();
+  for (const root of directories) {
+    const entries = await readdir(root, { withFileTypes: true }).catch(() => []);
+    for (const entry of entries) {
+      if (!entry.isDirectory() || entry.name.startsWith('.')) continue;
+      try { const pack = await loadPetPack(join(root, entry.name)); if (!packs.has(pack.manifest.id)) packs.set(pack.manifest.id, pack); }
+      catch { /* A malformed user pack must not prevent the bundled pet from loading. */ }
+    }
+  }
+  return [...packs.values()];
+}

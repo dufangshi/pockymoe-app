@@ -48,6 +48,8 @@ final class ProductWebController: UIViewController, WKNavigationDelegate, WKUIDe
         web.allowsBackForwardNavigationGestures = true
         web.scrollView.contentInsetAdjustmentBehavior = .never
         web.scrollView.bounces = false
+        web.scrollView.showsHorizontalScrollIndicator = false
+        web.scrollView.showsVerticalScrollIndicator = false
         web.accessibilityIdentifier = "productWebView"
         web.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(web)
@@ -162,6 +164,12 @@ final class ProductWebController: UIViewController, WKNavigationDelegate, WKUIDe
     }
     func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
         guard action.targetFrame?.isMainFrame != false, let url = action.request.url else { decisionHandler(.allow); return }
+        if trusted(url), url.path == "/__native/close" {
+            decisionHandler(.cancel)
+            if webView.canGoBack { webView.goBack() }
+            else if let home = URL(string: store.relayUrl + "/") { webView.load(URLRequest(url: home)) }
+            return
+        }
         if trusted(url) || url.scheme == "blob" { decisionHandler(.allow); return }
         decisionHandler(.cancel)
         if ["https", "http", "mailto", "tel"].contains(url.scheme ?? "") { UIApplication.shared.open(url) }

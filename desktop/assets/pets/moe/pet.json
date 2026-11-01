@@ -1,0 +1,18 @@
+{
+  "id": "moe",
+  "displayName": "Moe",
+  "description": "A cobalt axolotl who keeps an eye on your Remote Codex threads.",
+  "spritesheetPath": "spritesheet.webp",
+  "remoteCodex": {
+    "sleeping": {
+      "path": "sleeping.webp",
+      "frames": 4,
+      "durationsMs": [
+        900,
+        700,
+        900,
+        700
+      ]
+    }
+  }
+}

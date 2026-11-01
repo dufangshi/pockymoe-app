@@ -1,0 +1,39 @@
+appId: com.pockymoe.desktop
+productName: Pockymoe
+artifactName: ${productName}-${version}-${os}-${arch}.${ext}
+directories:
+  buildResources: build
+  output: release
+files:
+  - out/**
+  - build/*.png
+  - build/tray-*.ico
+  - package.json
+extraResources:
+  - from: assets/pets
+    to: pets
+    filter: ['**/*']
+mac:
+  category: public.app-category.developer-tools
+  icon: build/icon.icns
+  hardenedRuntime: true
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  target:
+    - target: dmg
+    - target: zip
+win:
+  icon: build/icon.ico
+  target:
+    - target: nsis
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+protocols:
+  name: Pockymoe
+  schemes: [pockymoe, remotecodex]
+publish:
+  provider: github
+  owner: dufangshi
+  repo: pockymoe-app

@@ -1,0 +1,66 @@
+/* Palette values mirror upstream themes/{id}/styles/tokens.css. Appearance sync supplies the resolved accent; local windows never fetch remote styles. */
+:root[data-theme-preset="plum-pocket"][data-theme-effective="dark"] {
+  --app-bg: #1b1022;
+  --app-fg: #f5e9d6;
+  --theme-surface: #2a1a35;
+  --theme-border: #3a2549;
+  --theme-fg-muted: #b9a2c0;
+  --theme-hover: #3a2349;
+  --theme-accent-soft: #42301b;
+  --theme-accent-solid: #f0b54a;
+  --matter-chrome: #170d1d;
+  --scrollbar-thumb-idle: rgb(106 70 130 / 45%);
+  --scrollbar-thumb: #6a4682;
+  --scrollbar-thumb-hover: rgb(240 181 74 / 75%);
+}
+:root[data-theme-preset="plum-pocket"][data-theme-effective="light"] {
+  --app-bg: #fbf4e8;
+  --app-fg: #2e1a35;
+  --theme-surface: #f8eedd;
+  --theme-border: #ead9c0;
+  --theme-fg-muted: #6e5875;
+  --theme-hover: #f1e2c9;
+  --theme-accent-soft: #fbe7bf;
+  --theme-accent-solid: #e8a93a;
+  --matter-chrome: #2f1a3b;
+  --scrollbar-thumb-idle: rgb(201 169 124 / 45%);
+  --scrollbar-thumb: #d4b88e;
+  --scrollbar-thumb-hover: rgb(232 169 58 / 80%);
+}
+:root[data-theme-preset="terminal"][data-theme-effective="dark"] {
+  --app-bg: #0b0d0c;
+  --app-fg: #e9efe9;
+  --theme-surface: #131615;
+  --theme-border: #2d3330;
+  --theme-fg-muted: #93a09a;
+  --theme-hover: #1b201e;
+  --theme-accent-soft: #0f2b20;
+  --theme-accent-solid: #4de3a2;
+  --matter-chrome: #0b0d0c;
+  --scrollbar-thumb-idle: #2d3330;
+  --scrollbar-thumb: #5b6560;
+  --scrollbar-thumb-hover: rgb(77 227 162 / 70%);
+  --scrollbar-radius: 0;
+}
+:root[data-theme-preset="terminal"][data-theme-effective="light"] {
+  --app-bg: #ffffff;
+  --app-fg: #0a0a0a;
+  --theme-surface: #f0f0ee;
+  --theme-border: #d6d6d1;
+  --theme-fg-muted: #5a5a55;
+  --theme-hover: #ececE8;
+  --theme-accent-soft: #dbe6ff;
+  --theme-accent-solid: #0a47c4;
+  --matter-chrome: #f0f0ee;
+  --scrollbar-thumb-idle: #d9d9d4;
+  --scrollbar-thumb: #a9a9a3;
+  --scrollbar-thumb-hover: rgb(10 71 196 / 65%);
+}
+:root[data-theme-preset=terminal]{font-family:ui-monospace,"SF Mono","Cascadia Mono",monospace} :root[data-theme-preset=terminal] button,:root[data-theme-preset=terminal] input,:root[data-theme-preset=terminal] select,:root[data-theme-preset=terminal] .setting-card{border-radius:2px}
+
+:root[data-theme-preset=plum-pocket] .pref-sidebar{color:#f6e9d2}
+:root[data-theme-preset=plum-pocket] .pref-brand small,:root[data-theme-preset=plum-pocket] .sidebar-bottom,:root[data-theme-preset=plum-pocket] .sidebar-bottom button,:root[data-theme-preset=plum-pocket] .nav-item svg{color:#b79cc0}
+:root[data-theme-preset=plum-pocket] .nav-item.selected{color:#f6e9d2;background:color-mix(in srgb,var(--theme-accent-solid) 22%,transparent)}
+:root[data-theme-preset=plum-pocket] .nav-item.selected svg{color:var(--theme-accent-solid)}
+
+@media(hover:hover){:root[data-theme-preset=plum-pocket] .pref-sidebar .nav-item:hover,:root[data-theme-preset=plum-pocket] .sidebar-bottom button:hover{background:color-mix(in srgb,#f6e9d2 8%,transparent);color:#f6e9d2}:root[data-theme-preset=plum-pocket] .pref-sidebar .nav-item.selected:hover{background:color-mix(in srgb,var(--theme-accent-solid) 22%,transparent)}}

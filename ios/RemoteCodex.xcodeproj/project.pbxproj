@@ -7,8 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-        D0D0D0D0D0D0D0D0D0D0D001 /* native-bridge.js in Resources */ = {isa = PBXBuildFile; fileRef = D0D0D0D0D0D0D0D0D0D0D002; };
 		05CCA3E32E28E12558B4249B /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100A28395AD9249007892B6B /* Theme.swift */; };
+		1F6F27A62C0F6815B4761169 /* native-bridge.js in Resources */ = {isa = PBXBuildFile; fileRef = 34686CB902BE2B65E8948084 /* native-bridge.js */; };
 		30619D85A639E15267F80C8E /* SessionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD620A3F2229D517B02A755E /* SessionStore.swift */; };
 		3A23EBA385C41E209FD38C82 /* RemoteCodexApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B582C49511E8012D3779A31 /* RemoteCodexApp.swift */; };
 		3AD446CEDDCAB344691F851C /* ThreadWebView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A6226F10BCBCF75780F727F /* ThreadWebView.swift */; };
@@ -35,13 +35,13 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
-        D0D0D0D0D0D0D0D0D0D0D002 /* native-bridge.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = ../web/native-bridge.js; sourceTree = SOURCE_ROOT; };
 		04FECA0E850860B8AC4CBA61 /* RemoteCodexUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = RemoteCodexUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		100A28395AD9249007892B6B /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
 		15AE2BF1DDBD2E6CCB66D786 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		1D8938FC70E7D30BF5DE7202 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
 		20B8D46B37DE808A09C6B86E /* RemoteCodexUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteCodexUITests.swift; sourceTree = "<group>"; };
 		2B582C49511E8012D3779A31 /* RemoteCodexApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteCodexApp.swift; sourceTree = "<group>"; };
+		34686CB902BE2B65E8948084 /* native-bridge.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = "native-bridge.js"; sourceTree = "<group>"; };
 		4D38F8A2105252D4BD4D5680 /* Components.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Components.swift; sourceTree = "<group>"; };
 		52E282EC58A24F97EC20C184 /* EventWatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventWatcher.swift; sourceTree = "<group>"; };
 		69B1D02571E1DF177175B33E /* RemoteCodex.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = RemoteCodex.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -135,9 +135,18 @@
 			path = ThreadWeb;
 			sourceTree = "<group>";
 		};
+		BC55688C603659B45774BA22 /* web */ = {
+			isa = PBXGroup;
+			children = (
+				34686CB902BE2B65E8948084 /* native-bridge.js */,
+			);
+			path = web;
+			sourceTree = "<group>";
+		};
 		BCA123D6461D26C7DF87D803 = {
 			isa = PBXGroup;
 			children = (
+				FD466F578995947AEC9E52F7 /* remote-codex-app */,
 				0F2339B4A16BEA2302FE5375 /* RemoteCodex */,
 				3928E330EF06B715CDD913B2 /* RemoteCodexUITests */,
 				83562AAAEC3F3EF6AD7C188E /* Products */,
@@ -159,6 +168,15 @@
 				100A28395AD9249007892B6B /* Theme.swift */,
 			);
 			path = Design;
+			sourceTree = "<group>";
+		};
+		FD466F578995947AEC9E52F7 /* remote-codex-app */ = {
+			isa = PBXGroup;
+			children = (
+				BC55688C603659B45774BA22 /* web */,
+			);
+			name = "remote-codex-app";
+			path = ..;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -244,7 +262,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				DD103EE72FEF3C4C48FE40BE /* Assets.xcassets in Resources */,
-                D0D0D0D0D0D0D0D0D0D0D001 /* native-bridge.js in Resources */,
+				1F6F27A62C0F6815B4761169 /* native-bridge.js in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -293,6 +311,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
+				APS_ENVIRONMENT = development;
 				CLANG_ANALYZER_NONNULL = YES;
 				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
@@ -383,7 +402,6 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = RemoteCodex/RemoteCodex.entitlements;
-				APS_ENVIRONMENT = development;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = RemoteCodex/Info.plist;
@@ -403,7 +421,6 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = RemoteCodex/RemoteCodex.entitlements;
-				APS_ENVIRONMENT = production;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = RemoteCodex/Info.plist;
@@ -442,6 +459,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
+				APS_ENVIRONMENT = production;
 				CLANG_ANALYZER_NONNULL = YES;
 				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
