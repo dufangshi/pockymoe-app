@@ -28,7 +28,7 @@ export interface HostCapabilities {
   };
 }
 
-export type ActivityState = 'needsInput' | 'failed' | 'completed' | 'running' | 'idle';
+export type ActivityState = 'needsInput' | 'failed' | 'interrupted' | 'completed' | 'running' | 'idle';
 
 export interface ActivityRequest {
   id: string;
@@ -64,7 +64,7 @@ export interface ActivitySnapshot {
   accountId: string;
   /** Thread the focused main window is showing, or null. */
   focusedThreadKey: string | null;
-  /** needsInput, failed (unread, last 24h), completed (unread) and running only. */
+  /** needsInput, failed/interrupted (unread, last 24h), completed (unread) and running only. */
   items: ActivityItem[];
 }
 
