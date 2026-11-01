@@ -45,7 +45,8 @@ Import… accepts a Codex pet folder or ZIP containing `pet.json` and its sprite
 sheet. Show pet, size, mini mode and sound take effect immediately. Alt+Space
 opens the quick window by default; choose another accelerator in Shortcuts if
 that key is already used. Closing the main window keeps the app in the menu bar
-or tray. Cmd/Ctrl+Q or Quit Pockymoe exits.
+or tray. Its Web activity source keeps running while hidden; native alerts and
+the pet continue receiving changes. Cmd/Ctrl+Q or Quit Pockymoe exits.
 
 ## Connection discovery
 
@@ -103,7 +104,7 @@ Local DOM controls follow the approved Electron utility-window exception in
 upstream `docs/ui-principles.md`, including keyboard/focus behavior, ErrorMark
 feedback and custom overlay scrollbars. Local forms use drawn switches and a
 root-level DOM picker with arrows, Home/End, typeahead, Enter/Space, Escape and
-focus restoration. A source guard prevents native selects in shell renderers.
+focus restoration. A source guard prevents native selects throughout desktop renderer source.
 Preferences uses compact divided rows; Pet includes atlas thumbnails, attribution,
 license/source links and edge auto-hide. About includes bundled artwork credits.
 Atlas files are served on demand through the local session's `pockymoe-pet:`
@@ -115,7 +116,10 @@ older items stay visible as history without emitting alerts or pet reactions.
 For older pages without that metadata, the hub waits for two snapshots containing
 the device. Missing items remain in the shared snapshot for 60 seconds, so a
 short device/network gap does not resolve requests or change the pet's state.
-Explicit state/request changes still resolve immediately. Recent-thread metadata
+Explicit state/request changes still resolve immediately. Terminal status, unread
+and completion timestamps can arrive separately; the hub rechecks a newly unread
+result or a timestamp corrected past the device baseline, then stable IDs prevent
+repeat alerts. Recent-thread metadata
 is validated and limited to five entries. `petEdgeHide` defaults to true and is
 persisted alongside the other pet settings.
 
@@ -223,6 +227,39 @@ Control+Option+Shift+P chord. App-scoped CUA injection did not activate the glob
 hotkey in this environment, so physical HID delivery is not claimed by the
 callback test. The temporary profile is removed on exit. Safe evidence goes to
 `.local/desktop-evidence/shell/packaged/`.
+
+### Alert integration QA
+
+With the isolated fixture already running and the current signed macOS bundle
+built, run `node test/packaged-alerts-qa.mjs`. Set
+`POCKYMOE_PACKAGED_EXECUTABLE` to test another bundle executable. The driver signs
+in with a fresh temporary profile, records actual hub events, pet state changes,
+delivery decisions, native Notification construction and both dismissal paths.
+It checks Dock visibility before/after close-to-tray and reopen, and confirms the
+exact process is a foreground Pockymoe app in Launch Services.
+
+The real authenticated backend fixture remains distinct from a supplemental
+60-second, 250-item contract stress case (11 devices, 21 workspaces). The latter
+checks historical silence and mood stability in the packaged main/pet processes.
+Rendered control-bar buttons must cause no sprite-window bounds changes.
+Idle time/proximity inputs are simulated inside the isolated test process;
+Notification Center permission/display, physical clicks and OS shortcuts still
+need the owner's observation. The test invokes the real native notification's
+click handler and clicks the rendered pet bubble button. Neither is presented
+as proof of an OS-delivered Notification Center click.
+
+In the default Pet first mode, new completion/failure events use the pet while
+the owner is active; system notices are added when idle for two minutes or the
+pet is hidden. Explicit System or Both settings take precedence. Focused-thread
+and snooze suppression still apply. Decision logs include event type because a
+turn's started and completed/failed events intentionally share one alert ID.
+
+For a focused event-matrix rerun, `POCKYMOE_PACKAGED_QA_PHASE=matrix` reuses
+`packaged-alerts-history-proof.json` only if its 60-second history/geometry checks
+passed and its `app.asar` SHA256 exactly matches the executable under test.
+`POCKYMOE_PACKAGED_QA_CASE` can select one named case. Each report records this
+scope explicitly; an unknown case or missing/mismatched proof fails. New app
+artifacts require a full run.
 
 ### Windows build on a Windows runner
 
