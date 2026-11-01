@@ -124,6 +124,8 @@ export interface DesktopSettings {
   petSize: 'S' | 'M' | 'L';
   petMini: boolean;
   petSound: boolean;
+  /** Hide the character past the screen edge when docked; default true. */
+  petEdgeHide: boolean;
   launchAtLogin: boolean;
   /** Electron accelerator; default 'Alt+Space'. */
   quickWindowShortcut: string;
