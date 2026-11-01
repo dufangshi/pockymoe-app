@@ -1,7 +1,11 @@
 import './styles.css';
+import lucideNotice from './NOTICE?raw';
+// Preserve the copied Web rail icon's licence in the distributed renderer.
+document.head.append(document.createComment(lucideNotice));
 import { ANIMATIONS, frameAt, type SpriteState } from './animation';
 import { activityStatus, statusMarkStyles, statusMarkSvg, type StatusMark } from '../shared/statusMarks';
 import { applyAppearance } from '../shared/appearance';
+import { accentForeground, bubbleOutline, escapeHtml, requestSummaryHtml } from './presentation';
 import { scrollGeometry } from './scroll';
 import type { ActivityItem } from '../shared/contract';
 import type { PetAction, PetBridge, PetViewState } from './bridge';
@@ -18,11 +22,16 @@ let animationState: SpriteState = 'idle', animationStart = performance.now(), fr
 let lastMeasure = '';
 let lastPointer: { clientX: number; clientY: number } | null = null;
 let alpha: Uint8ClampedArray | null = null, lastImage = '', lastSound = 0, lastBubble = '';
+let lastAccent = '';
+const accentCanvas = document.createElement('canvas'); accentCanvas.width = 1; accentCanvas.height = 1;
+const accentContext = accentCanvas.getContext('2d', { willReadFrequently: true })!;
 const canvas = document.createElement('canvas'), context = canvas.getContext('2d', { willReadFrequently: true })!;
 const text = (zh: string, en: string): string => state?.locale.startsWith('zh') ? zh : en;
-const escape = (value: string): string => value.replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]!);
-const paths: Record<string, string> = { chat: '<path d="M3 3.5h10v7H7l-4 3z"/>', tasks: '<rect x="3" y="2.5" width="10" height="11" rx="2"/><path d="M6 6h4M6 9h4"/>', home: '<path d="m2 7 6-5 6 5M4 6v8h8V6M7 14v-4h2v4"/>', more: '<circle cx="3" cy="8" r=".6"/><circle cx="8" cy="8" r=".6"/><circle cx="13" cy="8" r=".6"/>', close: '<path d="m5 5 6 6M11 5l-6 6"/>', send: '<path d="M8 13V3m-4 4 4-4 4 4"/>', check: '<path d="m3 8 3 3 7-7"/>', map: '<rect x="2" y="2" width="7" height="5" rx="1"/><rect x="11" y="2" width="3" height="12" rx="1"/><rect x="2" y="9" width="7" height="5" rx="1"/>', moon: '<path d="M12.5 10A5 5 0 0 1 6 3a5 5 0 1 0 6.5 7Z"/>' };
-const icon = (name: string): string => `<svg viewBox="0 0 16 16" aria-hidden="true">${paths[name] ?? paths.tasks}</svg>`;
+const escape = escapeHtml;
+const paths: Record<string, string> = { chat: '<path d="M3 3.5h10v7H7l-4 3z"/>', tasks: '<rect x="3" y="2.5" width="10" height="11" rx="2"/><path d="M6 6h4M6 9h4"/>', home: '<path d="m2 7 6-5 6 5M4 6v8h8V6M7 14v-4h2v4"/>', more: '<circle cx="3" cy="8" r=".6"/><circle cx="8" cy="8" r=".6"/><circle cx="13" cy="8" r=".6"/>', close: '<path d="m5 5 6 6M11 5l-6 6"/>', send: '<path d="M8 13V3m-4 4 4-4 4 4"/>', check: '<path d="m3 8 3 3 7-7"/>', map: '<rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/>', moon: '<path d="M12.5 10A5 5 0 0 1 6 3a5 5 0 1 0 6.5 7Z"/>' };
+// LayoutDashboard matches the Web rail in DesktopShell/MatterWorkbench (Lucide, ISC; see NOTICE).
+const icon = (name: string): string => `<svg viewBox="${name === 'map' ? '0 0 24 24' : '0 0 16 16'}" ${name === 'map' ? 'class="map-icon" data-icon="thread-map"' : ''} aria-hidden="true">${paths[name] ?? paths.tasks}</svg>`;
+function requestHeading(item: ActivityItem): string { return item.request?.kind === 'approval' ? text('需要你批准', 'Approval needed') : text('需要你回答', 'Answer needed'); }
 function status(item: ActivityItem): string {
   const kind = activityStatus(item);
   const labels: Record<StatusMark, [string, string]> = { running: ['运行中', 'Running'], unread: ['已完成，未读', 'Completed, unread'], failed: ['失败', 'Failed'], interrupted: ['已中断', 'Interrupted'], waiting: ['等待你', 'Waiting for you'], idle: ['已读，空闲', 'Read, idle'], 'agents-running': ['智能体线程运行中', 'Agents running'], unknown: ['状态未知', 'Unknown status'] };
@@ -31,17 +40,22 @@ function status(item: ActivityItem): string {
 function elapsed(milliseconds: number): string { const seconds = Math.floor(Math.max(0, milliseconds) / 1000); return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`; }
 function button(action: string, label: string, body = escape(label), extra = ''): string { return `<button type="button" data-action="${action}" aria-label="${escape(label)}" title="${escape(label)}" ${extra}>${body}</button>`; }
 function taskCard(item: ActivityItem): string {
-  const approval = item.state === 'needsInput' && item.request?.kind === 'approval';
+  const waiting = item.state === 'needsInput';
+  const approval = waiting && item.request?.kind === 'approval';
   const actions = (approval ? button('approve', text('批准', 'Approve'), undefined, 'class="primary"') + button('deny', text('拒绝', 'Deny')) : '')
     + button('open', text('打开', 'Open')) + (item.state === 'completed' || item.request?.kind === 'input' ? button('target', text('回复', 'Reply')) : '') + button('revealInMap', text('在地图中显示', 'Show in map'), icon('map'), 'class="map-action"');
-  return `<article class="task" data-key="${escape(item.key)}"><div class="task-title">${status(item)}<strong title="${escape(item.title)}">${escape(item.title)}</strong>${item.state === 'running' ? `<span class="timer" data-since="${escape(item.since)}">${elapsed(Date.now() - Date.parse(item.since))}</span>` : ''}</div><div class="meta" title="${escape(item.deviceName + ' · ' + item.workspaceLabel)}">${escape(item.deviceName)} · ${escape(item.workspaceLabel)}</div>${item.request?.summary || item.resultSummary ? `<div class="summary" title="${escape(item.request?.summary ?? item.resultSummary ?? '')}">${escape(item.request?.summary ?? item.resultSummary ?? '')}</div>` : ''}<div class="actions">${actions}</div></article>`;
+  const title = `<div class="task-title">${waiting ? '' : status(item)}<strong title="${escape(item.title)}">${escape(item.title)}</strong>${item.state === 'running' ? `<span class="timer" data-since="${escape(item.since)}">${elapsed(Date.now() - Date.parse(item.since))}</span>` : ''}</div>`;
+  const summary = item.request?.summary ?? item.resultSummary;
+  const summaryHtml = summary ? `<div class="summary ${waiting ? 'request-summary' : ''}" title="${escape(summary)}">${waiting ? requestSummaryHtml(summary) : escape(summary)}</div>` : '';
+  const meta = `<div class="meta" title="${escape(item.deviceName + ' · ' + item.workspaceLabel)}">${escape(item.deviceName)} · ${escape(item.workspaceLabel)}</div>`;
+  return `<article class="task ${waiting ? 'waiting' : ''}" data-key="${escape(item.key)}">${waiting ? `<div class="request-kicker">${status(item)}${escape(requestHeading(item))}</div>` : ''}${title}${waiting ? summaryHtml + meta : meta + summaryHtml}<div class="actions">${actions}</div></article>`;
 }
 function bubbleText(): string {
   const events = state?.bubble?.events ?? [], event = events[events.length - 1];
   if (!event) return '';
   if (events.length > 1) return text(`${events.length} 个任务完成`, `${events.length} tasks completed`);
   const item = event.item;
-  if (event.type === 'needsInput') return `${item.title} ${item.request?.kind === 'approval' ? text('需要你批准', 'needs approval') : text('需要你回复', 'needs your reply')}：${item.request?.summary ?? ''}`;
+  if (event.type === 'needsInput') return `${requestHeading(item)}\n${item.title}\n${item.request?.summary ?? ''}`;
   if (event.type === 'failed') return `${item.title} · ${item.resultSummary || text('遇到了一点问题', 'Something went wrong')}`;
   return `${item.title} ${text('完成了', 'completed')}${item.durationMs ? ` · ${elapsed(item.durationMs)}` : ''}`;
 }
@@ -70,7 +84,7 @@ function render(): void {
     <div class="stack ${state.panelAbove ? 'above' : 'below'}" style="top:${stackTop}px;bottom:${stackBottom}px;${state.panelAbove ? 'justify-content:flex-end' : ''}">
     ${state.error || actionError ? `<div class="surface error-banner" role="alert">${escape(state.error || actionError)}</div>` : ''}
     ${state.tray ? `<section class="tray surface" aria-label="${escape(text('活动任务', 'Activity'))}" style="max-height:${state.panelHeight}px"><header class="tray-header"><span class="tray-title">${escape(text('活动', 'Activity'))}</span><span class="tray-subtitle">${escape(text('跨设备 · 跨工作区', 'Across your workspaces'))}</span>${button('toggleTray', text('关闭任务', 'Close tasks'), icon('close'), 'class="close"')}</header><div class="scroll-frame" data-scroll-area><div class="task-list scroll-content" id="pet-task-list">${state.items.length ? groups.filter(([, list]) => list.length).map(([name, list]) => `<div class="group-label">${name}<span>${list.length}</span></div>${list.map(taskCard).join('')}`).join('') : `<div class="empty">${icon('check')}<div>${escape(text('一切就绪，交给我吧', 'All caught up. Ready when you are.'))}</div></div>`}</div><div class="scroll-track" role="scrollbar" aria-label="${escape(text('滚动活动任务', 'Scroll activity'))}" aria-controls="pet-task-list" aria-orientation="vertical" aria-valuemin="0" tabindex="0" hidden><div class="scroll-thumb"></div></div></div></section>` : ''}
-    ${bubble ? `<aside class="bubble surface" data-key="${escape(bubbleItem?.key ?? '')}" style="--tail:${Math.max(14, Math.min(250, pet.x + pet.width / 2 - 36))}px"><div class="bubble-kicker">${status(bubble.events[0].item)}${escape(bubble.sticky ? text('需要你', 'Needs you') : text('任务动态', 'Task update'))}</div>${button('bubbleOpen', bubbleText(), escape(bubbleText()), 'class="bubble-text"')}<div class="bubble-actions">${bubbleApproval ? button('approve', text('批准', 'Approve'), undefined, 'class="primary"') + button('deny', text('拒绝', 'Deny')) : ''}${button('revealInMap', text('在地图中显示', 'Show in map'), icon('map'), 'class="map-action"')}</div>${button('dismiss', text('关闭提醒', 'Dismiss alert'), icon('close'), 'class="close"')}</aside>` : ''}
+    ${bubble ? `<aside class="bubble surface" data-key="${escape(bubbleItem?.key ?? '')}"><svg class="bubble-frame" aria-hidden="true"><path fill="var(--theme-bg)" stroke="var(--theme-border)" stroke-width="1" vector-effect="non-scaling-stroke"/></svg><div class="bubble-kicker">${status(bubble.events[0].item)}${escape(bubble.sticky && bubbleItem ? requestHeading(bubbleItem) : text('任务动态', 'Task update'))}</div>${button('bubbleOpen', bubble.sticky && bubbleItem ? bubbleItem.title : bubbleText(), escape(bubble.sticky && bubbleItem ? bubbleItem.title : bubbleText()), `class="${bubble.sticky ? 'bubble-title' : 'bubble-text'}"`)}${bubble.sticky && bubbleItem?.request?.summary ? `<div class="request-summary" title="${escape(bubbleItem.request.summary)}">${requestSummaryHtml(bubbleItem.request.summary)}</div>` : ''}<div class="bubble-actions">${bubbleApproval ? button('approve', text('批准', 'Approve'), undefined, 'class="primary"') + button('deny', text('拒绝', 'Deny')) : ''}${button('revealInMap', text('在地图中显示', 'Show in map'), icon('map'), 'class="map-action"')}</div>${button('dismiss', text('关闭提醒', 'Dismiss alert'), icon('close'), 'class="close"')}</aside>` : ''}
     ${state.chat ? `<form class="chat surface" id="chat-form"><label class="chat-target">${target ? status(target) : icon('chat')}<select id="target-select" aria-label="${escape(text('回复目标线程', 'Target thread'))}">${state.targets.map((item) => `<option value="${escape(item.key)}" ${item.key === target?.key ? 'selected' : ''}>${escape(item.title)}</option>`).join('')}</select></label><div class="chat-input-row"><input id="reply-input" aria-label="${escape(text('回复', 'Reply'))}" placeholder="${escape(target ? text('继续这个任务…', 'Continue this task…') : text('暂无活动线程', 'No active threads'))}" value="${escape(draft)}" autocomplete="off" maxlength="16000" ${!target || sendState === 'sending' ? 'disabled' : ''}><button class="send" aria-label="${escape(text('发送回复', 'Send reply'))}" ${!target || sendState === 'sending' ? 'disabled' : ''}>${icon(sendState === 'sent' ? 'check' : 'send')}</button></div><div class="chat-status ${sendState === 'error' ? 'error' : ''}" role="status">${escape(sendState === 'sending' ? text('正在发送…', 'Sending…') : sendState === 'sent' ? text('已发送', 'Sent') : sendState === 'error' ? sendError : text('Enter 发送', 'Enter to send'))}</div></form>` : ''}</div>
     ${menu ? `<section class="more surface" role="menu" aria-label="${escape(text('宠物偏好', 'Pet preferences'))}" style="left:${Math.min(innerWidth - 216, Math.max(16, cx + 44))}px;${cy > innerHeight / 2 ? `bottom:${innerHeight - cy + 8}px` : `top:${cy + 44}px`};max-height:${innerHeight - 28}px;overflow:auto">${button('mini', text('Mini 模式', 'Mini mode'), escape(text('Mini 模式', 'Mini mode')) + (state.settings.petMini ? icon('check') : ''))}<div class="more-label">${escape(text('宠物大小', 'Pet size'))}</div><div class="sizes">${(['S', 'M', 'L'] as const).map((size) => button(`size-${size}`, size, size, `class="${state!.settings.petSize === size ? 'selected' : ''}"`)).join('')}</div><label class="more-label" for="pack-select">${escape(text('选择宠物', 'Choose pet'))}</label><select class="pack-select" id="pack-select">${state.packs.map((pack) => `<option value="${escape(pack.id)}" ${pack.id === state!.settings.petId ? 'selected' : ''}>${escape(pack.displayName)}</option>`).join('')}</select>${button('importFolder', text('导入文件夹…', 'Import folder…'))}${button('importZip', text('导入 ZIP…', 'Import ZIP…'))}<hr>${button('sound', text('轻触提示音', 'Soft click sound'), escape(text('轻触提示音', 'Soft click sound')) + (state.settings.petSound ? icon('check') : ''))}${button('preferences', text('偏好设置…', 'Preferences…'))}${button('hide', text('隐藏桌宠', 'Hide pet'))}</section>` : ''}<div class="live-announcement" aria-live="polite">${escape(bubbleText())}</div>`;
   if (focused === 'reply-input' && state.chat) { const input = document.querySelector<HTMLInputElement>('#reply-input'); input?.focus(); if (selection !== null) input?.setSelectionRange(selection, selection); }
@@ -79,7 +93,9 @@ function render(): void {
   else if (focused && focused !== 'reply-input') document.getElementById(focused)?.focus();
   const list = document.querySelector<HTMLElement>('.task-list'); if (list) list.scrollTop = savedScroll;
   paintSprite();
+  updateBubbleFrame();
   requestAnimationFrame(() => {
+    updateBubbleFrame();
     updateScrollArea();
     const list = document.querySelector<HTMLElement>('.task-list'), header = document.querySelector<HTMLElement>('.tray-header');
     const measured = { type: 'measure' as const, tray: list && header ? list.scrollHeight + header.offsetHeight : 0, bubble: document.querySelector<HTMLElement>('.bubble')?.offsetHeight ?? 0, chat: document.querySelector<HTMLElement>('.chat')?.offsetHeight ?? 0 };
@@ -185,6 +201,12 @@ bridge.onState((next) => {
   const previousChat = state?.chat;
   state = next; document.documentElement.lang = next.locale;
   applyAppearance(next.appearance);
+  const accent = document.documentElement.style.getPropertyValue('--theme-accent-solid');
+  if (accent !== lastAccent) {
+    lastAccent = accent; accentContext.clearRect(0, 0, 1, 1); accentContext.fillStyle = accent; accentContext.fillRect(0, 0, 1, 1);
+    const [red, green, blue] = accentContext.getImageData(0, 0, 1, 1).data;
+    document.documentElement.style.setProperty('--theme-accent-solid-fg', accentForeground(red, green, blue));
+  }
   if (animationState !== next.mood) { animationState = next.mood; animationStart = performance.now(); frame = 0; }
   const activeImage = next.mood === 'sleeping' && next.sleeping ? next.sleeping.imageUrl : next.imageUrl;
   if (lastImage !== activeImage) {
@@ -244,3 +266,14 @@ window.addEventListener('keydown', (event) => {
   const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 : (index + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
   event.preventDefault(); items[next]?.focus();
 });
+
+function updateBubbleFrame(): void {
+  const bubble = root.querySelector<HTMLElement>('.bubble'), frame = bubble?.querySelector<SVGSVGElement>('.bubble-frame'), path = frame?.querySelector('path');
+  if (!bubble || !frame || !path || !state) return;
+  const bounds = bubble.getBoundingClientRect(), character = root.querySelector('#character')?.getBoundingClientRect();
+  const headX = (character ? character.left + character.width / 2 : state.pet.x + state.pet.width / 2) - bounds.left;
+  const outline = bubbleOutline(bounds.width, bounds.height, headX, state.panelAbove);
+  frame.setAttribute('viewBox', `0 0 ${bounds.width} ${outline.canvasHeight}`);
+  frame.style.height = `${outline.canvasHeight}px`; frame.style.top = `${outline.offsetTop}px`;
+  path.setAttribute('d', outline.path); bubble.dataset.tailX = String(outline.tailX); bubble.dataset.headX = String(headX);
+}

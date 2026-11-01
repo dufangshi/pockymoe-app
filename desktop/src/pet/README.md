@@ -39,8 +39,10 @@ node src/pet/tools/capture.mjs
 
 The last two commands use a mock ActivityHub, an isolated temporary userData, and
 an independent Electron process. Screenshots/results go to
-`/tmp/rc-desktop/evidence/pet/v2/`; no Supervisor or real account is accessed.
+`/tmp/rc-desktop/evidence/pet/v3/`; no Supervisor or real account is accessed.
 `node src/pet/tools/generate-placeholder.mjs` recreates the original procedural
 atlas for tests. Production packaging must exclude `assets/pets/placeholder/**`.
 
 Appearance follows the host v2 `appearance()` / `onAppearance` callbacks through the shared appearance helper. Status SVGs come directly from `shared/statusMarks.ts`. The capture script checks Classic, Plum Pocket and Terminal in light/dark on 1440px and 900px work areas; `--smoke` selects Classic on a 900px work area.
+
+For request/bubble polish only, run `node src/pet/tools/capture.mjs --polish`. It covers approval/input hierarchy, command chips, matching rail icons, action focus/contrast, both tail orientations and edge clamping across all three packs in light/dark mode.
