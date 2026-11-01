@@ -124,6 +124,8 @@ export interface DesktopSettings {
   petSize: 'S' | 'M' | 'L';
   petMini: boolean;
   petSound: boolean;
+  /** Read alerts aloud with the system voice; default false. */
+  petVoice: boolean;
   /** Hide the character past the screen edge when docked; default true. */
   petEdgeHide: boolean;
   launchAtLogin: boolean;
@@ -209,8 +211,10 @@ export type PetMood =
 export interface PetControllerDeps {
   hub: ActivityHubLike;
   settings: SettingsStoreLike;
-  /** Focus the main window and run a command in the relay page (navigate, approve, reply, ...). */
+  /** Run a command in the relay page; only commands that show something raise the main window. */
   dispatch(command: Omit<HostCommand, 'id'>): Promise<HostCommandResult>;
+  /** Opens the Preferences window without touching the page. */
+  openPreferences(section?: 'general' | 'pet' | 'shortcuts'): void;
   /** Whether the delivery policy wants the pet to speak for this event (§5.2). */
   shouldSpeak(event: ActivityEvent): boolean;
   /** Directory holding bundled and imported pet packs. */

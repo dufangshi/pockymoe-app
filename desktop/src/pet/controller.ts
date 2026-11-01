@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import type { ActivityItem, ActivityRecent, Appearance, HostCommand, HostCommandResult, PetController, PetControllerDeps } from '../shared/contract';
 import { resolveLocale, setLocale, t } from '../shared/i18n';
-import { conversationKey } from '../shared/activityGroups';
+import { conversationKey, conversationTitle } from '../shared/activityGroups';
 import { ANIMATIONS } from './animation';
 import { BubbleQueue } from './bubbles';
 import { dockPosition, PET_HEIGHT, petLayout, restorePosition, surfaceLayout, type PetPosition } from './geometry';
@@ -11,7 +11,7 @@ import { importPetPack as importPack, listPetPacks, imageDimensions, type PetPac
 import { petConversations } from './conversations';
 import { StableMood, withoutResolvedRequest } from './stability';
 import { configureOverlay, glassOptions } from './windows';
-import type { PetAction, PetViewState } from './bridge';
+import type { PetAction, PetCue, PetViewState } from './bridge';
 
 type Command = HostCommand extends infer C ? C extends { id: string } ? Omit<C, 'id'> : never : never;
 export function createPetController(deps: PetControllerDeps): PetController {
@@ -36,7 +36,7 @@ export function createPetController(deps: PetControllerDeps): PetController {
   let disposed = false, visible = settings.petVisible, near = false, peek = false, dockAmount = 0;
   let mode: PetViewState['mode'] = 'controls', panel = false, menu = false, detailOpen = false;
   let lastSprite = '', lastGlass = '', readySprite = false, readyGlass = false, glassDismissed = false;
-  let hoverSince = 0, awaySince = 0, alertPeekUntil = 0, lastOpacity = 1;
+  let hoverSince = 0, awaySince = 0, alertPeekUntil = 0, lastOpacity = 1, lastCue = 0, lastSpeech = 0, controlsPinned = false;
   let blurTimer: ReturnType<typeof setTimeout> | undefined;
   let drag: { x: number; y: number; origin: PetPosition; moved: boolean } | null = null;
   const completedConversations = new Map<string, number>();
@@ -44,7 +44,7 @@ export function createPetController(deps: PetControllerDeps): PetController {
   let position = restorePosition(positions[String(lastDisplayId ?? primary.id)], screen.getAllDisplays(), primary, PET_HEIGHT[settings.petSize]);
   dockAmount = position.edge && settings.petEdgeHide !== false ? 1 : 0;
   const preload = join(__dirname, '../preload/pet.js');
-  const security = { preload, contextIsolation: true, sandbox: true, nodeIntegration: false, webSecurity: true };
+  const security = { preload, contextIsolation: true, sandbox: true, nodeIntegration: false, webSecurity: true, autoplayPolicy: 'no-user-gesture-required' as const };
   const window = new BrowserWindow({ ...petLayout(position, (screen.getAllDisplays().find(candidate => candidate.id === position.displayId) ?? primary).workArea, PET_HEIGHT[settings.petSize]).window, show: false, transparent: true, frame: false,
     focusable: false, hasShadow: false, skipTaskbar: true, resizable: false, maximizable: false, minimizable: false,
     ...(process.platform === 'darwin' ? { type: 'panel' as const } : {}), webPreferences: security });
@@ -76,7 +76,13 @@ export function createPetController(deps: PetControllerDeps): PetController {
     const before = glass.getBounds();
     if (Object.keys(bounds).some(key => bounds[key as keyof typeof bounds] !== before[key as keyof typeof before])) glass.setBounds(bounds);
   }
-  function closeSurface(): void { panel = false; menu = false; detailOpen = false; mode = 'controls'; glassDismissed = true; emit(); }
+  function closeSurface(): void { panel = false; menu = false; detailOpen = false; controlsPinned = false; mode = 'controls'; glassDismissed = true; emit(); }
+  function cue(sound: PetCue['sound'], speech?: string): void {
+    const now = Date.now(), wanted: PetCue = { locale: uiLocale };
+    if (sound && settings.petSound && now - lastCue >= 800) { wanted.sound = sound; lastCue = now; }
+    if (speech && settings.petVoice && now - lastSpeech >= 2500) { wanted.speech = speech; lastSpeech = now; }
+    if ((wanted.sound || wanted.speech) && readySprite && !window.isDestroyed()) window.webContents.send('rcDesktop:pet:cue', wanted);
+  }
   // macOS can deliver the prior panel's blur after a rapid close/reopen. Verify
   // settled native focus so that stale blur never tears down the newly opened UI.
   glass.on('blur', () => {
@@ -90,7 +96,8 @@ export function createPetController(deps: PetControllerDeps): PetController {
   function openSurface(next: 'panel' | 'menu', selectedKey: string | null = null): void {
     panel = next === 'panel'; menu = next === 'menu'; detailOpen = false; mode = next; glassDismissed = false; peek = true;
     if (panel) targetKey = selectedKey;
-    glass.setFocusable(true); emit(); glass.show(); glass.focus();
+    // show() would activate the app and raise the main window; a panel takes key focus without that.
+    glass.setFocusable(true); emit(); glass.showInactive(); glass.focus();
   }
   function emit(): void {
     if (disposed) return;
@@ -100,17 +107,18 @@ export function createPetController(deps: PetControllerDeps): PetController {
     for (const event of expiring) deps.hub.acknowledge(event.alertId, 'pet');
     const snoozed = !!settings.snoozeUntil && Date.parse(settings.snoozeUntil) > now;
     const bubble = snoozed ? null : bubbles.current;
-    mode = panel ? 'panel' : menu ? 'menu' : bubble ? 'bubble' : 'controls';
+    mode = panel ? 'panel' : menu ? 'menu' : bubble && !controlsPinned ? 'bubble' : 'controls';
+    const controlsShown = near || controlsPinned;
     const layout = petLayout(position, display().workArea, PET_HEIGHT[settings.petSize], { dockAmount });
     const effectiveTargets = [...new Map([...items, ...targets.values(), ...recent.map(item => ({ ...item, workspaceId: '', state: 'idle' as const, since: new Date(0).toISOString(), unread: false }))].map(item => [item.key, item])).values()];
     const sleeping = pack?.manifest.remoteCodex?.sleeping;
     const shared = { appearance, accountId, items, recent, targets: effectiveTargets, mood: moods.value(items, now, snoozed), bubble,
-      settings: { petSize: settings.petSize, petMini: settings.petMini, petSound: settings.petSound, petId: settings.petId },
+      settings: { petSize: settings.petSize, petMini: settings.petMini, petSound: settings.petSound, petVoice: settings.petVoice, petId: settings.petId },
       imageUrl: pack ? `data:image/${pack.manifest.spritesheetPath.endsWith('png') ? 'png' : 'webp'};base64,${pack.image.toString('base64')}` : '',
       ...(pack?.sleepingImage && sleeping ? { sleeping: { imageUrl: `data:image/${sleeping.path.endsWith('png') ? 'png' : 'webp'};base64,${pack.sleepingImage.toString('base64')}`, frames: sleeping.frames, durationsMs: sleeping.durationsMs } } : {}),
       atlasRows: (pack?.manifest.spriteVersionNumber === 2 ? 11 : 9) as 9 | 11, frameScale: pack?.manifest.remoteCodex?.frameScale ?? 1,
       packName: pack?.manifest.displayName ?? '', packs: packs.map(({ manifest }) => ({ id: manifest.id, displayName: manifest.displayName })),
-      error, locale: uiLocale, tray: panel, chat: panel, mode, near, peek, detailOpen, edgeHide: settings.petEdgeHide !== false,
+      error, locale: uiLocale, tray: panel, chat: panel, mode, near: controlsShown, peek, detailOpen, edgeHide: settings.petEdgeHide !== false,
       edge: position.edge, dockAmount, pet: layout.pet, panelAbove: layout.panelAbove, panelHeight: 258, targetKey };
     for (const view of [window, glass]) {
       const state: PetViewState = { ...shared, surface: view === window ? 'sprite' : 'glass' };
@@ -120,9 +128,9 @@ export function createPetController(deps: PetControllerDeps): PetController {
         view.webContents.send('rcDesktop:pet:state', state);
       }
     }
-    const show = visible && readyGlass && (panel || menu || !!bubble || settings.petMini || !glassDismissed && (near || awaySince > 0 && now - awaySince < 220));
-    glass.setIgnoreMouseEvents(mode === 'controls' && !near && !settings.petMini, { forward: true });
-    const opacity = mode === 'controls' && !near && !settings.petMini ? Math.max(0, 1 - (now - awaySince) / 220) : 1;
+    const show = visible && readyGlass && (panel || menu || !!bubble || settings.petMini || controlsPinned || !glassDismissed && (near || awaySince > 0 && now - awaySince < 220));
+    glass.setIgnoreMouseEvents(mode === 'controls' && !controlsShown && !settings.petMini, { forward: true });
+    const opacity = mode === 'controls' && !controlsShown && !settings.petMini ? Math.max(0, 1 - (now - awaySince) / 220) : 1;
     if (opacity !== lastOpacity && process.platform !== 'linux') { lastOpacity = opacity; glass.setOpacity(opacity); }
     if (show && !glass.isVisible()) { placeGlass(); glass.showInactive(); }
     if (!show && glass.isVisible()) glass.hide();
@@ -170,15 +178,20 @@ export function createPetController(deps: PetControllerDeps): PetController {
       case 'showConversation': if (item) openSurface('panel', conversationKey('state' in item ? item as ActivityItem : { ...item, state: 'idle', since: '', unread: false, workspaceId: '' })); break;
       case 'dismiss': for (const event of [...(bubbles.current?.events ?? [])]) deps.hub.acknowledge(event.alertId, 'pet'); break;
       case 'toggleTray': case 'toggleChat': if (panel) closeSurface(); else openSurface('panel'); break;
-      case 'click': moods.react('jumping', Date.now(), ANIMATIONS.jumping.durations.reduce((a, b) => a + b, 0) * (pack?.manifest.remoteCodex?.frameScale ?? 1)); openSurface('panel'); break;
+      case 'click':
+        moods.react('jumping', Date.now(), ANIMATIONS.jumping.durations.reduce((a, b) => a + b, 0) * (pack?.manifest.remoteCodex?.frameScale ?? 1)); cue('click');
+        // A click reveals the control capsule; the panel opens from there.
+        if (panel || menu) closeSurface(); else { controlsPinned = !controlsPinned; glassDismissed = false; peek = true; }
+        break;
       case 'menu': if (action.value) openSurface('menu'); else closeSurface(); break;
       case 'close': closeSurface(); break;
-      case 'detail': detailOpen = action.value === true; if (detailOpen) { glass.setFocusable(true); glass.show(); glass.focus(); } break;
+      case 'detail': detailOpen = action.value === true; if (detailOpen) { glass.setFocusable(true); glass.showInactive(); glass.focus(); } break;
       case 'openMain': closeSurface(); return dispatch({ type: 'navigate', path: '/' });
       case 'openMap': closeSurface(); return dispatch({ type: 'openMap' });
-      case 'preferences': closeSurface(); return dispatch({ type: 'navigate', path: '/settings' });
+      case 'preferences': closeSurface(); deps.openPreferences('pet'); return { ok: true };
       case 'setMini': if (typeof action.value === 'boolean') deps.settings.set({ petMini: action.value }); break;
       case 'setSound': if (typeof action.value === 'boolean') deps.settings.set({ petSound: action.value }); break;
+      case 'setVoice': if (typeof action.value === 'boolean') deps.settings.set({ petVoice: action.value }); break;
       case 'setVisible': if (typeof action.value === 'boolean') deps.settings.set({ petVisible: action.value }); break;
       case 'setEdgeHide': if (typeof action.value === 'boolean') deps.settings.set({ petEdgeHide: action.value }); break;
       case 'setSize': if (['S', 'M', 'L'].includes(action.size)) deps.settings.set({ petSize: action.size }); break;
@@ -238,6 +251,12 @@ export function createPetController(deps: PetControllerDeps): PetController {
       completedConversations.set(conversationKey(event.item), now);
       reaction = completedConversations.size > 1 ? 'jumping' : 'waving';
     }
+    if (delivered) {
+      const title = conversationTitle(event.item);
+      if (event.type === 'needsInput') cue('needsInput', t('{title} 需要你处理', { title }, uiLocale));
+      else if (event.type === 'completed') cue('completed', t('{title} 完成了', { title }, uiLocale));
+      else if (event.type === 'failed') cue('failed', t('{title} 失败了', { title }, uiLocale));
+    }
     moods.onEvent(event.type, now, delivered, reaction, ANIMATIONS[reaction].durations.reduce((a, b) => a + b, 0) * (pack?.manifest.remoteCodex?.frameScale ?? 1));
     if (delivered && bubbles.push(event, now)) {
       targetKey = event.item.key; targets.set(event.item.key, event.item); while (targets.size > 20) targets.delete(targets.keys().next().value!);
@@ -246,7 +265,11 @@ export function createPetController(deps: PetControllerDeps): PetController {
     emit();
   }), deps.hub.onAcknowledge(id => { bubbles.acknowledge(id, Date.now()); emit(); }), deps.settings.onChange(next => {
     const sizeChanged = settings.petSize !== next.petSize, packChanged = settings.petId !== next.petId;
+    const soundOn = next.petSound && !settings.petSound, voiceOn = next.petVoice && !settings.petVoice;
     settings = next; visible = next.petVisible;
+    // Turning a cue on previews it, so the setting's effect is obvious.
+    if (soundOn) cue('completed');
+    if (voiceOn) cue(undefined, t('语音播报已打开', {}, uiLocale));
     if (sizeChanged) { position = restorePosition(position, screen.getAllDisplays(), screen.getPrimaryDisplay(), PET_HEIGHT[next.petSize]); placeSprite(); savePosition(); }
     if (packChanged) { pack = packs.find(candidate => candidate.manifest.id === next.petId) ?? pack; if (!packs.some(candidate => candidate.manifest.id === next.petId)) void refreshPacks(); }
     if (visible && readySprite && !window.isVisible()) window.showInactive();
@@ -260,9 +283,10 @@ export function createPetController(deps: PetControllerDeps): PetController {
     const now = Date.now(), cursor = screen.getCursorScreenPoint(), bounds = window.getBounds(), child = glass.getBounds();
     const within = (r: Electron.Rectangle, margin = 0) => cursor.x >= r.x - margin && cursor.x <= r.x + r.width + margin && cursor.y >= r.y - margin && cursor.y <= r.y + r.height + margin;
     const close = within(bounds, 60) || glass.isVisible() && within(child, 8);
+    if (controlsPinned && !close && now - awaySince >= 4000) controlsPinned = false;
     if (close) { if (!near) glassDismissed = false; near = true; awaySince = 0; if (!hoverSince) hoverSince = now; }
     else { near = false; hoverSince = 0; if (!awaySince) awaySince = now; }
-    if (!position.edge || settings.petEdgeHide === false || panel || menu || bubbles.current?.sticky || now < alertPeekUntil || close && now - hoverSince >= 150) peek = true;
+    if (!position.edge || settings.petEdgeHide === false || panel || menu || controlsPinned || bubbles.current?.sticky || now < alertPeekUntil || close && now - hoverSince >= 150) peek = true;
     else if (!close && now - awaySince >= 800) peek = false;
     const destination = position.edge && settings.petEdgeHide !== false && !peek ? 1 : 0;
     dockAmount = destination;

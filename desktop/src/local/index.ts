@@ -111,7 +111,8 @@ function renderPreferences(): void {
       <div class="setting-row"><label for="petSize">${t('大小')}</label>${picker('petSize', t('宠物大小'))}</div>
       ${toggle('petEdgeHide', t('贴边自动隐藏'), t('靠近屏幕边缘时收起，指针靠近时探出。'), s.petEdgeHide)}
       ${toggle('petMini', t('Mini 模式'), t('只显示控制条和活动托盘。'), s.petMini)}
-      ${toggle('petSound', t('提示音'), '', s.petSound)}</section>`;
+      ${toggle('petSound', t('提示音'), t('点击桌宠和收到提醒时播放，打开时试听。'), s.petSound)}
+      ${toggle('petVoice', t('语音播报'), t('用系统语音读出提醒，打开时试听。'), s.petVoice)}</section>`;
   } else content.innerHTML = `<h2>${t('全局快捷键')}</h2><section class="settings-group"><label for="quickWindowShortcut">${t('唤起快捷窗口')}</label><div class="shortcut-field"><input id="quickWindowShortcut" value="${escapeHtml(s.quickWindowShortcut)}" spellcheck="false" aria-label="${t('快捷窗口快捷键')}"/><button id="save-shortcut">${t('保存')}</button></div></section>
     <h2>${t('在 Pockymoe 中')}</h2><section class="settings-group key-list">${[[t('搜索'), '⌘ / Ctrl F'], [t('打开地图'), '⌘ / Ctrl 0'], [t('新建线程'), '⌘ / Ctrl N'], [t('设置'), '⌘ / Ctrl ,'], [t('显示 / 隐藏桌宠'), '⌘ / Ctrl ⇧ P'], [t('退出应用'), '⌘ / Ctrl Q']].map(([label, key]) => `<div class="setting-row"><span>${label}</span><kbd>${key}</kbd></div>`).join('')}</section>`;
   const bindPicker = (id: keyof DesktopSettings, options: SelectOption[]): void => {

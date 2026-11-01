@@ -62,7 +62,8 @@ export class Notifications {
       title: multiple && conversations.length > 1 ? t(allComplete ? '{count} 个对话完成' : '{count} 个对话有新进展', { count: conversations.length }) : conversationTitle(item, this.hub.snapshot()?.items),
       subtitle: multiple && conversations.length > 1 ? 'Pockymoe' : notificationContext(related),
       body: multiple ? formatList(conversations.map(group => `${group.title} · ${notificationContext(group.items)}`).slice(0, 3)) : item.state === 'interrupted' ? `${t('已中断')}${item.resultSummary ? ` · ${item.resultSummary}` : ''}` : item.request?.summary || item.resultSummary || (first.type === 'failed' ? t('任务遇到了问题') : t('已完成')),
-      silent: !this.settings.get().petSound,
+      // The visible pet plays its own cue, so the banner stays quiet to avoid two sounds.
+      silent: !this.settings.get().petSound || this.settings.get().petVisible,
       ...(['darwin', 'win32'].includes(process.platform) && !multiple ? { actions: [
         ...(item.request?.kind === 'approval' ? [{ type: 'button' as const, text: t('批准') }, { type: 'button' as const, text: t('拒绝') }] : []),
         { type: 'button' as const, text: t('在地图中显示') }

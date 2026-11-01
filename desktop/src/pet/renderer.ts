@@ -11,6 +11,7 @@ import { getLocale, setLocale, t, type MessageKey } from '../shared/i18n';
 import { showError } from '../local/errorMark';
 import { commandErrorMessage } from './errors';
 import { scrollGeometry } from './scroll';
+import { playSound, speak } from './sounds';
 import type { ActivityItem, HostCommandResult } from '../shared/contract';
 import type { PetAction, PetBridge, PetViewState } from './bridge';
 const bridge = (window as unknown as { rcDesktop: { pet: PetBridge } }).rcDesktop.pet;
@@ -19,7 +20,7 @@ const markStyle = document.createElement('style'); markStyle.textContent = statu
 const motion = matchMedia('(prefers-reduced-motion: reduce)');
 let state: PetViewState | null = null, signature = '', lastMeasure = '';
 let draft = '', sendState: 'idle' | 'sending' | 'sent' | 'error' = 'idle';
-let selected: string | null = null, selectedRequest: string | null = null, lastSound = 0, lastBubble = '';
+let selected: string | null = null, selectedRequest: string | null = null;
 const collapsedRequests = new Set<string>();
 const failures = new Map<string, { result: HostCommandResult; key?: string }>(), pending = new Set<string>();
 let drag: { id: number; x: number; y: number; moved: boolean } | null = null;
@@ -81,7 +82,7 @@ function renderGlass(): void {
   root.className = `glass mode-${state.mode}`;
   let content = controls();
   if (state.mode === 'panel') content = `<section class="panel" aria-label="${escape(t('活动面板'))}"><header class="panel-header"><span aria-hidden="true">${icon('tasks')}</span>${button('close', t('关闭任务'), icon('close'))}</header><div class="scroll-frame" data-scroll-area><div class="task-list scroll-content" role="listbox" aria-label="${escape(t('活动任务'))}" id="pet-task-list">${rows.length ? rows.map(group => taskRow(group, rows.some(other => other.key !== group.key && other.title === group.title))).join('') : `<div class="empty">${icon('check')}${escape(t('一切就绪'))}</div>`}</div><div class="scroll-track" role="scrollbar" aria-label="${escape(t('滚动活动任务'))}" aria-controls="pet-task-list" aria-orientation="vertical" aria-valuemin="0" tabindex="0" hidden><div class="scroll-thumb"></div></div></div><form id="chat-form" class="chat" data-key="${escape(target?.key ?? '')}"><input id="reply-input" aria-label="${escape(t('发送回复'))}" placeholder="${escape(target ? t('回复 {title}…', { title: title(target) }) : t('一切就绪'))}" value="${escape(draft)}" maxlength="16000" autocomplete="off" ${!target || sendState === 'sending' ? 'disabled' : ''}>${errorSlot(`chat:${target?.key}`)}${button('send', sendState === 'sent' ? t('已发送') : sendState === 'sending' ? t('正在发送…') : t('发送回复'), sendState === 'sent' ? icon('check') : icon('send'), `class="send ${sendState === 'sending' ? 'sending' : ''}" ${!target || !draft.trim() || sendState === 'sending' ? 'disabled' : ''}`)}</form><span class="live-announcement" role="status">${sendState === 'error' ? escape(t('未发送')) : sendState === 'sent' ? escape(t('已发送')) : ''}</span></section>`;
-  if (state.mode === 'menu') content = `<section class="more" role="menu" aria-label="${escape(t('宠物偏好'))}">${button('mini', t('Mini 模式'), `${escape(t('Mini 模式'))}${state.settings.petMini ? icon('check') : ''}`, 'role="menuitemcheckbox" aria-checked="'+state.settings.petMini+'"')}<div class="menu-sizes" role="group" aria-label="${escape(t('宠物大小'))}">${(['S', 'M', 'L'] as const).map(size => button(`size-${size}`, size, size, `role="menuitemradio" aria-checked="${state!.settings.petSize === size}"`)).join('')}</div>${button('edgeHide', t('贴边自动隐藏'), `<span class="menu-copy">${escape(t('贴边自动隐藏'))}</span>` + (state.edgeHide ? icon('check') : ''), `role="menuitemcheckbox" aria-checked="${state.edgeHide}"`)}${button('sound', t('轻触提示音'), `<span class="menu-copy">${escape(t('轻触提示音'))}</span>` + (state.settings.petSound ? icon('check') : ''), `role="menuitemcheckbox" aria-checked="${state.settings.petSound}"`)}<hr>${button('preferences', t('偏好设置…'), escape(t('偏好设置…')), 'role="menuitem"')}${button('hide', t('隐藏桌宠'), escape(t('隐藏桌宠')), 'role="menuitem"')}</section>`;
+  if (state.mode === 'menu') content = `<section class="more" role="menu" aria-label="${escape(t('宠物偏好'))}">${button('mini', t('Mini 模式'), `${escape(t('Mini 模式'))}${state.settings.petMini ? icon('check') : ''}`, 'role="menuitemcheckbox" aria-checked="'+state.settings.petMini+'"')}<div class="menu-sizes" role="group" aria-label="${escape(t('宠物大小'))}">${(['S', 'M', 'L'] as const).map(size => button(`size-${size}`, size, size, `role="menuitemradio" aria-checked="${state!.settings.petSize === size}"`)).join('')}</div>${button('edgeHide', t('贴边自动隐藏'), `<span class="menu-copy">${escape(t('贴边自动隐藏'))}</span>` + (state.edgeHide ? icon('check') : ''), `role="menuitemcheckbox" aria-checked="${state.edgeHide}"`)}${button('sound', t('提示音'), `<span class="menu-copy">${escape(t('提示音'))}</span>` + (state.settings.petSound ? icon('check') : ''), `role="menuitemcheckbox" aria-checked="${state.settings.petSound}"`)}${button('voice', t('语音播报'), `<span class="menu-copy">${escape(t('语音播报'))}</span>` + (state.settings.petVoice ? icon('check') : ''), `role="menuitemcheckbox" aria-checked="${state.settings.petVoice}"`)}<hr>${button('preferences', t('偏好设置…'), escape(t('偏好设置…')), 'role="menuitem"')}${button('hide', t('隐藏桌宠'), escape(t('隐藏桌宠')), 'role="menuitem"')}</section>`;
   const bubble = state.bubble;
   const bubbleGroups = bubble ? petConversations(bubble.events.map(event => event.item), state.items) : [];
   const group = bubbleGroups[0];
@@ -103,13 +104,6 @@ function measure(): void {
   const rect = root.getBoundingClientRect(), value = { type: 'surfaceMeasure' as const, width: Math.ceil(rect.width), height: Math.ceil(rect.height) };
   const next = JSON.stringify(value); if (next !== lastMeasure) { lastMeasure = next; void bridge.action(value); }
 }
-function sound(): void {
-  if (!state?.settings.petSound || Date.now() - lastSound < 1500) return;
-  lastSound = Date.now(); const audio = new AudioContext(), oscillator = audio.createOscillator(), gain = audio.createGain();
-  oscillator.type = 'sine'; oscillator.frequency.setValueAtTime(620, audio.currentTime); oscillator.frequency.exponentialRampToValueAtTime(420, audio.currentTime + .07);
-  gain.gain.setValueAtTime(.018, audio.currentTime); gain.gain.exponentialRampToValueAtTime(.0001, audio.currentTime + .09);
-  oscillator.connect(gain).connect(audio.destination); oscillator.start(); oscillator.stop(audio.currentTime + .1); oscillator.onended = () => { void audio.close(); };
-}
 async function itemAction(action: PetAction & { key: string }, surface: string): Promise<HostCommandResult> {
   const id = `${surface}:${action.key}`, account = state?.accountId; failures.delete(id); pending.add(id); renderGlass();
   let result: HostCommandResult; try { result = await bridge.action(action); } catch { result = { ok: false }; }
@@ -130,7 +124,7 @@ root.addEventListener('click', event => {
   if (!control && row) { selectActivityRow(row); return; }
   if (!control || !state) return;
   const type = control.dataset.action!, key = control.closest<HTMLElement>('[data-key]')?.dataset.key;
-  const surface = control.closest('.bubble') ? 'bubble' : 'row'; sound();
+  const surface = control.closest('.bubble') ? 'bubble' : 'row';
   if (type === 'toggleRequests') {
     const groupKey = control.closest<HTMLElement>('[data-conversation-key]')?.dataset.conversationKey; if (!groupKey) return;
     if (selected === groupKey && !collapsedRequests.has(groupKey)) collapsedRequests.add(groupKey); else collapsedRequests.delete(groupKey);
@@ -139,7 +133,7 @@ root.addEventListener('click', event => {
   if (type === 'showConversation' && key) { void bridge.action({ type: 'showConversation', key }); return; }
   if (key && ['approve', 'deny', 'open', 'revealInMap'].includes(type)) { void itemAction({ type: type as 'approve' | 'deny' | 'open' | 'revealInMap', key }, surface); return; }
   if (type === 'send') { document.querySelector<HTMLFormElement>('#chat-form')?.requestSubmit(); return; }
-  const action: PetAction = type === 'more' ? { type: 'menu', value: true } : type.startsWith('size-') ? { type: 'setSize', size: type.slice(5) as 'S' | 'M' | 'L' } : type === 'mini' ? { type: 'setMini', value: !state.settings.petMini } : type === 'edgeHide' ? { type: 'setEdgeHide', value: !state.edgeHide } : type === 'sound' ? { type: 'setSound', value: !state.settings.petSound } : type === 'hide' ? { type: 'setVisible', value: false } : { type } as PetAction;
+  const action: PetAction = type === 'more' ? { type: 'menu', value: true } : type.startsWith('size-') ? { type: 'setSize', size: type.slice(5) as 'S' | 'M' | 'L' } : type === 'mini' ? { type: 'setMini', value: !state.settings.petMini } : type === 'edgeHide' ? { type: 'setEdgeHide', value: !state.edgeHide } : type === 'sound' ? { type: 'setSound', value: !state.settings.petSound } : type === 'voice' ? { type: 'setVoice', value: !state.settings.petVoice } : type === 'hide' ? { type: 'setVisible', value: false } : { type } as PetAction;
   void bridge.action(action);
 });
 root.addEventListener('dblclick', event => { const row = (event.target as HTMLElement).closest<HTMLElement>('.task-row,.request-row'); if (row?.dataset.key) void itemAction({ type: 'open', key: row.dataset.key }, 'row'); });
@@ -233,6 +227,11 @@ window.addEventListener('keydown', event => {
     root.querySelector<HTMLElement>(`.${request ? 'request-row' : 'task-row'}[data-key="${CSS.escape(key ?? '')}"]`)?.focus();
   }
 });
+bridge.onCue(cue => {
+  if (state?.surface !== 'sprite') return;
+  if (cue.sound) void playSound(cue.sound).then(audio => { root.dataset.lastCue = `${cue.sound}:${audio}`; });
+  if (cue.speech) { speak(cue.speech, cue.locale); root.dataset.lastSpeech = cue.speech; }
+});
 bridge.onState(next => {
   const old = state, changedMode = old?.mode !== next.mode;
   if (old && old.accountId !== next.accountId) { failures.clear(); pending.clear(); draft = ''; sendState = 'idle'; selected = null; selectedRequest = null; collapsedRequests.clear(); }
@@ -245,7 +244,6 @@ bridge.onState(next => {
   const contentKey = JSON.stringify([next.accountId, next.items, next.recent, next.mode, next.mode === 'bubble' && next.near, next.bubble, next.settings, next.locale, next.appearance, next.edgeHide]);
   if (signature !== contentKey) { signature = contentKey; renderGlass(); }
   if (changedMode && next.mode === 'menu') root.querySelector<HTMLElement>('[role^="menuitem"]')?.focus();
-  if (next.bubble?.id && next.bubble.id !== lastBubble) { lastBubble = next.bubble.id; sound(); }
 });
 function animate(now: number): void {
   if (state?.surface === 'sprite') {

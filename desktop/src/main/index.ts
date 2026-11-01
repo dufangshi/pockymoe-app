@@ -47,6 +47,11 @@ else {
     const appearance = new AppearanceStore();
     let preferencesRequestId = 0;
     let preferencesSection: LocalState['preferencesSection'] = 'general';
+    const openPreferences = (section?: LocalState['preferencesSection']): void => {
+      preferencesRequestId++;
+      preferencesSection = section || 'general';
+      manager.createLocal('preferences'); broadcast();
+    };
     const focusedThreads = new Map<number, string | null>();
     let pet: PetController | undefined;
     const notifications = new Notifications(hub, settings, manager, () => pet, () => {
@@ -59,7 +64,7 @@ else {
     const petModules = import.meta.glob('../pet/controller.ts', { eager: true }) as Record<string, { createPetController(deps: PetControllerDeps): PetController }>;
     const petModule = Object.values(petModules)[0];
     if (petModule) {
-      try { pet = petModule.createPetController({ hub, settings, dispatch: command => manager.dispatch(command as CommandInput), shouldSpeak: event => notifications.shouldSpeak(event), petDirectories, appearance: appearance.get, onAppearance: appearance.onChange }); }
+      try { pet = petModule.createPetController({ hub, settings, dispatch: command => manager.dispatch(command as CommandInput), openPreferences, shouldSpeak: event => notifications.shouldSpeak(event), petDirectories, appearance: appearance.get, onAppearance: appearance.onChange }); }
       catch { /* Shell remains usable if a pet pack cannot load. */ }
     }
     const tray = new DesktopTray(hub, settings, manager);
@@ -95,9 +100,7 @@ else {
     listen(c.openThread, (_e, path, options) => { const safe = threadPath(path); if (options && typeof options === 'object' && (options as { newWindow?: boolean }).newWindow === true) manager.createMain(safe); else void manager.dispatch({ type: 'navigate', path: safe }); });
     listen(c.preferences, (_e, section) => {
       if (section !== undefined && !['general', 'pet', 'shortcuts'].includes(String(section))) return;
-      preferencesRequestId++;
-      preferencesSection = (section || 'general') as LocalState['preferencesSection'];
-      manager.createLocal('preferences'); broadcast();
+      openPreferences(section as LocalState['preferencesSection'] | undefined);
     });
     listen(c.title, (e, title) => { if (typeof title === 'string') BrowserWindow.fromWebContents(e.sender)?.setTitle(title.slice(0, 256)); });
     listen(c.external, (_e, url) => { const safe = externalUrl(url); if (safe) void shell.openExternal(safe); });

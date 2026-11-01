@@ -68,6 +68,34 @@ test.beforeAll(async () => {
 test.afterEach(async () => { for (const app of apps.splice(0)) await app.close(); for (const dir of directories.splice(0)) rmSync(dir, { recursive: true, force: true }); });
 test.afterAll(async () => { await Promise.all([new Promise<void>(done => relay.close(() => done())), new Promise<void>(done => other.close(() => done())), new Promise<void>(done => api.close(() => done()))]); });
 
+test('pet controls never raise the main window, and a click shows the capsule first', async () => {
+  const app = await launch('light'); const page = await pageAt(app, origin);
+  await expect.poll(() => page.evaluate(() => !!window.pockymoeHost)).toBe(true);
+  const surfaces = (): Page[] => app.windows().filter(w => w.url().includes('/pet/'));
+  await expect.poll(() => surfaces().length).toBe(2);
+  const bySurface = async (name: string): Promise<Page> => { for (const w of surfaces()) if (await w.evaluate(() => document.body.dataset.surface) === name) return w; throw new Error(name); };
+  await expect.poll(async () => { try { await bySurface('glass'); await bySurface('sprite'); return true; } catch { return false; } }).toBe(true);
+  const sprite = await bySurface('sprite'), glass = await bySurface('glass');
+  const act = (action: unknown) => sprite.evaluate(a => (window as never as { rcDesktop: { pet: { action(x: unknown): Promise<{ ok: boolean }> } } }).rcDesktop.pet.action(a), action);
+  await app.evaluate(({ BrowserWindow }) => { for (const w of BrowserWindow.getAllWindows()) if (w.webContents.getURL().startsWith('http')) w.hide(); });
+  const mainVisible = () => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().some(w => w.webContents.getURL().startsWith('http') && w.isVisible()));
+  expect(await mainVisible()).toBe(false);
+  await act({ type: 'click' });
+  await expect(glass.locator('nav.controls')).toBeVisible();
+  await expect(glass.locator('.panel')).toHaveCount(0);
+  await expect.poll(() => sprite.evaluate(() => document.querySelector<HTMLElement>('#app')?.dataset.lastCue)).toBe('click:running');
+  await act({ type: 'toggleTray' });
+  await expect(glass.locator('.panel')).toBeVisible();
+  expect(await mainVisible()).toBe(false);
+  await act({ type: 'close' });
+  await expect(glass.locator('.panel')).toHaveCount(0);
+  expect(await mainVisible()).toBe(false);
+  await app.evaluate(() => { void globalThis.__pockymoeDesktopTest.windows.dispatch({ type: 'markRead', key: 'missing' }); });
+  expect(await mainVisible()).toBe(false);
+  await act({ type: 'preferences' });
+  await pageAt(app, 'view=preferences');
+  expect(await mainVisible()).toBe(false);
+});
 test('OAuth finishes in a bridge-free sign-in window on the page session', async () => {
   const app = await launch('light'); const page = await pageAt(app, origin);
   await page.evaluate(start => { location.assign(start); }, `${relayOriginValue}/relay/auth/oauth/github/start`);

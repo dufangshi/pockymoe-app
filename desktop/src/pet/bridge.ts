@@ -1,3 +1,4 @@
+import type { PetSound } from './sounds';
 import type { ActivityItem, ActivityRecent, Appearance, DesktopSettings, HostCommandResult } from '../shared/contract';
 import type { SpriteState } from './animation';
 import type { PetBubble } from './bubbles';
@@ -17,7 +18,7 @@ export interface PetViewState {
   targets: ActivityItem[];
   mood: SpriteState;
   bubble: PetBubble | null;
-  settings: Pick<DesktopSettings, 'petSize' | 'petMini' | 'petSound' | 'petId'>;
+  settings: Pick<DesktopSettings, 'petSize' | 'petMini' | 'petSound' | 'petVoice' | 'petId'>;
   imageUrl: string;
   sleeping?: { imageUrl: string; frames: number; durationsMs: number[] };
   packName: string;
@@ -34,6 +35,7 @@ export interface PetViewState {
   panelHeight: number;
   targetKey: string | null;
 }
+export interface PetCue { sound?: PetSound; speech?: string; locale: string }
 export type PetAction =
   | { type: 'open' | 'approve' | 'deny' | 'revealInMap'; key: string }
   | { type: 'reply'; key: string; text: string }
@@ -45,12 +47,13 @@ export type PetAction =
   | { type: 'toggleTray' | 'toggleChat' | 'click' | 'openMain' | 'preferences' | 'importFolder' | 'importZip' }
   | { type: 'setSize'; size: 'S' | 'M' | 'L' }
   | { type: 'setPack'; id: string }
-  | { type: 'setMini' | 'setSound' | 'setVisible'; value: boolean }
+  | { type: 'setMini' | 'setSound' | 'setVoice' | 'setVisible'; value: boolean }
   | { type: 'review' | 'menu' | 'reducedMotion'; value: boolean }
   | { type: 'measure'; tray: number; bubble: number; chat: number }
   | { type: 'dragStart' | 'dragMove' | 'dragEnd'; x: number; y: number };
 export interface PetBridge {
   onState(listener: (state: PetViewState) => void): () => void;
+  onCue(listener: (cue: PetCue) => void): () => void;
   ready(): void;
   hitTest(interactive: boolean): void;
   action(action: PetAction): Promise<HostCommandResult>;

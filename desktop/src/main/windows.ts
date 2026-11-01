@@ -178,7 +178,8 @@ export class Windows {
     const pending = this.pending.get(id); this.pending.delete(id);
     for (const send of pending || []) send();
   }
-  dispatch(input: CommandInput, focus = true): Promise<HostCommandResult> {
+  /** Approving, replying or marking read works from the pet or a notification without raising the window. */
+  dispatch(input: CommandInput, focus = !['resolveRequest', 'reply', 'markRead'].includes(input.type)): Promise<HostCommandResult> {
     const w = focus ? this.focusMain() : this.main();
     const command = { ...input, id: randomUUID() } as HostCommand;
     return new Promise(resolve => {
