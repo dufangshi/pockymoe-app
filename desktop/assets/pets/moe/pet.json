@@ -4,6 +4,7 @@
   "description": "A cobalt axolotl who keeps an eye on your Remote Codex threads.",
   "spritesheetPath": "spritesheet.webp",
   "remoteCodex": {
+    "frameScale": 2.5,
     "sleeping": {
       "path": "sleeping.webp",
       "frames": 4,
