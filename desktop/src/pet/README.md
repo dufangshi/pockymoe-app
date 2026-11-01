@@ -39,7 +39,7 @@ node src/pet/tools/capture.mjs
 
 The last two commands use a mock ActivityHub, an isolated temporary userData, and
 an independent Electron process. Screenshots/results go to
-`/tmp/rc-desktop/evidence/pet/qa1/`; no Supervisor or real account is accessed.
+`.local/desktop-evidence/pet/qa1/`; no Supervisor or real account is accessed.
 `node src/pet/tools/generate-placeholder.mjs` recreates the original procedural
 atlas for tests. Production packaging must exclude `assets/pets/placeholder/**`.
 

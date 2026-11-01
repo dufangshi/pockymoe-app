@@ -252,9 +252,3 @@ relay 网页（主窗口，持有密钥与连接）
 | P2 桌宠 MVP | 透明悬浮窗、Codex 图集播放器、状态映射、气泡、任务卡、吸附、导入宠物包、一个原创默认宠物 | remote-codex-app |
 | P3 离线推送 | macOS APNs 注册；relay 按订阅区分 topic 并加 collapse-id；supervisor 投递 `awaiting_input` 事件 | 两个仓库 |
 | P4 增强 | 全局快捷键快捷窗口（同一会话快速回复）、多窗口、桌宠上直接聊天 | remote-codex-app |
-
-### 待定问题
-
-2. 默认桌宠的形象：是自己做一个原创角色，还是去联系 @風-隐 谈白龙的授权？
-3. 第一版是否需要 Windows？如果需要，就只做 L1 加托盘常驻。
-4. 离线“等待审批”推送是否值得改 supervisor 和 relay？这一项也会惠及 iOS。

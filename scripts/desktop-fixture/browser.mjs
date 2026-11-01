@@ -8,7 +8,7 @@ const [command, stateFile] = process.argv.slice(2);
 const state = JSON.parse(await readFile(stateFile, 'utf8'));
 const require = createRequire(join(state.webRoot, 'package.json'));
 const { chromium, expect } = require('@playwright/test');
-const evidence = '/tmp/rc-desktop/evidence/fixture/v2' + (state.webMode === 'dev' ? '/dev' : '');
+const evidence = `${(process.env.POCKYMOE_DESKTOP_EVIDENCE || '.local/desktop-evidence')}/fixture` + (state.webMode === 'dev' ? '/dev' : '');
 await mkdir(evidence, { recursive: true });
 const browser = await chromium.launch({ headless: true });
 const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, reducedMotion: 'reduce' });

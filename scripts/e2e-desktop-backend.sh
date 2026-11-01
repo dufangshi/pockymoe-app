@@ -13,7 +13,7 @@
 # Defaults: API relay 18890, supervisors 18891..18893, separate web 18894.
 # Override DESKTOP_E2E_RELAY_PORT, DESKTOP_E2E_SUPERVISOR_PORT (first),
 # DESKTOP_E2E_WEB_PORT, DESKTOP_E2E_POCKYMOE_ROOT, DESKTOP_E2E_BIN or
-# DESKTOP_E2E_WEB_DIST. Rust binary defaults to the current desktop worktree.
+# DESKTOP_E2E_WEB_DIST. Rust binary defaults to the sibling remoteCodex checkout.
 # Static mode builds/caches Pages artifacts; --dev-web runs Vite for iteration.
 # No Rust builds, production services, or the parent's :18900/:18901 are touched.
 # A new run always gets .local/e2e-desktop.*/ with separate SQLite/workspace/logs.

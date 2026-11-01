@@ -11,7 +11,7 @@ import { spawnSync } from 'node:child_process';
 const repo = fileURLToPath(new URL('../../', import.meta.url));
 const desktop = join(repo, 'desktop');
 const executable = process.env.POCKYMOE_PACKAGED_EXECUTABLE || join(desktop, 'release/mac-arm64/Pockymoe.app/Contents/MacOS/Pockymoe');
-const evidence = process.env.POCKYMOE_PACKAGED_EVIDENCE || '/tmp/rc-desktop/evidence/shell/packaged';
+const evidence = process.env.POCKYMOE_PACKAGED_EVIDENCE || `${(process.env.POCKYMOE_DESKTOP_EVIDENCE || '.local/desktop-evidence')}/shell/packaged`;
 mkdirSync(evidence, { recursive: true });
 let fixture;
 try {

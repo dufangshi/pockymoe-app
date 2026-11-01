@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 const repo = fileURLToPath(new URL('../../../../', import.meta.url));
-const out = '/tmp/rc-desktop/evidence/pet/locale'; mkdirSync(out, { recursive: true });
+const out = `${(process.env.POCKYMOE_DESKTOP_EVIDENCE || '.local/desktop-evidence')}/pet/locale`; mkdirSync(out, { recursive: true });
 let fixture;
 try { fixture = JSON.parse(readFileSync(join(repo, '.local/e2e-desktop-env.json'), 'utf8')); }
 catch { throw new Error('Fixture configuration unavailable'); }

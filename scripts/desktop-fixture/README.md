@@ -23,9 +23,8 @@ python3 scripts/desktop-fixture/verify_lifecycle.py
 
 Run from any directory. Prerequisites: Python 3.9+, Node 20+, pnpm, Chromium from
 Playwright, and the existing current debug binary. Default sources/binary:
-`/Users/mac/dev/remoteCodex.worktrees/desktop/target/debug/pockymoe`. No Rust build,
-release, deployment or production supervisor update happens here. The old
-`remoteCodex` checkout is never modified.
+`target/debug/pockymoe` of the Pockymoe checkout. No Rust build,
+release, deployment or production supervisor update happens here.
 
 Defaults: API-only relay `127.0.0.1:18890`, supervisors `18891..18893`, separate
 Web `18894`. Configure `DESKTOP_E2E_POCKYMOE_ROOT` (`DESKTOP_E2E_CODEX_ROOT` is
@@ -129,5 +128,5 @@ transport. Completion assertions use unique text rather than matching seed histo
 It records a settled map screenshot and safe geometry facts. No product UI is added
 or restyled by this task; theme/layout acceptance belongs to the desktop UI engineer.
 
-Evidence: `/tmp/rc-desktop/evidence/fixture/v2/` (dev-mode browser evidence in `dev/`).
+Evidence: `.local/desktop-evidence/fixture/` (dev-mode browser evidence in `dev/`).
 Logs remain under each run's `.local/e2e-desktop.*/relay`, `web`, `device-1..3`.

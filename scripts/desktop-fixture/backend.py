@@ -22,7 +22,7 @@ ROOT = Path(__file__).resolve().parents[2]
 LOCAL = ROOT / ".local"
 STATE = LOCAL / "e2e-desktop-state.json"
 ENV = LOCAL / "e2e-desktop-env.json"
-EVIDENCE = Path("/tmp/rc-desktop/evidence/fixture/v2")
+EVIDENCE = Path(os.environ.get("POCKYMOE_DESKTOP_EVIDENCE", ".local/desktop-evidence")) / "fixture"
 NAMES = ["MacBook Pro", "Studio Linux", "Build Box"]
 # These are public, disposable test credentials, never inherited credentials.
 USERNAME = "desktop"
@@ -354,7 +354,7 @@ def start(dev_web=False):
             return previous
         stop(previous)
     codex = Path(os.environ.get("DESKTOP_E2E_POCKYMOE_ROOT", os.environ.get(
-        "DESKTOP_E2E_CODEX_ROOT", str(ROOT.parent / "remoteCodex.worktrees/desktop")))).resolve()
+        "DESKTOP_E2E_CODEX_ROOT", str(ROOT.parent / "remoteCodex")))).resolve()
     binary = Path(os.environ.get("DESKTOP_E2E_BIN", str(codex / "target/debug/pockymoe"))).resolve()
     # A peer may be linking the agreed binary. Wait, never build a substitute.
     retry(lambda: binary.is_file() and os.access(binary, os.X_OK), "existing debug binary", started + 10)

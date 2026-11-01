@@ -135,7 +135,7 @@ pnpm exec playwright test test/shell.e2e.ts --project=electron
 Fixtures use fresh temporary profiles, a Web server and a separate fake Relay,
 and a whitelisted process environment. They never use production cookies or a
 running Supervisor. The debug object exists only with `POCKYMOE_DESKTOP_E2E=1`.
-Screenshots: `/tmp/rc-desktop/evidence/shell/v2/` (three packs, light/dark, native
+Screenshots: `.local/desktop-evidence/shell/v2/` (three packs, light/dark, native
 utility-window sizes plus 900/1440 width stress checks). The normal quick window
 remains 640×420. Pet-specific checks belong to the pet module.
 
@@ -202,7 +202,7 @@ exact callback. For a separate physical-key check, set
 Control+Option+Shift+P chord. App-scoped CUA injection did not activate the global
 hotkey in this environment, so physical HID delivery is not claimed by the
 callback test. The temporary profile is removed on exit. Safe evidence goes to
-`/tmp/rc-desktop/evidence/shell/packaged/`.
+`.local/desktop-evidence/shell/packaged/`.
 
 ### Windows build on a Windows runner
 

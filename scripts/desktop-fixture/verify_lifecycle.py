@@ -1,6 +1,7 @@
 """CLI regression: preserve identities, toggle device 3, restore its live requests."""
 
 import json
+import os
 from pathlib import Path
 import subprocess
 
@@ -65,7 +66,7 @@ def main():
         assert device_api(after, third, f"/threads/{third['scenarios'][name]}")["pendingRequests"]
     assert json.loads(run("status"))["connectedSupervisors"] == 3
     report["restart"] = "same device ID, 81 threads, restored pending requests and working /ws"
-    write_json(Path("/tmp/rc-desktop/evidence/fixture/v2/lifecycle.json"), report)
+    write_json(Path(os.environ.get("POCKYMOE_DESKTOP_EVIDENCE", ".local/desktop-evidence")) / "fixture/lifecycle.json", report)
     print(json.dumps(report, indent=2))
 
 

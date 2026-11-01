@@ -16,7 +16,7 @@ import { item, snapshot } from './fixtures';
 type Runtime = { lastDialog?: Electron.MessageBoxOptions; lastSave?: Electron.SaveDialogOptions; appearance: AppearanceStore; hub: ActivityHub; settings: SettingsStore; windows: Windows; tray: DesktopTray; notifications: Notifications };
 declare global { var __pockymoeDesktopTest: Runtime }
 declare global { interface Window { pockymoeHost?: PockymoeHost; commands: unknown[] } }
-const evidence = '/tmp/rc-desktop/evidence/shell/v2';
+const evidence = `${(process.env.POCKYMOE_DESKTOP_EVIDENCE || '.local/desktop-evidence')}/shell/v2`;
 let relay: Server, api: Server, relayOriginValue: string, other: Server, origin: string, otherOrigin: string;
 const apps: ElectronApplication[] = [];
 const themes = new WeakMap<ElectronApplication, 'light' | 'dark'>();
