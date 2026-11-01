@@ -2,7 +2,7 @@ import { app, BrowserWindow, dialog, ipcMain, nativeImage, nativeTheme, screen }
 import { join } from 'node:path';
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import type { Appearance, HostCommand, HostCommandResult, PetController, PetControllerDeps } from '../shared/contract';
-import { getLocale, resolveLocale, setLocale } from '../shared/i18n';
+import { resolveLocale, setLocale, t } from '../shared/i18n';
 import { conversationKey } from '../shared/activityGroups';
 import { ANIMATIONS, moodFor, type SpriteState } from './animation';
 import { BubbleQueue } from './bubbles';
@@ -48,12 +48,12 @@ export function createPetController(deps: PetControllerDeps): PetController {
   const trusted = (event: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent): boolean =>
     !disposed && event.sender === window.webContents && event.senderFrame === window.webContents.mainFrame;
   const dispatch = async (command: Command): Promise<HostCommandResult> => {
-    try { return await deps.dispatch(command); } catch { return { ok: false, error: uiLocale === 'zh-CN' ? '主窗口暂时无法连接，请稍后重试。' : 'The main window is unavailable. Try again.' }; }
+    try { return await deps.dispatch(command); } catch { return { ok: false, error: t('主窗口暂时无法连接，请稍后重试。', {}, uiLocale) }; }
   };
   function savePosition(): void {
     positions[String(position.displayId)] = position;
     try { mkdirSync(app.getPath('userData'), { recursive: true }); writeFileSync(positionFile, JSON.stringify(positions)); }
-    catch { error = 'Could not save the pet position.'; }
+    catch { error = t('无法保存桌宠位置。', {}, uiLocale); }
   }
   function emit(): void {
     if (disposed || window.isDestroyed()) return;
@@ -99,7 +99,7 @@ export function createPetController(deps: PetControllerDeps): PetController {
     packs = candidates.filter((_, index) => valid[index]);
     if (disposed) return;
     pack = packs.find((candidate) => candidate.manifest.id === settings.petId) ?? packs.find((candidate) => candidate.manifest.id === 'moe') ?? packs.find((candidate) => candidate.manifest.id === 'placeholder') ?? packs[0];
-    error = pack ? null : 'No valid Codex v1 pet pack is installed.';
+    error = pack ? null : t('没有可用的 Codex v1 宠物包。', {}, uiLocale);
     emit();
   }
   function acknowledgeKey(key: string): void {
@@ -109,10 +109,10 @@ export function createPetController(deps: PetControllerDeps): PetController {
     for (const id of new Set(ids)) deps.hub.acknowledge(id, 'pet');
   }
   async function action(value: unknown): Promise<HostCommandResult> {
-    if (!value || typeof value !== 'object' || typeof (value as PetAction).type !== 'string') return { ok: false, error: 'Invalid pet action' };
+    if (!value || typeof value !== 'object' || typeof (value as PetAction).type !== 'string') return { ok: false, error: t('桌宠操作无效', {}, uiLocale) };
     const action = value as PetAction;
     const item = 'key' in action && typeof action.key === 'string' ? items.find((candidate) => candidate.key === action.key) ?? recentTargets.get(action.key) : undefined;
-    if (['open', 'approve', 'deny', 'reply', 'target', 'revealInMap'].includes(action.type) && !item) return { ok: false, error: uiLocale === 'zh-CN' ? '线程已不在活动列表中。' : 'This thread is no longer active.' };
+    if (['open', 'approve', 'deny', 'reply', 'target', 'revealInMap'].includes(action.type) && !item) return { ok: false, error: t('线程已不在活动列表中。', {}, uiLocale) };
     switch (action.type) {
       case 'open': {
         if (!item) break;
@@ -122,10 +122,10 @@ export function createPetController(deps: PetControllerDeps): PetController {
       }
       case 'revealInMap': if (!item) break; return dispatch({ type: 'revealInMap', key: item.key });
       case 'approve': case 'deny':
-        if (!item?.request || item.request.kind !== 'approval' || !items.some((candidate) => candidate.key === item.key && candidate.request?.id === item.request?.id)) return { ok: false, error: 'This request is no longer awaiting approval.' };
+        if (!item?.request || item.request.kind !== 'approval' || !items.some((candidate) => candidate.key === item.key && candidate.request?.id === item.request?.id)) return { ok: false, error: t('此请求已不再等待批准。', {}, uiLocale) };
         return dispatch({ type: 'resolveRequest', deviceId: item.deviceId, threadId: item.threadId, requestId: item.request.id, decision: action.type });
       case 'reply':
-        if (!item || typeof action.text !== 'string' || !action.text.trim() || action.text.length > 16000) return { ok: false, error: 'Please enter a reply (maximum 16000 characters).' };
+        if (!item || typeof action.text !== 'string' || !action.text.trim() || action.text.length > 16000) return { ok: false, error: t('请输入回复（最多16000个字符）。', {}, uiLocale) };
         return dispatch({ type: 'reply', deviceId: item.deviceId, threadId: item.threadId, text: action.text.trim() });
       case 'target': if (!item) break; recentTargets.set(item.key, item); targetKey = item.key; chat = true; window.setFocusable(true); window.focus(); break;
       case 'dismiss': for (const event of [...(bubbles.current?.events ?? [])]) deps.hub.acknowledge(event.alertId, 'pet'); break;
@@ -149,12 +149,12 @@ export function createPetController(deps: PetControllerDeps): PetController {
         if (![action.tray, action.bubble, action.chat].every((value) => Number.isFinite(value) && value >= 0 && value <= 10000)) break;
         measured = { tray: Math.min(action.tray, 414), bubble: Math.min(action.bubble, 280), chat: Math.min(action.chat, 140) }; break;
       case 'importFolder': case 'importZip': {
-        const chosen = await dialog.showOpenDialog({ title: uiLocale === 'zh-CN' ? '导入 Codex 宠物包' : 'Import Codex pet', properties: [action.type === 'importFolder' ? 'openDirectory' : 'openFile'], ...(action.type === 'importZip' ? { filters: [{ name: 'Codex pet pack', extensions: ['zip'] }] } : {}) });
+        const chosen = await dialog.showOpenDialog({ title: t('导入 Codex 宠物包', {}, uiLocale), buttonLabel: t('打开', {}, uiLocale), properties: [action.type === 'importFolder' ? 'openDirectory' : 'openFile'], ...(action.type === 'importZip' ? { filters: [{ name: t('Codex 宠物包'), extensions: ['zip'] }] } : {}) });
         if (!chosen.canceled && chosen.filePaths[0]) {
           try {
             const imported = await importPack(chosen.filePaths[0], userPets, (bytes) => decodeImage(window, bytes), packs.map((pack) => pack.manifest.id));
             await refreshPacks(); deps.settings.set({ petId: imported.manifest.id });
-          } catch (cause) { error = cause instanceof Error ? cause.message : 'Pet import failed'; emit(); return { ok: false, error }; }
+          } catch (cause) { error = cause instanceof Error ? cause.message : t('操作失败，请重试', {}, uiLocale); emit(); return { ok: false, error }; }
         }
         break;
       }
@@ -179,7 +179,7 @@ export function createPetController(deps: PetControllerDeps): PetController {
         }
         break;
       }
-      default: return { ok: false, error: 'Unknown pet action' };
+      default: return { ok: false, error: t('未知桌宠操作', {}, uiLocale) };
     }
     emit(); return { ok: true };
   }
@@ -190,7 +190,7 @@ export function createPetController(deps: PetControllerDeps): PetController {
   };
   ipcMain.on('rcDesktop:pet:ready', onReady);
   ipcMain.on('rcDesktop:pet:hitTest', onHitTest);
-  ipcMain.handle('rcDesktop:pet:action', (event, value: unknown) => trusted(event) ? action(value) : { ok: false, error: 'Untrusted pet frame' });
+  ipcMain.handle('rcDesktop:pet:action', (event, value: unknown) => trusted(event) ? action(value) : { ok: false, error: t('不受信任的桌宠页面', {}, uiLocale) });
   const unsubscribes = [deps.onAppearance((next) => { appearance = next; if (next.locale) uiLocale = resolveLocale(next.locale); setLocale(uiLocale); emit(); }), deps.hub.onSnapshot((snapshot) => {
     if (accountId && accountId !== snapshot.accountId) { bubbles.clear(); recentTargets.clear(); completedConversations.clear(); targetKey = null; }
     accountId = snapshot.accountId; items = snapshot.items;
@@ -241,9 +241,9 @@ export function createPetController(deps: PetControllerDeps): PetController {
 
 /** Native Settings import entry; shell owns the parent window, pet owns validation. */
 export async function importPetPack(deps: { petDirectories: string[]; settings: PetControllerDeps['settings']; parent: BrowserWindow }): Promise<void> {
-  const choice = await dialog.showMessageBox(deps.parent, { type: 'question', message: getLocale() === 'zh-CN' ? '导入 Codex 宠物包' : 'Import a Codex pet pack', buttons: getLocale() === 'zh-CN' ? ['文件夹', 'ZIP', '取消'] : ['Folder', 'ZIP', 'Cancel'], cancelId: 2 });
+  const choice = await dialog.showMessageBox(deps.parent, { type: 'question', message: t('导入 Codex 宠物包'), buttons: [t('文件夹'), 'ZIP', t('取消')], cancelId: 2 });
   if (choice.response === 2) return;
-  const result = await dialog.showOpenDialog(deps.parent, { properties: [choice.response === 0 ? 'openDirectory' : 'openFile'], ...(choice.response === 1 ? { filters: [{ name: 'Codex pet pack', extensions: ['zip'] }] } : {}) });
+  const result = await dialog.showOpenDialog(deps.parent, { title: t('导入 Codex 宠物包'), buttonLabel: t('打开'), properties: [choice.response === 0 ? 'openDirectory' : 'openFile'], ...(choice.response === 1 ? { filters: [{ name: t('Codex 宠物包'), extensions: ['zip'] }] } : {}) });
   if (result.canceled || !result.filePaths[0]) return;
   const installed = await listPetPacks(deps.petDirectories);
   const pack = await importPack(result.filePaths[0], join(app.getPath('userData'), 'pets'), (bytes) => decodeImage(deps.parent, bytes), installed.map((pack) => pack.manifest.id));

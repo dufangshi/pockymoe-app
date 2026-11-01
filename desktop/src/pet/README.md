@@ -50,3 +50,5 @@ For request/bubble polish only, run `node src/pet/tools/capture.mjs --polish`. I
 `node src/pet/tools/capture.mjs --grouped` verifies root-conversation counts, sibling alert paging, inactive-root titles and actual-agent approval/reply/acknowledgement routing across the theme matrix.
 
 `node src/pet/tools/qa1.mjs` checks English/Chinese page-locale updates, prose versus real command chips, and inline resolve/reply failure recovery through ErrorMark. It captures waiting bubbles and error details in every pack/mode at 1440px and 900px work-area widths.
+
+All app-owned pet copy uses `shared/i18n.ts`, including retained command failures and native import dialogs. `node src/pet/tools/qa1.mjs --locale-surfaces` checks the pet bubble, tray, controls and More menu in every theme/mode and en/zh-CN. `node src/pet/tools/locale-real.mjs` launches the real app against the parent fixture and switches language through Web Settings; it uses fixture credentials only inside sign-in and never logs authentication values.

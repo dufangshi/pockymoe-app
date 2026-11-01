@@ -2,9 +2,11 @@
 import { _electron as electron, expect } from '@playwright/test';
 import electronPath from 'electron';
 import { mkdir, writeFile } from 'node:fs/promises';
-const evidence = '/tmp/rc-desktop/evidence/pet/qa1';
+const localeSurfaces = process.argv.includes('--locale-surfaces');
+const harnessRoot = '/tmp/rc-desktop/evidence/pet/qa1';
+const evidence = localeSurfaces ? '/tmp/rc-desktop/evidence/pet/locale/mock' : harnessRoot;
 await mkdir(evidence, { recursive: true });
-const app = await electron.launch({ executablePath: electronPath, args: [`${evidence}/harness/main/index.js`], env: { ...process.env, ELECTRON_RENDERER_URL: '' } });
+const app = await electron.launch({ executablePath: electronPath, args: [`${harnessRoot}/harness/main/index.js`], env: { ...process.env, ELECTRON_RENDERER_URL: '' } });
 const page = await app.firstWindow(), errors = [], captures = [];
 page.on('pageerror', (error) => { errors.push(error.message); console.error(error.stack); });
 const smoke = process.argv.includes('--smoke');
@@ -35,7 +37,7 @@ async function shot(name, context) {
   captures.push({ name, ...context, image: `data:image/png;base64,${buffer.toString('base64')}` });
 }
 async function checkOwnedLanguage(locale) {
-  const generated = await page.evaluate(() => [...document.querySelectorAll('.bubble-kicker,.bubble-actions button,.chat-status,.error-popover,.error-mark')].map((element) => `${element.textContent} ${element.getAttribute('aria-label') || ''}`).join('\n'));
+  const generated = await page.evaluate(() => [...document.querySelectorAll('.bubble-kicker,.bubble-actions button,.chat-status,.error-popover,.error-mark,.controls button,.tray-header,.tray-header button,.group-label,.task button,.more button,.more-label')].map((element) => `${element.textContent} ${element.getAttribute('aria-label') || ''}`).join('\n'));
   if (locale === 'en') expect(generated).not.toMatch(/[\u3400-\u9fff]/);
   else expect(generated).not.toMatch(/Approval needed|Approve|Deny|Open in thread|Complete this action|Not sent/);
 }
@@ -58,6 +60,11 @@ try {
     await appearance(theme); await expect(bubble.locator('.bubble-kicker')).toHaveText(header);
     if (!chinese) { await appearance({ pack, effective: mode, accent: theme.accent }); await expect(bubble.locator('.bubble-kicker')).toHaveText('Approval needed'); await expect(page.locator('html')).toHaveAttribute('lang', 'en'); await appearance(theme); }
     await shot(`${id}-waiting-prose`, context);
+    if (localeSurfaces) {
+      await action({ type: 'toggleTray' }); await expect(page.locator('.tray-title')).toHaveText(chinese ? '活动' : 'Activity'); await checkOwnedLanguage(locale); await shot(`${id}-tray-controls`, context);
+      await page.locator('[data-action="more"]').click(); await expect(page.getByRole('menuitem', { name: chinese ? '隐藏桌宠' : 'Hide pet', exact: true })).toBeVisible(); await checkOwnedLanguage(locale); await shot(`${id}-more`, context); await page.keyboard.press('Escape');
+      await action({ type: 'toggleTray' }); await action({ type: 'dismiss' }); continue;
+    }
     await failure('resolveRequest'); await bubble.getByRole('button', { name: chinese ? '批准' : 'Approve', exact: true }).click();
     await expect(bubble.locator('.error-mark')).toBeVisible(); await expect(bubble).toHaveAttribute('data-alert-id', `studio:${item.request.id}`); await expect(page.locator('.error-banner')).toHaveCount(0);
     await expect(page.locator('.error-popover')).toHaveCount(0); await checkOwnedLanguage(locale); await shot(`${id}-resolve-error`, context);
@@ -96,5 +103,5 @@ try {
     await writeFile(`${evidence}/contact-${locale}-${mode}.png`, Buffer.from(url.split(',')[1], 'base64'));
   }
   await writeFile(`${evidence}/qa-results.json`, JSON.stringify({ result: 'passed', captures: captures.map(({ name, pack, mode, width, locale }) => ({ name, pack, mode, width, locale })), errors }, null, 2));
-  console.log(`Pet QA1 passed: ${captures.length} captures, no mixed app-owned language, failed bubbles and drafts retained.`);
+  console.log(localeSurfaces ? `Pet locale surfaces passed: ${captures.length} captures, no mixed app-owned language.` : `Pet QA1 passed: ${captures.length} captures, no mixed app-owned language, failed bubbles and drafts retained.`);
 } finally { await app.close(); }
