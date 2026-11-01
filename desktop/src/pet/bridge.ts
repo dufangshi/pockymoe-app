@@ -1,8 +1,9 @@
-import type { ActivityItem, DesktopSettings, HostCommandResult } from '../shared/contract';
+import type { ActivityItem, Appearance, DesktopSettings, HostCommandResult } from '../shared/contract';
 import type { SpriteState } from './animation';
 import type { PetBubble } from './bubbles';
 import type { DockEdge, Rect } from './geometry';
 export interface PetViewState {
+  appearance: Appearance;
   items: ActivityItem[];
   targets: ActivityItem[];
   mood: SpriteState;
@@ -25,7 +26,7 @@ export interface PetViewState {
   targetKey: string | null;
 }
 export type PetAction =
-  | { type: 'open' | 'approve' | 'deny'; key: string }
+  | { type: 'open' | 'approve' | 'deny' | 'revealInMap'; key: string }
   | { type: 'reply'; key: string; text: string }
   | { type: 'target'; key: string }
   | { type: 'dismiss' }

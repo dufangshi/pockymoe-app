@@ -5,6 +5,7 @@
 ```ts
 import { createPetController } from '../pet/controller';
 const pet = createPetController({ hub, settings,
+  appearance: appearance.get, onAppearance: appearance.onChange,
   dispatch: command => windows.dispatch(command),
   shouldSpeak: event => notifications.shouldSpeak(event),
   petDirectories: [bundledPetsDirectory, userPetsDirectory],
@@ -16,7 +17,7 @@ The build has two extra entries: `src/pet/preload.ts` → `out/preload/pet.js`
 and `src/pet/index.html` → `out/renderer/pet/index.html`. In development the
 renderer uses `ELECTRON_RENDERER_URL/pet/index.html`. No relay credentials enter
 this window. Its `rcDesktop.pet` methods accept only named, sender-checked actions.
-The panel becomes focusable only while the user explicitly opens quick chat.
+The panel becomes focusable while the user explicitly opens quick chat or its keyboard menu.
 
 The native Settings screen can call the additional `importPetPack({ settings,
 petDirectories, parent })` export. Import validates dimensions/limits and decodes
@@ -38,6 +39,8 @@ node src/pet/tools/capture.mjs
 
 The last two commands use a mock ActivityHub, an isolated temporary userData, and
 an independent Electron process. Screenshots/results go to
-`/tmp/rc-desktop/evidence/pet/`; no Supervisor or real account is accessed.
+`/tmp/rc-desktop/evidence/pet/v2/`; no Supervisor or real account is accessed.
 `node src/pet/tools/generate-placeholder.mjs` recreates the original procedural
 atlas for tests. Production packaging must exclude `assets/pets/placeholder/**`.
+
+Appearance follows the host v2 `appearance()` / `onAppearance` callbacks through the shared appearance helper. Status SVGs come directly from `shared/statusMarks.ts`. The capture script checks Classic, Plum Pocket and Terminal in light/dark on 1440px and 900px work areas; `--smoke` selects Classic on a 900px work area.

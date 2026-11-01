@@ -1,7 +1,7 @@
-import { app, BrowserWindow, dialog, ipcMain, nativeImage, screen } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, nativeImage, nativeTheme, screen } from 'electron';
 import { join } from 'node:path';
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
-import type { HostCommand, HostCommandResult, PetController, PetControllerDeps } from '../shared/contract';
+import type { Appearance, HostCommand, HostCommandResult, PetController, PetControllerDeps } from '../shared/contract';
 import { ANIMATIONS, moodFor, type SpriteState } from './animation';
 import { BubbleQueue } from './bubbles';
 import { dockPosition, PET_HEIGHT, petLayout, restorePosition, type PetPosition } from './geometry';
@@ -15,6 +15,7 @@ export function createPetController(deps: PetControllerDeps): PetController {
   let positions: Record<string, PetPosition> = {};
   try { const stored: unknown = JSON.parse(readFileSync(positionFile, 'utf8')); if (stored && typeof stored === 'object' && !Array.isArray(stored)) positions = stored as Record<string, PetPosition>; } catch { /* First launch. */ }
   let settings = deps.settings.get(), items = deps.hub.snapshot()?.items ?? [];
+  let appearance: Appearance = deps.appearance() ?? { effective: nativeTheme.shouldUseDarkColors ? 'dark' : 'light', pack: 'classic', accent: '#ad782e' };
   let packs: PetPack[] = [], pack: PetPack | undefined, error: string | null = null;
   let disposed = false, visible = settings.petVisible, tray = settings.petMini, chat = false, peek = false, reviewing = false;
   let menuOpen = false, reducedMotion = false, dockAmount = 0;
@@ -51,7 +52,7 @@ export function createPetController(deps: PetControllerDeps): PetController {
   }
   function emit(): void {
     if (disposed || window.isDestroyed()) return;
-    window.setFocusable(chat);
+    window.setFocusable(chat || menuOpen);
     const now = Date.now();
     bubbles.tick(now);
     if (completionUntil <= now) completion = null;
@@ -64,7 +65,7 @@ export function createPetController(deps: PetControllerDeps): PetController {
       const bounds = window.getBounds();
       if (Object.keys(layout.window).some((key) => bounds[key as keyof typeof bounds] !== layout.window[key as keyof typeof layout.window])) window.setBounds(layout.window);
     }
-    const state: PetViewState = { items, targets: [...new Map([...items, ...recentTargets.values()].map((item) => [item.key, item])).values()], mood: dragMood ?? moodFor(items, { snoozed, completion, reviewing }),
+    const state: PetViewState = { appearance, items, targets: [...new Map([...items, ...recentTargets.values()].map((item) => [item.key, item])).values()], mood: dragMood ?? moodFor(items, { snoozed, completion, reviewing }),
       bubble: snoozed ? null : bubbles.current, settings: { petSize: settings.petSize, petMini: settings.petMini, petSound: settings.petSound, petId: settings.petId },
       imageUrl: pack ? `data:image/${pack.manifest.spritesheetPath.endsWith('png') ? 'png' : 'webp'};base64,${pack.image.toString('base64')}` : '',
       ...(pack?.sleepingImage && pack.manifest.remoteCodex ? { sleeping: { imageUrl: `data:image/${pack.manifest.remoteCodex.sleeping.path.endsWith('png') ? 'png' : 'webp'};base64,${pack.sleepingImage.toString('base64')}`, frames: pack.manifest.remoteCodex.sleeping.frames, durationsMs: pack.manifest.remoteCodex.sleeping.durationsMs } } : {}),
@@ -106,7 +107,7 @@ export function createPetController(deps: PetControllerDeps): PetController {
     if (!value || typeof value !== 'object' || typeof (value as PetAction).type !== 'string') return { ok: false, error: 'Invalid pet action' };
     const action = value as PetAction;
     const item = 'key' in action && typeof action.key === 'string' ? items.find((candidate) => candidate.key === action.key) ?? recentTargets.get(action.key) : undefined;
-    if (['open', 'approve', 'deny', 'reply', 'target'].includes(action.type) && !item) return { ok: false, error: app.getLocale().startsWith('zh') ? '线程已不在活动列表中。' : 'This thread is no longer active.' };
+    if (['open', 'approve', 'deny', 'reply', 'target', 'revealInMap'].includes(action.type) && !item) return { ok: false, error: app.getLocale().startsWith('zh') ? '线程已不在活动列表中。' : 'This thread is no longer active.' };
     switch (action.type) {
       case 'open': {
         if (!item) break;
@@ -114,6 +115,7 @@ export function createPetController(deps: PetControllerDeps): PetController {
         if (result.ok) { acknowledgeKey(item.key); await dispatch({ type: 'markRead', key: item.key }); }
         return result;
       }
+      case 'revealInMap': if (!item) break; return dispatch({ type: 'revealInMap', key: item.key });
       case 'approve': case 'deny':
         if (!item?.request || item.request.kind !== 'approval' || !items.some((candidate) => candidate.key === item.key && candidate.request?.id === item.request?.id)) return { ok: false, error: 'This request is no longer awaiting approval.' };
         return dispatch({ type: 'resolveRequest', deviceId: item.deviceId, threadId: item.threadId, requestId: item.request.id, decision: action.type });
@@ -136,7 +138,7 @@ export function createPetController(deps: PetControllerDeps): PetController {
       case 'setSize': if (!['S', 'M', 'L'].includes(action.size)) break; deps.settings.set({ petSize: action.size }); position = dockPosition(position, screen.getDisplayMatching({ x: Math.round(position.x), y: Math.round(position.y), width: 1, height: 1 }).workArea, PET_HEIGHT[action.size]); break;
       case 'setPack': if (!packs.some((candidate) => candidate.manifest.id === action.id)) break; deps.settings.set({ petId: action.id }); break;
       case 'review': reviewing = action.value === true; break;
-      case 'menu': menuOpen = action.value === true; break;
+      case 'menu': menuOpen = action.value === true; if (menuOpen) { window.setFocusable(true); window.focus(); } break;
       case 'reducedMotion': reducedMotion = action.value === true; break;
       case 'measure':
         if (![action.tray, action.bubble, action.chat].every((value) => Number.isFinite(value) && value >= 0 && value <= 10000)) break;
@@ -184,7 +186,7 @@ export function createPetController(deps: PetControllerDeps): PetController {
   ipcMain.on('rcDesktop:pet:ready', onReady);
   ipcMain.on('rcDesktop:pet:hitTest', onHitTest);
   ipcMain.handle('rcDesktop:pet:action', (event, value: unknown) => trusted(event) ? action(value) : { ok: false, error: 'Untrusted pet frame' });
-  const unsubscribes = [deps.hub.onSnapshot((snapshot) => {
+  const unsubscribes = [deps.onAppearance((next) => { appearance = next; emit(); }), deps.hub.onSnapshot((snapshot) => {
     if (accountId && accountId !== snapshot.accountId) { bubbles.clear(); recentTargets.clear(); targetKey = null; }
     accountId = snapshot.accountId; items = snapshot.items;
     for (const item of items) if (recentTargets.has(item.key)) recentTargets.set(item.key, item);

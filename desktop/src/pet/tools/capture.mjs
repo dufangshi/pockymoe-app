@@ -1,81 +1,175 @@
-// Run from desktop/: pnpm exec electron-vite build --config src/pet/tools/electron.config.ts
-// Then node src/pet/tools/capture.mjs. Uses a mock hub and a fresh temporary userData.
+// Focused Electron validation. Uses only a mock ActivityHub and isolated userData.
+// From desktop/: pnpm exec electron-vite build --config src/pet/tools/electron.config.ts
+// node src/pet/tools/capture.mjs [--smoke]
 import { _electron as electron, expect } from '@playwright/test';
 import electronPath from 'electron';
 import { mkdir, writeFile } from 'node:fs/promises';
-const directory = '/tmp/rc-desktop/evidence/pet'; await mkdir(directory, { recursive: true });
-const application = await electron.launch({ executablePath: electronPath, args: [`${directory}/harness/main/index.js`], env: { ...process.env, ELECTRON_RENDERER_URL: '' } });
-const page = await application.firstWindow();
-const errors = []; page.on('pageerror', (error) => errors.push(error.message));
+import { PNG } from 'pngjs';
+const rootEvidence = '/tmp/rc-desktop/evidence/pet/v2';
+const smoke = process.argv.includes('--smoke');
+const directory = smoke ? `${rootEvidence}/smoke` : rootEvidence;
+await mkdir(directory, { recursive: true });
+const application = await electron.launch({ executablePath: electronPath, args: [`${rootEvidence}/harness/main/index.js`], env: { ...process.env, ELECTRON_RENDERER_URL: '' } });
+const page = await application.firstWindow(), errors = [], captures = [];
+page.on('pageerror', (error) => errors.push(error.message));
+const packs = smoke ? ['classic'] : ['classic', 'plum-pocket', 'terminal'];
+const widths = smoke ? [900] : [1440, 900];
 const now = new Date().toISOString();
-const base = { deviceId: 'macbook', deviceName: 'MacBook Pro', workspaceId: 'w', workspaceLabel: 'remoteCodex', since: now, unread: true };
-const running = { ...base, key: 'macbook:login', threadId: 'login', title: '修复登录与会话恢复', state: 'running', since: new Date(Date.now() - 192000).toISOString(), turnId: 'turn-login' };
-const review = { ...base, deviceId: 'windows', deviceName: 'Windows Studio', workspaceLabel: 'desktop-app', key: 'windows:desktop', threadId: 'desktop', title: '打磨桌面端交互细节', state: 'running', turnId: 'turn-desktop' };
-const sync = async (items) => application.evaluate((_, items) => globalThis.petHarness.sync({ version: 1, accountId: 'pet-fixture', generatedAt: new Date().toISOString(), focusedThreadKey: null, items }), items);
-const fire = async (type, item, alertId) => application.evaluate((_, event) => globalThis.petHarness.event(event), { type, item, alertId, at: new Date().toISOString() });
-const action = async (value) => page.evaluate((value) => window.rcDesktop.pet.action(value), value);
-const shot = async (name) => { await page.waitForTimeout(400); const overflow = await page.evaluate(() => [...document.querySelectorAll('.controls,.stack,.tray,.chat,.bubble,.more')].filter((element) => { const r = element.getBoundingClientRect(); return r.width && r.height && (r.top < -1 || r.bottom > innerHeight + 1 || r.left < -1 || r.right > innerWidth + 1); }).map((element) => element.className)); expect(overflow, name + ' overflow').toEqual([]); await page.screenshot({ path: `${directory}/${name}.png`, omitBackground: true }); };
+const base = { deviceId: 'macbook', deviceName: 'MacBook Pro', workspaceId: 'w', workspaceLabel: 'pockymoe', since: now, unread: true };
+const definitions = [
+  ['needsInput', '审批：验证运行时更新', '运行 cargo test -p pockymoe-runtime', 'approval'],
+  ['needsInput', '等待补充桌面端反馈', '请确认任务完成后的提醒方式', 'input'],
+  ['failed', '检查 relay 连接恢复', '连接暂时中断，请打开线程查看'],
+  ['interrupted', '整理 Windows 启动行为', '已中断，工作记录已保留'],
+  ['running', '对齐原生窗口与主题', ''],
+  ['running', '验证跨设备活动同步', ''],
+  ['completed', '修复登录与会话恢复', '登录恢复已修复，针对性回归全部通过。'],
+  ['completed', '打磨桌面端交互细节', '卡片、气泡与快速回复已对齐。'],
+];
+const sync = (items) => application.evaluate((_, items) => globalThis.petHarness.sync({ version: 1, accountId: 'pet-fixture-v2', generatedAt: new Date().toISOString(), focusedThreadKey: null, items }), items);
+const action = (value) => page.evaluate((value) => window.rcDesktop.pet.action(value), value);
+const setSettings = (patch) => application.evaluate((_, patch) => globalThis.petHarness.settings(patch), patch);
+const accent = (pack, mode) => pack === 'terminal' ? mode === 'dark' ? '#4de3a2' : '#0a47c4' : pack === 'plum-pocket' ? mode === 'dark' ? '#f0b54a' : '#e8a93a' : mode === 'dark' ? '#e4b86a' : '#ad782e';
+async function moveTo(x, y) {
+  const local = await page.evaluate(() => { const pet = document.querySelector('#character'), root = document.querySelector('#app'); return { x: parseFloat(pet.style.left), y: parseFloat(pet.style.top), width: pet.offsetWidth, height: pet.offsetHeight, edge: root.dataset.dockEdge, amount: Number(root.dataset.dockAmount) }; });
+  const bounds = await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getBounds());
+  const cropX = local.edge === 'left' ? -local.width * .45 * local.amount : local.edge === 'right' ? local.width * .45 * local.amount : 0;
+  const cropY = local.edge === 'top' ? -local.height * .45 * local.amount : local.edge === 'bottom' ? local.height * .45 * local.amount : 0;
+  const dx = x - (bounds.x + local.x - cropX), dy = y - (bounds.y + local.y - cropY);
+  await action({ type: 'dragStart', x: 0, y: 0 }); await action({ type: 'dragMove', x: dx, y: dy }); await action({ type: 'dragEnd', x: dx, y: dy });
+  const edge = await page.locator('#app').getAttribute('data-dock-edge');
+  await expect(page.locator('#app')).toHaveAttribute('data-dock-amount', edge ? '1' : '0');
+}
+async function ensureTray(value) { if (!!await page.locator('.tray').count() !== value) await action({ type: 'toggleTray' }); }
+async function shot(name, context) {
+  await page.waitForTimeout(100);
+  const overflow = await page.evaluate(() => [...document.querySelectorAll('.controls,.tray,.chat,.bubble,.more')].filter((element) => { const r = element.getBoundingClientRect(); return r.width && r.height && (r.top < -1 || r.bottom > innerHeight + 1 || r.left < -1 || r.right > innerWidth + 1); }).map((element) => element.className));
+  expect(overflow, `${name}: overlay bounds`).toEqual([]);
+  const raw = await page.screenshot({ path: `${directory}/${name}.png`, omitBackground: true, scale: 'css' });
+  const native = await page.screenshot({ path: `${directory}/${name}@2x.png`, omitBackground: true });
+  const bounds = await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getBounds());
+  captures.push({ name, ...context, bounds, raw, native });
+}
 try {
-  await page.waitForSelector('#sprite'); await page.waitForFunction(() => document.querySelector('#sprite').style.backgroundImage.includes('data:'));
-  for (const theme of ['light', 'dark']) {
-    await application.evaluate((_, theme) => globalThis.petHarness.theme(theme), theme);
-    await page.emulateMedia({ colorScheme: theme });
-    expect(await page.evaluate(() => matchMedia('(prefers-color-scheme: dark)').matches)).toBe(theme === 'dark');
-    const run = { ...running, key: `macbook:login-${theme}`, threadId: `login-${theme}` };
-    await sync([run, review]); if (!await page.locator('.tray').count()) await action({ type: 'toggleTray' }); await shot(`${theme}-running`);
-    const attention = { ...run, state: 'needsInput', request: { id: `req-${theme}`, kind: 'approval', summary: '运行 cargo test -p runtime acp' } };
-    await sync([attention, review]); await fire('needsInput', attention, `macbook:req-${theme}`); await shot(`${theme}-needs-input`);
-    await application.evaluate((_, id) => globalThis.petHarness.acknowledge(id), `macbook:req-${theme}`); await expect(page.locator('.bubble')).toHaveCount(0);
-    await page.getByRole('button', { name: '批准', exact: true }).click();
-    const completed = { ...run, state: 'completed', durationMs: 192000, resultSummary: '登录恢复已修复，针对性回归全部通过。', request: null };
-    const done2 = { ...review, state: 'completed', resultSummary: '桌面端交互打磨完成。', durationMs: 94000 };
-    await sync([completed, done2]);
-    // Different ids/keys each theme keep the production 30-second dedup behavior intact.
-    for (let i = 0; i < 3; i++) await fire('completed', { ...completed, key: `${theme}:${i}`, threadId: `finished-${i}` }, `${theme}:done-${i}`);
-    await shot(`${theme}-completed-burst`);
-    await action({ type: 'target', key: completed.key }); await page.getByRole('textbox', { name: '回复', exact: true }).fill('再检查一下 Windows 的恢复路径');
-    await expect(page.locator('#reply-input')).toHaveValue('再检查一下 Windows 的恢复路径'); await shot(`${theme}-chat`); await page.getByRole('textbox', { name: '回复', exact: true }).press('Enter'); await expect(page.getByRole('status')).toHaveText('已发送');
-    await action({ type: 'toggleChat' });
-    // Move the logical sprite anchor through the actual IPC, using work-area geometry.
-    const work = await application.evaluate(({ screen }) => screen.getPrimaryDisplay().workArea);
-    const moveTo = async (x, y) => {
-      const local = await page.evaluate(() => { const pet = document.querySelector('#character'), root = document.querySelector('#app'); return { x: parseFloat(pet.style.left), y: parseFloat(pet.style.top), width: pet.offsetWidth, height: pet.offsetHeight, edge: root.dataset.dockEdge, amount: Number(root.dataset.dockAmount) }; });
-      const bounds = await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getBounds());
-      const cropX = local.edge === 'left' ? -local.width * .45 * local.amount : local.edge === 'right' ? local.width * .45 * local.amount : 0;
-      const cropY = local.edge === 'top' ? -local.height * .45 * local.amount : local.edge === 'bottom' ? local.height * .45 * local.amount : 0;
-      const dx = x - (bounds.x + local.x - cropX), dy = y - (bounds.y + local.y - cropY);
-      await action({ type: 'dragStart', x: 0, y: 0 }); await action({ type: 'dragMove', x: dx, y: dy }); await action({ type: 'dragEnd', x: dx, y: dy }); await page.waitForTimeout(330);
-    };
-    const spriteWidth = await page.locator('#character').evaluate((element) => element.offsetWidth);
-    await moveTo(work.x + work.width - spriteWidth, work.y + work.height / 2);
-    expect(await page.locator('#app').getAttribute('data-dock-edge')).toBe('right');
-    await shot(`${theme}-docked`); await action({ type: 'click' }); await shot(`${theme}-peek`);
-    await application.evaluate(() => globalThis.petHarness.settings({ petMini: true })); await shot(`${theme}-mini`);
-    await application.evaluate(() => globalThis.petHarness.settings({ petMini: false }));
-    await moveTo(work.x + work.width / 2, work.y + work.height / 2);
-    await application.evaluate(() => globalThis.petHarness.settings({ snoozeUntil: new Date(Date.now() + 60000).toISOString() })); await shot(`${theme}-sleeping`);
-    await application.evaluate(() => globalThis.petHarness.settings({ snoozeUntil: null }));
-    if (await page.locator('.tray').count()) await action({ type: 'toggleTray' });
+  await page.waitForFunction(() => document.querySelector('#sprite')?.style.backgroundImage.includes('data:'));
+  for (const pack of packs) for (const mode of ['light', 'dark']) for (const width of widths) {
+    const id = `${pack}-${mode}-${width}`, context = { pack, mode, width };
+    console.log(`Capture ${id}`);
+    await page.emulateMedia({ colorScheme: mode === 'light' ? 'dark' : 'light', reducedMotion: 'no-preference' });
+    await application.evaluate((_, width) => globalThis.petHarness.workArea(width), width);
+    await application.evaluate((_, value) => globalThis.petHarness.appearance(value), { effective: mode, pack, accent: accent(pack, mode) });
+    expect(await application.evaluate(({ screen }) => screen.getPrimaryDisplay().workArea.width)).toBe(width);
+    await expect(page.locator('html')).toHaveAttribute('data-theme-effective', mode);
+    await expect(page.locator('html')).toHaveAttribute('data-theme-preset', pack);
+    await setSettings({ petMini: false, snoozeUntil: null });
     await action({ type: 'dismiss' });
-    await moveTo(work.x + work.width / 2, work.y + work.height / 2);
-    await page.locator('[data-action="more"]').click(); await shot(`${theme}-more`);
-    await page.keyboard.press('Escape');
-
+    const items = definitions.map(([state, title, summary, kind], index) => ({ ...base, key: `${index % 2 ? 'studio' : 'macbook'}:${id}-${index}`, threadId: `${id}-${index}`, title, state, since: new Date(Date.now() - (index + 1) * 32000).toISOString(), turnId: `turn-${id}-${index}`, ...(index % 2 ? { deviceId: 'studio', deviceName: 'Windows Studio', workspaceLabel: 'desktop-app' } : {}), ...(kind ? { request: { id: `req-${id}-${index}`, kind, summary } } : { resultSummary: summary }) }));
+    await sync(items); await moveTo(width - 220, 660); await ensureTray(true);
+    await expect(page.locator('.task')).toHaveCount(8);
+    await expect(page.locator('.scroll-track')).toBeVisible();
+    await expect(page.locator('.scroll-frame')).toHaveAttribute('data-overflow-bottom', 'true');
+    await expect(page.locator('.tray [data-status="waiting"]')).toHaveCount(2);
+    await expect(page.locator('.tray [data-status="interrupted"]')).toHaveCount(1);
+    await expect(page.locator('.tray [data-status="running"] .status-mark-orbit')).toHaveCount(2);
+    await shot(`${id}-tray-top`, context);
+    await page.locator('.task-list').evaluate((element) => { element.scrollTop = Math.round((element.scrollHeight - element.clientHeight) / 2); });
+    await expect(page.locator('.scroll-frame')).toHaveAttribute('data-overflow-top', 'true');
+    await shot(`${id}-tray-scroll`, context);
+    const scrollBefore = await page.locator('.task-list').evaluate((element) => element.scrollTop), thumb = await page.locator('.scroll-thumb').boundingBox(), track = await page.locator('.scroll-track').boundingBox();
+    await page.mouse.move(thumb.x + thumb.width / 2, thumb.y + thumb.height / 2); await page.mouse.down();
+    const selectedAccent = accent(pack, mode), rgb = `rgb(${parseInt(selectedAccent.slice(1, 3), 16)}, ${parseInt(selectedAccent.slice(3, 5), 16)}, ${parseInt(selectedAccent.slice(5, 7), 16)})`;
+    await expect(page.locator('.scroll-thumb')).toHaveCSS('background-color', rgb);
+    await page.mouse.move(thumb.x + thumb.width / 2, track.y + track.height - 8, { steps: 4 }); await page.mouse.up();
+    await expect.poll(() => page.locator('.task-list').evaluate((element) => element.scrollTop)).toBeGreaterThan(scrollBefore);
+    await page.locator('.scroll-track').focus(); await page.keyboard.press('End');
+    await expect(page.locator('.scroll-frame')).toHaveAttribute('data-overflow-bottom', 'false');
+    const lastActions = page.locator('.task').last().locator('.actions'); await expect(lastActions).toBeInViewport();
+    await page.evaluate(() => document.activeElement?.blur()); await shot(`${id}-tray-bottom`, context);
+    await page.locator('.scroll-track').focus(); await page.keyboard.press('Home');
+    await page.locator('.task').first().getByRole('button', { name: '在地图中显示' }).click();
+    await ensureTray(false);
+    await application.evaluate((_, event) => globalThis.petHarness.event(event), { type: 'needsInput', item: items[0], alertId: `macbook:req-${id}-0`, at: now });
+    await expect(page.locator('.bubble [data-status="waiting"]')).toBeVisible();
+    await expect(page.locator('.bubble').getByRole('button', { name: '批准', exact: true })).toBeVisible();
+    await expect(page.locator('.bubble').getByRole('button', { name: '拒绝', exact: true })).toBeVisible();
+    await shot(`${id}-waiting`, context);
+    await page.locator('.bubble').getByRole('button', { name: '在地图中显示' }).click();
+    await page.locator('.bubble').getByRole('button', { name: '批准', exact: true }).click();
+    await application.evaluate((_, id) => globalThis.petHarness.acknowledge(id), `macbook:req-${id}-0`);
+    await expect(page.locator('.bubble')).toHaveCount(0);
+    await action({ type: 'target', key: items[0].key });
+    await expect(page.locator('.chat-target [data-status="waiting"]')).toBeVisible();
+    await page.locator('#reply-input').fill('继续检查这项任务'); await shot(`${id}-chat`, context);
+    await page.locator('#reply-input').press('Enter'); await expect(page.getByRole('status')).toHaveText('已发送');
+    await action({ type: 'toggleChat' });
+    await sync([]); await ensureTray(false); await moveTo(width - 220, 550);
+    await setSettings({ snoozeUntil: new Date(Date.now() + 60000).toISOString() });
+    await expect(page.locator('.sleep-motes path')).toHaveCount(3);
+    await expect(page.locator('#character')).toHaveCSS('filter', 'none'); await expect(page.locator('#character')).toHaveCSS('opacity', '1');
+    await expect(page.locator('#sprite')).toHaveCSS('background-size', /128px$/);
+    await shot(`${id}-sleeping`, context);
+    await setSettings({ snoozeUntil: null }); await sync(items); await ensureTray(false);
+    await moveTo(0, 500); await expect(page.locator('#app')).toHaveAttribute('data-dock-edge', 'left'); await shot(`${id}-dock-left`, context);
+    const petWidth = await page.locator('#character').evaluate((element) => element.offsetWidth);
+    await moveTo(width - petWidth, 500); await expect(page.locator('#app')).toHaveAttribute('data-dock-edge', 'right'); await shot(`${id}-dock-right`, context);
+    await moveTo(width - 220, 660); await setSettings({ petMini: true }); await expect(page.locator('#character')).toHaveCount(0); await shot(`${id}-mini`, context);
+    await setSettings({ petMini: false }); await ensureTray(false);
+    await page.locator('[data-action="more"]').click(); await expect(page.getByRole('menuitem').first()).toBeFocused(); await page.keyboard.press('ArrowDown'); await expect(page.getByRole('menuitem').nth(1)).toBeFocused(); await shot(`${id}-more`, context); await page.keyboard.press('Escape'); await expect(page.getByRole('menu')).toHaveCount(0);
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await setSettings({ snoozeUntil: new Date(Date.now() + 60000).toISOString() });
+    await expect(page.locator('.sleep-motes path').first()).toHaveCSS('animation-name', 'none');
+    await setSettings({ snoozeUntil: null });
   }
-  await page.emulateMedia({ reducedMotion: 'reduce' });
-  await sync([running]); await action({ type: 'review', value: false });
-  await page.waitForTimeout(250);
-  expect(await page.locator('#sprite').evaluate((element) => element.style.backgroundPosition.split(' ')[0])).toMatch(/^0/);
-  await page.mouse.move(2, 2); await expect.poll(() => application.evaluate(() => globalThis.petHarness.ignored())).toBe(true);
-  const petRect = await page.locator('#character').boundingBox(); await page.mouse.move(petRect.x + petRect.width / 2, petRect.y + petRect.height * .6); await expect.poll(() => application.evaluate(() => globalThis.petHarness.ignored())).toBe(false);
-  await action({ type: 'target', key: running.key }); await sync([]); await application.evaluate(() => globalThis.petHarness.failReply(true));
-  await page.locator('#reply-input').fill('保留这段未发送的回复'); await page.locator('#reply-input').press('Enter');
-  await expect(page.getByRole('status')).toHaveText('模拟发送失败，请重试'); await expect(page.locator('#reply-input')).toHaveValue('保留这段未发送的回复');
-  await shot('dark-reply-error');
   const commands = await application.evaluate(() => globalThis.petHarness.commands());
-  expect(commands.filter((command) => command.type === 'resolveRequest')).toHaveLength(2);
-  expect(commands.filter((command) => command.type === 'reply')).toHaveLength(3);
+  const combinations = packs.length * 2 * widths.length;
+  expect(commands.filter((command) => command.type === 'revealInMap')).toHaveLength(combinations * 2);
+  expect(commands.filter((command) => command.type === 'resolveRequest')).toHaveLength(combinations);
+  expect(commands.filter((command) => command.type === 'reply')).toHaveLength(combinations);
   expect(errors).toEqual([]);
-  await writeFile(`${directory}/capture-results.json`, JSON.stringify({ screenshots: 19, errors, commands, result: 'passed' }, null, 2));
-  console.log('Pet Electron scenarios passed; 19 light/dark screenshots captured.');
+  // Context frames show the correctly sized native overlay in each simulated work area.
+  // These are labelled composites, not captures of a real account or an OS desktop.
+  for (const entry of captures) {
+    const frame = new PNG({ width: entry.width, height: 838 }), source = PNG.sync.read(entry.raw);
+    const colour = entry.mode === 'dark' ? [22, 24, 29] : [235, 237, 241];
+    expect(entry.bounds.x).toBeGreaterThanOrEqual(0); expect(entry.bounds.x + entry.bounds.width).toBeLessThanOrEqual(entry.width);
+    expect(entry.bounds.y).toBeGreaterThanOrEqual(38); expect(entry.bounds.y + entry.bounds.height).toBeLessThanOrEqual(838);
+    for (let i = 0; i < frame.data.length; i += 4) { for (let c = 0; c < 3; c++) frame.data[i + c] = colour[c]; frame.data[i + 3] = 255; }
+    for (let y = 0; y < source.height; y++) for (let x = 0; x < source.width; x++) {
+      const a = (y * source.width + x) * 4, b = ((entry.bounds.y + y) * entry.width + entry.bounds.x + x) * 4, alpha = source.data[a + 3] / 255;
+      for (let c = 0; c < 3; c++) frame.data[b + c] = source.data[a + c] * alpha + colour[c] * (1 - alpha);
+    }
+    await writeFile(`${directory}/${entry.name}-work-area.png`, PNG.sync.write(frame));
+  }
+  for (const pack of packs) for (const mode of ['light', 'dark']) for (const width of widths) {
+    const entries = captures.filter((entry) => entry.pack === pack && entry.mode === mode && entry.width === width);
+    const dataUrl = await page.evaluate(async ({ entries, mode }) => {
+      const canvas = document.createElement('canvas'); canvas.width = 1200; canvas.height = 1120;
+      const context = canvas.getContext('2d'); context.fillStyle = mode === 'dark' ? '#16181d' : '#ebedf1'; context.fillRect(0, 0, 1200, 1120);
+      for (const [index, entry] of entries.entries()) {
+        const image = new Image(); image.src = entry.image; await image.decode();
+        const x = index % 5 * 240 + 8, y = Math.floor(index / 5) * 560 + 8, scale = Math.min(224 / image.width, 520 / image.height);
+        context.font = '11px system-ui'; context.fillStyle = mode === 'dark' ? '#d9dce5' : '#555b68'; context.fillText(entry.name, x, y + 12, 224);
+        context.drawImage(image, x, y + 24, image.width * scale, image.height * scale);
+      }
+      return canvas.toDataURL('image/png');
+    }, { mode, entries: entries.map((entry) => ({ name: entry.name.replace(`${pack}-${mode}-${width}-`, ''), image: `data:image/png;base64,${entry.raw.toString('base64')}` })) });
+    await writeFile(`${directory}/contact-${pack}-${mode}-${width}.png`, Buffer.from(dataUrl.split(',')[1], 'base64'));
+  }
+  for (const mode of ['light', 'dark']) {
+    const entries = captures.filter((capture) => capture.mode === mode), tileWidth = 240, tileHeight = 560, columns = 6, rows = Math.ceil(entries.length / columns);
+    const sheet = new PNG({ width: columns * tileWidth, height: rows * tileHeight });
+    const color = mode === 'dark' ? [22, 24, 29] : [235, 237, 241];
+    for (let i = 0; i < sheet.data.length; i += 4) { for (let c = 0; c < 3; c++) sheet.data[i + c] = color[c]; sheet.data[i + 3] = 255; }
+    for (const [n, entry] of entries.entries()) {
+      const source = PNG.sync.read(entry.raw), scale = Math.min((tileWidth - 16) / source.width, (tileHeight - 16) / source.height);
+      for (let y = 0; y < Math.floor(source.height * scale); y++) for (let x = 0; x < Math.floor(source.width * scale); x++) {
+        const a = (Math.floor(y / scale) * source.width + Math.floor(x / scale)) * 4, b = ((Math.floor(n / columns) * tileHeight + 8 + y) * sheet.width + n % columns * tileWidth + 8 + x) * 4, alpha = source.data[a + 3] / 255;
+        for (let c = 0; c < 3; c++) sheet.data[b + c] = source.data[a + c] * alpha + color[c] * (1 - alpha);
+      }
+    }
+    await writeFile(`${directory}/${mode}-contact.png`, PNG.sync.write(sheet));
+    await writeFile(`${directory}/${mode}-contact-index.json`, JSON.stringify(entries.map(({ name }) => name), null, 2));
+  }
+  await writeFile(`${directory}/capture-results.json`, JSON.stringify({ result: 'passed', screenshots: captures.length, combinations, errors, commands, captures: captures.map(({ name, pack, mode, width, bounds }) => ({ name, pack, mode, width, bounds })) }, null, 2));
+  console.log(`Pet v2 passed: ${captures.length} captures across ${combinations} appearance/work-area combinations.`);
 } finally { await application.close(); }

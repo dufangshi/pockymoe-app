@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { deflateRawSync } from 'node:zlib';
 import type { ActivityEvent, ActivityItem } from '../shared/contract';
 import { ANIMATIONS, frameAt, moodFor } from './animation';
+import { scrollGeometry } from './scroll';
 import { BubbleQueue } from './bubbles';
 import { clampRect, defaultPosition, dockPosition, petLayout, restorePosition } from './geometry';
 import { importPetPack, loadPetPack, MAX_PACK_BYTES, parseManifest, unpackPetZip, validateAtlas } from './packs';
@@ -96,5 +97,23 @@ describe('interaction regressions', () => {
   it('refuses a header-valid image if the pixel decoder rejects it, before installing anything', async () => {
     const temp = await mkdtemp(join(tmpdir(), 'pet-decode-'));
     try { const source = new URL('../../assets/pets/placeholder/', import.meta.url).pathname; await expect(importPetPack(source, join(temp, 'pets'), undefined, ['placeholder'])).rejects.toThrow('already installed'); await expect(importPetPack(source, join(temp, 'pets'), () => false)).rejects.toThrow('cannot decode'); await expect(access(join(temp, 'pets', 'placeholder'))).rejects.toThrow(); } finally { await rm(temp, { recursive: true, force: true }); }
+  });
+});
+
+describe('custom task scrollbar', () => {
+  it('hides the thumb and fades for content that fits', () => {
+    expect(scrollGeometry(300, 200, 0, 280)).toMatchObject({ overflowing: false, atStart: true, atEnd: true, thumbSize: 280 });
+  });
+  it('maps scroll offset to proportional thumb travel and visible clipping affordances', () => {
+    const middle = scrollGeometry(240, 960, 360, 224); expect(middle).toMatchObject({ maximum: 720, thumbSize: 56, thumbOffset: 84, atStart: false, atEnd: false });
+    expect(scrollGeometry(240, 960, 0, 224).atStart).toBe(true); expect(scrollGeometry(240, 960, 720, 224).atEnd).toBe(true);
+  });
+  it('clamps overscroll and keeps a usable thumb without leaving tiny tracks', () => {
+    expect(scrollGeometry(200, 10000, -20, 184)).toMatchObject({ offset: 0, thumbSize: 24, thumbOffset: 0 });
+    expect(scrollGeometry(200, 10000, 12000, 184)).toMatchObject({ offset: 9800, thumbOffset: 160 });
+    expect(scrollGeometry(1, 100, 20, 12).thumbSize).toBe(12);
+  });
+  it('treats an unread interruption as a failed mood beneath waiting', () => {
+    expect(moodFor([item('interrupted'), item('running')])).toBe('failed'); expect(moodFor([item('interrupted'), item('needsInput')])).toBe('waiting');
   });
 });

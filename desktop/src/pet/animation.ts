@@ -22,7 +22,7 @@ export function moodFor(items: ActivityItem[], options: {
   // Snooze is an explicit global override: do not animate an attention pose during quiet hours.
   if (options.snoozed) return 'sleeping';
   if (items.some((item) => item.state === 'needsInput')) return 'waiting';
-  if (items.some((item) => item.state === 'failed' && item.unread)) return 'failed';
+  if (items.some((item) => (item.state === 'failed' || item.state === 'interrupted') && item.unread)) return 'failed';
   if (options.reviewing) return 'review';
   if (options.completion) return options.completion;
   if (items.some((item) => item.state === 'running')) return 'running';
