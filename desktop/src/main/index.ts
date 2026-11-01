@@ -6,7 +6,7 @@ import type { HostCapabilities, PetController, PetControllerDeps } from '../shar
 import type { LocalAction, LocalState } from '../shared/local';
 import { channels as c } from '../shared/channels';
 import { ActivityHub, alertId, validateSnapshot } from './activity';
-import { SettingsStore, validateSettings } from './store';
+import { pageSettings, pageSettingsPatch, SettingsStore, validateSettings } from './store';
 import { externalUrl, isWebFrame, relayOrigin, threadPath } from './security';
 import { AppearanceStore } from './appearance';
 import { discoverOrigins } from './discovery';
@@ -17,6 +17,7 @@ import { installMenu } from './menu';
 import { apnsEnabled, registerApns } from './apns';
 import { checkUpdate, configureUpdates } from './updates';
 import { PetCatalog } from './petCatalog';
+import { VoiceService } from './voice';
 
 app.setName('Pockymoe');
 app.setPath('userData', process.env.POCKYMOE_DESKTOP_USER_DATA || join(app.getPath('appData'), 'Pockymoe'));
@@ -57,6 +58,7 @@ else {
     const notifications = new Notifications(hub, settings, manager, () => pet, () => {
       const w = [...manager.relay].find(w => w.isFocused()); return w ? focusedThreads.get(w.webContents.id) ?? null : null;
     });
+    const voice = new VoiceService(dataDir, settings, () => pet?.say(t('语音已就绪')));
     const petDirectories = [app.isPackaged ? join(process.resourcesPath, 'pets') : join(app.getAppPath(), 'assets/pets'), join(dataDir, 'pets')];
     mkdirSync(petDirectories[1], { recursive: true });
     const petCatalog = new PetCatalog(petDirectories);
@@ -64,7 +66,7 @@ else {
     const petModules = import.meta.glob('../pet/controller.ts', { eager: true }) as Record<string, { createPetController(deps: PetControllerDeps): PetController }>;
     const petModule = Object.values(petModules)[0];
     if (petModule) {
-      try { pet = petModule.createPetController({ hub, settings, dispatch: command => manager.dispatch(command as CommandInput), openPreferences, shouldSpeak: event => notifications.shouldSpeak(event), petDirectories, appearance: appearance.get, onAppearance: appearance.onChange }); }
+      try { pet = petModule.createPetController({ hub, settings, dispatch: command => manager.dispatch(command as CommandInput), openPreferences, speak: text => voice.speak(text), shouldSpeak: event => notifications.shouldSpeak(event), petDirectories, appearance: appearance.get, onAppearance: appearance.onChange }); }
       catch { /* Shell remains usable if a pet pack cannot load. */ }
     }
     const tray = new DesktopTray(hub, settings, manager);
@@ -104,8 +106,8 @@ else {
     });
     listen(c.title, (e, title) => { if (typeof title === 'string') BrowserWindow.fromWebContents(e.sender)?.setTitle(title.slice(0, 256)); });
     listen(c.external, (_e, url) => { const safe = externalUrl(url); if (safe) void shell.openExternal(safe); });
-    handle(c.settingsGet, () => settings.get());
-    handle(c.settingsSet, (_e, patch) => applySettings(patch));
+    handle(c.settingsGet, () => pageSettings(settings.get()));
+    handle(c.settingsSet, (_e, patch) => pageSettings(applySettings(pageSettingsPatch(patch))));
     listen(c.petSet, (_e, visible) => { if (typeof visible === 'boolean') settings.set({ petVisible: visible }); });
     handle(c.petGet, () => pet?.isVisible() ?? false);
     listen(c.badge, (_e, count, style) => { if (typeof count === 'number' && Number.isFinite(count) && ['attention', 'running', 'none'].includes(String(style))) { if (hub.snapshot()) tray.update(); else tray.setBadge(count, style as 'attention' | 'running' | 'none'); } });
@@ -143,8 +145,9 @@ else {
       }
       return settings.set(next);
     }
-    const localState = (): LocalState => ({ locale: getLocale(), preferencesRequestId, preferencesSection, settings: settings.get(), appearance: appearance.get(), snapshot: hub.snapshot(), petAvailable: !!pet, petPacks: petCatalog.list(), version: app.getVersion() });
+    const localState = (): LocalState => ({ locale: getLocale(), preferencesRequestId, preferencesSection, settings: settings.get(), appearance: appearance.get(), snapshot: hub.snapshot(), petAvailable: !!pet, petPacks: petCatalog.list(), version: app.getVersion(), voice: voice.status() });
     const broadcast = (): void => { for (const w of manager.local.keys()) if (!w.isDestroyed()) w.webContents.send(c.localState, localState()); };
+    voice.onChange(broadcast);
     let nativeLocale = getLocale();
     appearance.onChange(next => {
       manager.setAppearance(next); tray.setAppearance(next);
@@ -208,6 +211,18 @@ else {
             await shell.openExternal(safe); break;
           }
           case 'checkUpdate': await checkUpdate(); break;
+          case 'voiceModel':
+            if (action.command === 'download') void voice.model.download();
+            else if (action.command === 'cancel') voice.model.cancel();
+            else if (action.command === 'remove') { voice.stopWorker(); voice.model.remove(); }
+            break;
+          case 'voiceKey': voice.setKey(typeof action.key === 'string' ? action.key : null); break;
+          case 'voiceList': await voice.refreshVoices(); break;
+          case 'voicePreview': {
+            if (!pet) throw new Error(t('桌宠模块尚未安装。'));
+            pet.play(await voice.preview(t('这个任务已经完成了，来看看结果吧。')));
+            break;
+          }
           default: throw new Error(t('未知桌面操作'));
         }
         return { ok: true };
@@ -240,7 +255,7 @@ else {
     for (const url of [...deepLinks, ...process.argv.filter(a => /^(pockymoe|remotecodex):/.test(a))]) manager.openDeepLink(url);
     if (process.env.POCKYMOE_DESKTOP_E2E !== '1') { configureUpdates(); void registerApns(settings, manager); }
     app.on('activate', () => { if (manager.relay.size) manager.focusMain(); else manager.createLocal('relay'); });
-    app.on('before-quit', () => { manager.quitting = true; manager.dispose(); notifications.dispose(); pet?.dispose(); tray.dispose(); hub.dispose(); globalShortcut.unregisterAll(); });
+    app.on('before-quit', () => { manager.quitting = true; manager.dispose(); notifications.dispose(); voice.dispose(); pet?.dispose(); tray.dispose(); hub.dispose(); globalShortcut.unregisterAll(); });
     if (process.env.POCKYMOE_DESKTOP_E2E === '1') Object.assign(globalThis, { __pockymoeDesktopTest: { hub, settings, appearance, windows: manager, tray, notifications, capabilities } });
   }).catch(error => {
     if (process.env.POCKYMOE_DESKTOP_E2E === '1') console.error(error);

@@ -2,7 +2,6 @@ import { lstatSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import type { LocalState } from '../shared/local';
 
-export const dragonCredit = { author: 'ouyang070125-cmyk', source: 'https://github.com/ouyang070125-cmyk/codex-dragon-pet', license: 'CC BY 4.0', licenseUrl: 'https://creativecommons.org/licenses/by/4.0/' };
 /** Catalog assets are served only by the local windows' default session. The Web
  * uses a separate partition and never receives a path or an asset handler. */
 export class PetCatalog {
@@ -26,7 +25,7 @@ export class PetCatalog {
           const name = typeof manifest.displayName === 'string' ? manifest.displayName.slice(0, 100) : id;
           this.assets.set(id, { path: image, type: image.endsWith('.png') ? 'image/png' : 'image/webp' });
           this.entries.push({ id, name, thumbnail: `pockymoe-pet://atlas/${encodeURIComponent(id)}`, rows: manifest.spriteVersionNumber === 2 ? 11 : 9,
-            ...(id === 'gpt-dragon' && directory === this.directories[0] ? dragonCredit : id === 'moe' ? { author: 'Pockymoe' } : {}) });
+            ...(['moe', 'frost'].includes(id) && directory === this.directories[0] ? { author: 'Pockymoe' } : {}) });
         } catch { /* Incomplete/custom packs must not break Preferences. */ }
       }
     }

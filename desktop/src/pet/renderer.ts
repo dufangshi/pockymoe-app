@@ -11,7 +11,7 @@ import { getLocale, setLocale, t, type MessageKey } from '../shared/i18n';
 import { showError } from '../local/errorMark';
 import { commandErrorMessage } from './errors';
 import { scrollGeometry } from './scroll';
-import { playSound, speak } from './sounds';
+import { playSound, playSpeech } from './sounds';
 import type { ActivityItem, HostCommandResult } from '../shared/contract';
 import type { PetAction, PetBridge, PetViewState } from './bridge';
 const bridge = (window as unknown as { rcDesktop: { pet: PetBridge } }).rcDesktop.pet;
@@ -229,8 +229,11 @@ window.addEventListener('keydown', event => {
 });
 bridge.onCue(cue => {
   if (state?.surface !== 'sprite') return;
-  if (cue.sound) void playSound(cue.sound).then(audio => { root.dataset.lastCue = `${cue.sound}:${audio}`; });
-  if (cue.speech) { speak(cue.speech, cue.locale); root.dataset.lastSpeech = cue.speech; }
+  void playSound(cue.sound).then(audio => { root.dataset.lastCue = `${cue.sound}:${audio}`; });
+});
+bridge.onSpeech(audio => {
+  if (state?.surface !== 'sprite') return;
+  void playSpeech(audio).then(() => { root.dataset.lastSpeech = String(audio.byteLength); }, () => { root.dataset.lastSpeech = 'undecodable'; });
 });
 bridge.onState(next => {
   const old = state, changedMode = old?.mode !== next.mode;

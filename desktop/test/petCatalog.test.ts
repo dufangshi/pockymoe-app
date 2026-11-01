@@ -7,16 +7,16 @@ import { PetCatalog } from '../src/main/petCatalog';
 it('serves only cataloged atlas files and supplies bundled attribution without filesystem paths', async () => {
   const root = mkdtempSync(join(tmpdir(), 'pockymoe-catalog-'));
   try {
-    const pack = join(root, 'gpt-dragon'); mkdirSync(pack);
-    writeFileSync(join(pack, 'pet.json'), JSON.stringify({ id: 'gpt-dragon', displayName: 'GPT Dragon', spritesheetPath: 'spritesheet.webp', spriteVersionNumber: 2 }));
+    const pack = join(root, 'frost'); mkdirSync(pack);
+    writeFileSync(join(pack, 'pet.json'), JSON.stringify({ id: 'frost', displayName: 'Frost', spritesheetPath: 'spritesheet.webp', spriteVersionNumber: 2 }));
     writeFileSync(join(pack, 'spritesheet.webp'), 'fixture-image');
     const catalog = new PetCatalog([root]);
-    expect(catalog.list()).toEqual([expect.objectContaining({ author: 'ouyang070125-cmyk', license: 'CC BY 4.0', rows: 11, thumbnail: 'pockymoe-pet://atlas/gpt-dragon' })]);
+    expect(catalog.list()).toEqual([expect.objectContaining({ author: 'Pockymoe', rows: 11, thumbnail: 'pockymoe-pet://atlas/frost' })]);
     expect(JSON.stringify(catalog.list())).not.toContain(root);
-    expect(await catalog.asset('pockymoe-pet://atlas/gpt-dragon').text()).toBe('fixture-image');
-    for (const path of ['pockymoe-pet://atlas/unknown', 'pockymoe-pet://atlas/%2e%2e%2fpet.json', 'pockymoe-pet://other/gpt-dragon']) expect(catalog.asset(path).status).toBe(404);
+    expect(await catalog.asset('pockymoe-pet://atlas/frost').text()).toBe('fixture-image');
+    for (const path of ['pockymoe-pet://atlas/unknown', 'pockymoe-pet://atlas/%2e%2e%2fpet.json', 'pockymoe-pet://other/frost']) expect(catalog.asset(path).status).toBe(404);
     rmSync(join(pack, 'spritesheet.webp')); symlinkSync(join(pack, 'pet.json'), join(pack, 'spritesheet.webp'));
-    expect(catalog.asset('pockymoe-pet://atlas/gpt-dragon').status).toBe(404);
+    expect(catalog.asset('pockymoe-pet://atlas/frost').status).toBe(404);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 it('ignores unsafe manifests and never replaces bundled catalog assets with an imported duplicate', async () => {

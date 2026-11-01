@@ -25,11 +25,16 @@ export async function playSound(sound: PetSound, gain = .2): Promise<AudioContex
   }
   return context.state;
 }
-export function speak(text: string, locale: string): void {
-  if (!('speechSynthesis' in window)) return;
-  speechSynthesis.cancel();
-  const utterance = new SpeechSynthesisUtterance(text), language = locale.toLowerCase().split('-')[0]!;
-  const voice = speechSynthesis.getVoices().find(candidate => candidate.lang.toLowerCase().startsWith(language));
-  utterance.lang = voice?.lang ?? locale; if (voice) utterance.voice = voice;
-  speechSynthesis.speak(utterance);
+let speech: AudioBufferSourceNode | null = null;
+/** Decodes whatever the voice service produced; a newer alert cuts off the one being read. */
+export async function playSpeech(audio: Uint8Array): Promise<void> {
+  context ??= new AudioContext();
+  if (context.state !== 'running') await context.resume();
+  const copy = audio.buffer.slice(audio.byteOffset, audio.byteOffset + audio.byteLength) as ArrayBuffer;
+  const buffer = await context.decodeAudioData(copy);
+  speech?.stop();
+  const source = context.createBufferSource();
+  source.buffer = buffer; source.connect(context.destination); source.start();
+  speech = source;
+  source.onended = () => { if (speech === source) speech = null; };
 }
