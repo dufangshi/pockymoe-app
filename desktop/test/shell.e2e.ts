@@ -131,7 +131,7 @@ function appearanceFor(pack: string, effective: 'light' | 'dark'): Appearance {
 }
 async function capture(app: ElectronApplication, page: Page, name: string, pack: string, mode: string): Promise<void> {
   await page.screenshot({ animations: 'disabled', path: join(evidence, `${name}-${pack}-${mode}-native.png`) });
-  const original = page.viewportSize();
+  const original = await app.evaluate(({ BrowserWindow }, url) => BrowserWindow.getAllWindows().find(w => w.webContents.getURL() === url)!.getContentSize(), page.url());
   for (const width of [1440, 900]) {
     await app.evaluate(({ BrowserWindow }, { url, width }) => {
       const w = BrowserWindow.getAllWindows().find(w => w.webContents.getURL() === url)!;
@@ -141,7 +141,7 @@ async function capture(app: ElectronApplication, page: Page, name: string, pack:
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await page.screenshot({ animations: 'disabled', path: join(evidence, `${name}-${pack}-${mode}-${width}.png`) });
   }
-  if (original) await app.evaluate(({ BrowserWindow }, { url, size }) => BrowserWindow.getAllWindows().find(w => w.webContents.getURL() === url)!.setContentSize(size.width, size.height), { url: page.url(), size: original });
+  await app.evaluate(({ BrowserWindow }, { url, size }) => BrowserWindow.getAllWindows().find(w => w.webContents.getURL() === url)!.setContentSize(size[0], size[1]), { url: page.url(), size: original });
 }
 for (const pack of packs) for (const theme of ['light', 'dark'] as const) test(`local windows appearance and origin discovery (${pack} ${theme})`, async () => {
   const app = await launch(theme, true);
@@ -185,4 +185,31 @@ for (const pack of packs) for (const theme of ['light', 'dark'] as const) test(`
   await capture(app, quick, 'quick', pack, theme);
   const before = await quick.locator('.elapsed').textContent();
   await expect.poll(() => quick.locator('.elapsed').textContent()).not.toBe(before);
+});
+
+for (const pack of packs) for (const theme of ['light', 'dark'] as const) test(`agent conversations preserve targets (${pack} ${theme})`, async () => {
+  const app = await launch(theme), page = await pageAt(app, origin);
+  await app.evaluate(() => globalThis.__pockymoeDesktopTest.settings.set({ petVisible: false }));
+  await page.evaluate(a => window.pockymoeHost!.appearance.sync(a), appearanceFor(pack, theme));
+  const root = item({ key: 'mac:root', threadId: 'root', title: '完善 Pockymoe 桌面体验', since: new Date(Date.now() - 70_000).toISOString() });
+  const agent = (id: string, name: string) => item({ key: `mac:${id}`, threadId: id, title: `子任务 ${name}`, agentName: name, rootThreadKey: root.key, rootThreadTitle: '旧根标题', state: 'needsInput', request: { id: `request-${id}`, kind: 'approval', summary: '运行定向测试' } });
+  await page.evaluate(s => window.pockymoeHost!.activity.sync(s), snapshot([root, agent('a', 'Planner'), agent('b', 'Reviewer')]));
+  await expect.poll(() => app.evaluate(() => globalThis.__pockymoeDesktopTest.tray.menuLabels)).toContain('需要你 · 1');
+  await page.evaluate(async () => { window.pockymoeHost!.badge.set(99, 'attention'); await window.pockymoeHost!.settings.get(); });
+  if (process.platform === 'darwin') expect(await app.evaluate(({ app }) => app.dock!.getBadge())).toBe('1');
+  await app.evaluate(() => globalThis.__pockymoeDesktopTest.windows.createLocal('quick'));
+  const quick = await pageAt(app, 'view=quick');
+  await expect(quick.getByRole('option')).toHaveCount(2);
+  await expect(quick.locator('[data-key="mac:a"] strong')).toContainText(root.title);
+  await expect(quick.locator('[data-key="mac:a"] .row-copy>span')).toHaveText('智能体 Planner · MacBook Pro · remoteCodex');
+  await capture(app, quick, 'root-groups-collapsed', pack, theme);
+  await quick.getByRole('button', { name: `展开「${root.title}」的线程`, exact: true }).click();
+  await expect(quick.getByRole('option')).toHaveCount(3);
+  await capture(app, quick, 'root-groups-expanded', pack, theme);
+  await quick.locator('[data-key="mac:b"]').hover();
+  await expect(quick.locator('[data-key="mac:b"]')).toHaveAttribute('aria-selected', 'true');
+  await quick.getByLabel('快速回复').fill('请继续审查'); await quick.getByLabel('发送回复', { exact: true }).click();
+  await expect.poll(() => page.evaluate(() => window.commands)).toEqual(expect.arrayContaining([expect.objectContaining({ type: 'reply', threadId: 'b', text: '请继续审查' })]));
+  await quick.locator('[data-key="mac:b"]').click();
+  await expect(page).toHaveURL(`${origin}/devices/mac/threads/b`);
 });

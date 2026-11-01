@@ -100,7 +100,7 @@ else {
     handle(c.settingsSet, (_e, patch) => applySettings(patch));
     listen(c.petSet, (_e, visible) => { if (typeof visible === 'boolean') settings.set({ petVisible: visible }); });
     handle(c.petGet, () => pet?.isVisible() ?? false);
-    listen(c.badge, (_e, count, style) => { if (typeof count === 'number' && Number.isFinite(count) && ['attention', 'running', 'none'].includes(String(style))) tray.setBadge(count, style as 'attention' | 'running' | 'none'); });
+    listen(c.badge, (_e, count, style) => { if (typeof count === 'number' && Number.isFinite(count) && ['attention', 'running', 'none'].includes(String(style))) { if (hub.snapshot()) tray.update(); else tray.setBadge(count, style as 'attention' | 'running' | 'none'); } });
     const savedNotifications = new Set<Notification>();
     const savedNotification = (path: string): void => {
       if (!Notification.isSupported()) return;

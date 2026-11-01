@@ -14,7 +14,9 @@ export function validateSnapshot(value: unknown): ActivitySnapshot {
     if (!i || typeof i !== 'object' || !text(i.deviceId, 256) || !i.deviceId || !text(i.threadId, 256) || !i.threadId ||
         i.key !== `${i.deviceId}:${i.threadId}` || keys.has(i.key) || !text(i.deviceName, 256) || !text(i.workspaceId, 256) ||
         !text(i.workspaceLabel, 512) || !text(i.title, 512) || !states.has(i.state) || !date(i.since) || typeof i.unread !== 'boolean' ||
-        (i.agentName != null && !text(i.agentName, 256)) || (i.turnId != null && !text(i.turnId, 256)) ||
+        (i.agentName != null && !text(i.agentName, 256)) ||
+        (i.rootThreadKey != null && (!text(i.rootThreadKey, 513) || i.rootThreadKey.indexOf(':') <= 0 || i.rootThreadKey.endsWith(':'))) ||
+        (i.rootThreadTitle != null && !text(i.rootThreadTitle, 512)) || (i.turnId != null && !text(i.turnId, 256)) ||
         (i.resultSummary != null && !text(i.resultSummary, 140)) ||
         (i.durationMs != null && (!Number.isFinite(i.durationMs) || i.durationMs < 0)) ||
         (i.request != null && (!text(i.request.id, 256) || !i.request.id || !['approval', 'input'].includes(i.request.kind) || !text(i.request.summary, 140)))) throw new Error('Invalid activity item');
@@ -23,6 +25,7 @@ export function validateSnapshot(value: unknown): ActivitySnapshot {
     return {
       key: i.key, deviceId: i.deviceId, deviceName: i.deviceName, workspaceId: i.workspaceId,
       workspaceLabel: i.workspaceLabel, threadId: i.threadId, title: i.title, state: i.state,
+      rootThreadKey: i.rootThreadKey, rootThreadTitle: i.rootThreadTitle,
       since: i.since, unread: i.unread, agentName: i.agentName, turnId: i.turnId,
       resultSummary: i.resultSummary, durationMs: i.durationMs,
       request: i.request ? { id: i.request.id, kind: i.request.kind, summary: i.request.summary } : null

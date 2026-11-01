@@ -6,7 +6,7 @@ export const isAgentActivity = (item: ActivityItem): boolean => conversationKey(
 export function conversationTitle(item: ActivityItem, allItems: ActivityItem[] = []): string {
   const key = conversationKey(item);
   if (key === item.key) return item.title;
-  return allItems.find(root => root.key === key)?.title || item.rootThreadTitle || `对话 ${key.slice(item.deviceId.length + 1, item.deviceId.length + 9)}`;
+  return allItems.find(root => root.key === key)?.title || item.rootThreadTitle || `对话 ${key.slice(key.indexOf(':') + 1).slice(0, 8)}`;
 }
 export function activitySecondary(item: ActivityItem): string {
   return `${isAgentActivity(item) ? `智能体${item.agentName ? ` ${item.agentName}` : ''} · ` : ''}${item.deviceName} · ${item.workspaceLabel}`;

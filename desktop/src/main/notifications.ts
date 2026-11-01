@@ -1,5 +1,6 @@
 import { Notification, powerMonitor } from 'electron';
 import type { ActivityEvent, ActivityItem, PetController } from '../shared/contract';
+import { activitySecondary, conversationKey, conversationTitle, groupActivities } from '../shared/activityGroups';
 import type { ActivityHub } from './activity';
 import { deliveryPolicy, EventCoalescer } from './delivery';
 import type { SettingsStore } from './store';
@@ -40,13 +41,14 @@ export class Notifications {
     if (!events.length || !Notification.isSupported()) return;
     const first = events[0]; const item = first.item;
     const multiple = events.length > 2;
+    const conversations = groupActivities(events.map(e => e.item), this.hub.snapshot()?.items);
     const allComplete = events.every(e => e.type === 'completed');
     const notification = new Notification({
       id: first.alertId,
-      groupId: `pockymoe:${item.deviceId}`,
-      title: multiple ? `${events.length} 个任务${allComplete ? '完成' : '有新进展'}` : item.title,
-      subtitle: multiple ? 'Pockymoe' : `${item.deviceName} · ${item.workspaceLabel}`,
-      body: multiple ? events.map(e => e.item.title).slice(0, 3).join('、') : item.state === 'interrupted' ? `已中断${item.resultSummary ? ` · ${item.resultSummary}` : ''}` : item.request?.summary || item.resultSummary || (first.type === 'failed' ? '任务遇到了问题' : '任务已完成'),
+      groupId: `pockymoe:${conversationKey(item)}`,
+      title: multiple && conversations.length > 1 ? `${conversations.length} 个对话${allComplete ? '完成' : '有新进展'}` : conversationTitle(item, this.hub.snapshot()?.items),
+      subtitle: multiple && conversations.length > 1 ? 'Pockymoe' : activitySecondary(item),
+      body: multiple ? conversations.map(group => `${group.title} · ${group.items.map(activitySecondary).join('、')}`).slice(0, 3).join('；') : item.state === 'interrupted' ? `已中断${item.resultSummary ? ` · ${item.resultSummary}` : ''}` : item.request?.summary || item.resultSummary || (first.type === 'failed' ? '任务遇到了问题' : '任务已完成'),
       silent: !this.settings.get().petSound,
       ...(['darwin', 'win32'].includes(process.platform) && !multiple ? { actions: [
         ...(item.request?.kind === 'approval' ? [{ type: 'button' as const, text: '批准' }, { type: 'button' as const, text: '拒绝' }] : []),

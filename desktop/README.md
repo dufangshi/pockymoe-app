@@ -67,6 +67,12 @@ and pet dependencies expose `appearance()` and `onAppearance()`. The shared
 `statusMarks.ts` mirrors upstream shapes; running uses a complete faint track
 with a rotating arc, waiting a filled speech bubble, interruption an amber
 square and failure a red diamond. Quick-window rows are 44 px with live timers.
+Activity snapshots preserve optional `rootThreadKey` / `rootThreadTitle`. Tray, quick
+window and badges count conversations (`rootThreadKey ?? key`) per activity group;
+agent members fold beneath the root title with their role, device and workspace.
+Native notifications use the root conversation group and title while retaining
+actual alert IDs. Replies, approvals and thread opening keep the selected member
+key/threadId/requestId. The shared `activityGroups.ts` helpers also serve the pet.
 Local DOM controls follow the approved Electron utility-window exception in
 upstream `docs/ui-principles.md`, including keyboard/focus behavior, ErrorMark
 feedback and custom overlay scrollbars.
@@ -80,7 +86,7 @@ Cmd/Ctrl+F search binding; the shell does not register F a second time.
 ```sh
 pnpm typecheck
 pnpm lint
-pnpm test test/activity.test.ts test/delivery.test.ts test/security.test.ts test/store.test.ts test/discovery.test.ts test/appearance.test.ts test/nativeSurfaces.test.ts
+pnpm test test/activity.test.ts test/delivery.test.ts test/security.test.ts test/store.test.ts test/discovery.test.ts test/appearance.test.ts test/nativeSurfaces.test.ts test/activityGroups.test.ts
 pnpm build
 pnpm exec playwright test test/shell.e2e.ts --project=electron
 ```

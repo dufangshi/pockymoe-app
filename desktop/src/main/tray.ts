@@ -1,22 +1,29 @@
 import { app, Menu, nativeImage, nativeTheme, Tray, type MenuItemConstructorOptions } from 'electron';
 import { join } from 'node:path';
 import type { ActivityItem, ActivitySnapshot, Appearance, DesktopSettings } from '../shared/contract';
+import { activitySecondary, conversationKey, groupActivities } from '../shared/activityGroups';
 import { alertId, type ActivityHub } from './activity';
 import { itemPath } from './notifications';
 import type { SettingsStore } from './store';
 import type { Windows } from './windows';
 
 export function activityCounts(snapshot: ActivitySnapshot | null): { attention: number; running: number } {
-  return { attention: snapshot?.items.filter(i => i.state === 'needsInput' || ['failed', 'interrupted'].includes(i.state) && i.unread).length || 0,
-    running: snapshot?.items.filter(i => i.state === 'running').length || 0 };
+  return { attention: new Set(snapshot?.items.filter(i => i.state === 'needsInput' || ['failed', 'interrupted'].includes(i.state) && i.unread).map(conversationKey)).size,
+    running: new Set(snapshot?.items.filter(i => i.state === 'running').map(conversationKey)).size };
 }
 export function trayTemplate(snapshot: ActivitySnapshot | null, settings: DesktopSettings, open: (i: ActivityItem) => void, actions: { pet: () => void; snooze: () => void; main: () => void; settings: () => void; quit: () => void; map: () => void; reveal: (item: ActivityItem) => void }): MenuItemConstructorOptions[] {
-  const needs = snapshot?.items.filter(i => i.state === 'needsInput' || ['failed', 'interrupted'].includes(i.state) && i.unread).slice(0, 5) || [];
-  const running = snapshot?.items.filter(i => i.state === 'running').slice(0, 5) || [];
+  const all = snapshot?.items || [];
+  const needs = groupActivities(all.filter(i => i.state === 'needsInput' || ['failed', 'interrupted'].includes(i.state) && i.unread), all);
+  const running = groupActivities(all.filter(i => i.state === 'running'), all);
   const items: MenuItemConstructorOptions[] = [];
   for (const [title, group] of [['需要你', needs], ['进行中', running]] as const) {
     items.push({ label: `${title} · ${group.length}`, enabled: false });
-    for (const item of group) items.push({ label: `${item.title.slice(0, 48)} — ${item.deviceName}`, submenu: [{ label: '打开线程', click: () => open(item) }, { label: '在地图中显示', click: () => actions.reveal(item) }] });
+    for (const conversation of group.slice(0, 5)) {
+      const menuFor = (item: ActivityItem): MenuItemConstructorOptions[] => [{ label: '打开线程', click: () => open(item) }, { label: '在地图中显示', click: () => actions.reveal(item) }];
+      const first = conversation.items[0];
+      const rootOnly = conversation.items.length === 1 && first.key === conversation.key;
+      items.push({ label: `${conversation.title.slice(0, 48)} — ${first.deviceName}`, submenu: rootOnly ? menuFor(first) : conversation.items.map(item => ({ label: activitySecondary(item), submenu: menuFor(item) })) });
+    }
   }
   items.push({ type: 'separator' }, { label: '显示桌宠', type: 'checkbox', checked: settings.petVisible, click: actions.pet },
     { label: Date.parse(settings.snoozeUntil || '') > Date.now() ? '恢复提醒' : '暂停提醒 1 小时', click: actions.snooze },
