@@ -145,14 +145,14 @@ const packs = ['classic', 'plum-pocket', 'terminal'] as const;
 function appearanceFor(pack: string, effective: 'light' | 'dark'): Appearance {
   return { effective, pack, locale: 'zh-CN', accent: pack === 'terminal' ? effective === 'dark' ? '#4de3a2' : '#0a47c4' : pack === 'plum-pocket' ? '#e8a93a' : '#a57224' };
 }
-async function capture(app: ElectronApplication, page: Page, name: string, pack: string, mode: string): Promise<void> {
+async function capture(app: ElectronApplication, page: Page, name: string, pack: string, mode: string, widths = [1440, 900]): Promise<void> {
   await page.screenshot({ animations: 'disabled', path: join(evidence, `${name}-${pack}-${mode}-native.png`) });
   const original = await app.evaluate(({ BrowserWindow }, url) => BrowserWindow.getAllWindows().find(w => w.webContents.getURL() === url)!.getContentSize(), page.url());
-  for (const width of [1440, 900]) {
-    await app.evaluate(({ BrowserWindow }, { url, width }) => {
+  for (const width of widths) {
+    await app.evaluate(({ BrowserWindow }, { url, width, height }) => {
       const w = BrowserWindow.getAllWindows().find(w => w.webContents.getURL() === url)!;
-      w.setContentSize(width, 640);
-    }, { url: page.url(), width });
+      w.setContentSize(width, height);
+    }, { url: page.url(), width, height: width <= 560 ? original[1] : 640 });
     await expect.poll(() => page.evaluate(() => innerWidth)).toBe(width);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await page.screenshot({ animations: 'disabled', path: join(evidence, `${name}-${pack}-${mode}-${width}.png`) });
@@ -210,20 +210,25 @@ for (const pack of packs) for (const theme of ['light', 'dark'] as const) test(`
   await page.evaluate(a => window.pockymoeHost!.appearance.sync(a), appearanceFor(pack, theme));
   const root = item({ key: 'mac:root', threadId: 'root', title: '完善 Pockymoe 桌面体验', since: new Date(Date.now() - 70_000).toISOString() });
   const agent = (id: string, name: string) => item({ key: `mac:${id}`, threadId: id, title: `子任务 ${name}`, agentName: name, rootThreadKey: root.key, rootThreadTitle: '旧根标题', state: 'needsInput', request: { id: `request-${id}`, kind: 'approval', summary: '运行定向测试' } });
-  await page.evaluate(s => { window.pockymoeHost!.activity.sync({ ...s, items: [], generatedAt: '2026-11-01T05:59:00.000Z', syncedDeviceIds: ['mac', 'pc'] }); window.pockymoeHost!.activity.sync(s); }, snapshot([root, agent('a', 'Planner'), agent('b', 'Reviewer')]));
+  await page.evaluate(s => { window.pockymoeHost!.activity.sync({ ...s, items: [], generatedAt: '2026-11-01T05:59:00.000Z', syncedDeviceIds: ['mac', 'pc'] }); window.pockymoeHost!.activity.sync(s); }, snapshot([root, { ...agent('a', 'Planner'), state: 'running', request: null }, agent('b', 'Reviewer'), item({ key: 'pc:resource', deviceId: 'pc', threadId: 'resource', title: '校验打包资源', since: root.since })]));
   await expect.poll(() => app.evaluate(() => globalThis.__pockymoeDesktopTest.tray.menuLabels)).toContain('需要你 · 1');
   await page.evaluate(async () => { window.pockymoeHost!.badge.set(99, 'attention'); await window.pockymoeHost!.settings.get(); });
   if (process.platform === 'darwin') expect(await app.evaluate(({ app }) => app.dock!.getBadge())).toBe('1');
   await app.evaluate(() => globalThis.__pockymoeDesktopTest.windows.createLocal('quick'));
   const quick = await pageAt(app, 'view=quick');
+  await expect(quick.getByRole('option')).toHaveCount(2);
+  await expect(quick.locator('[data-key="mac:b"] strong')).toHaveText(root.title);
+  await expect(quick.locator('.conversation-count')).toHaveText('2');
+  await expect(quick.locator('.conversation-count svg')).toHaveCount(1);
+  await expect(quick.locator('.conversation-toggle')).toHaveCount(0);
+  await expect(quick.locator('.row-copy>span')).toHaveCount(0);
+  await expect(quick.locator('#reply')).not.toHaveAttribute('placeholder', /智能体|Agent/);
+  expect(await quick.locator('#quick-list').innerText()).not.toMatch(/智能体|Agent|MacBook Pro|remoteCodex/);
+  await capture(app, quick, 'conversation-row', pack, theme, [560, 380]);
+  // Searching a member keeps the conversation intact and targets its waiting request.
+  await quick.getByLabel('搜索活动线程').fill('Planner');
   await expect(quick.getByRole('option')).toHaveCount(1);
-  await expect(quick.locator('[data-key="mac:a"] strong')).toContainText(root.title);
-  await expect(quick.locator('[data-key="mac:a"] .row-copy>span')).toHaveText('智能体 Planner · MacBook Pro · remoteCodex');
-  await capture(app, quick, 'root-groups-collapsed', pack, theme);
-  await quick.getByRole('button', { name: `展开「${root.title}」的线程`, exact: true }).click();
-  await expect(quick.getByRole('option')).toHaveCount(3);
-  await capture(app, quick, 'root-groups-expanded', pack, theme);
-  await quick.locator('[data-key="mac:b"]').hover();
+  await expect(quick.locator('.conversation-count')).toHaveText('2');
   await expect(quick.locator('[data-key="mac:b"]')).toHaveAttribute('aria-selected', 'true');
   await quick.getByLabel('快速回复').fill('请继续审查'); await quick.getByLabel('发送回复', { exact: true }).click();
   await expect.poll(() => page.evaluate(() => window.commands)).toEqual(expect.arrayContaining([expect.objectContaining({ type: 'reply', threadId: 'b', text: '请继续审查' })]));

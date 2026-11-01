@@ -1,12 +1,17 @@
 import { t, formatList } from '../shared/i18n';
 import { Notification, powerMonitor } from 'electron';
 import type { ActivityEvent, ActivityItem, PetController } from '../shared/contract';
-import { activitySecondary, conversationKey, conversationTitle, groupActivities } from '../shared/activityGroups';
+import { conversationKey, conversationTitle, groupActivities, isAgentActivity } from '../shared/activityGroups';
 import type { ActivityHub } from './activity';
 import { deliveryPolicy, EventCoalescer } from './delivery';
 import type { SettingsStore } from './store';
 import type { Windows } from './windows';
 export const itemPath = (item: Pick<ActivityItem, 'deviceId' | 'threadId'>): string => `/devices/${encodeURIComponent(item.deviceId)}/threads/${encodeURIComponent(item.threadId)}`;
+function notificationContext(items: ActivityItem[]): string {
+  const locations = [...new Set(items.map(item => [item.deviceName, item.workspaceLabel].filter(Boolean).join(' · ')))];
+  const count = new Set(items.filter(isAgentActivity).map(item => item.key)).size;
+  return [...locations, ...(count ? [`🤖 ${count}`] : [])].join(' · ');
+}
 export class Notifications {
   private active = new Map<string, Notification>();
   readonly constructed: { alertId: string; key: string; type: string; at: string; events: { alertId: string; key: string; type: string }[] }[] = [];
@@ -50,12 +55,13 @@ export class Notifications {
     const multiple = events.length > 2;
     const conversations = groupActivities(events.map(e => e.item), this.hub.snapshot()?.items);
     const allComplete = events.every(e => e.type === 'completed');
+    const related = [...(this.hub.snapshot()?.items || []), ...events.map(event => event.item)].filter(candidate => conversationKey(candidate) === conversationKey(item));
     const notification = new Notification({
       id: first.alertId,
       groupId: `pockymoe:${conversationKey(item)}`,
       title: multiple && conversations.length > 1 ? t(allComplete ? '{count} 个对话完成' : '{count} 个对话有新进展', { count: conversations.length }) : conversationTitle(item, this.hub.snapshot()?.items),
-      subtitle: multiple && conversations.length > 1 ? 'Pockymoe' : activitySecondary(item),
-      body: multiple ? formatList(conversations.map(group => `${group.title} · ${formatList(group.items.map(activitySecondary))}`).slice(0, 3)) : item.state === 'interrupted' ? `${t('已中断')}${item.resultSummary ? ` · ${item.resultSummary}` : ''}` : item.request?.summary || item.resultSummary || (first.type === 'failed' ? t('任务遇到了问题') : t('已完成')),
+      subtitle: multiple && conversations.length > 1 ? 'Pockymoe' : notificationContext(related),
+      body: multiple ? formatList(conversations.map(group => `${group.title} · ${notificationContext(group.items)}`).slice(0, 3)) : item.state === 'interrupted' ? `${t('已中断')}${item.resultSummary ? ` · ${item.resultSummary}` : ''}` : item.request?.summary || item.resultSummary || (first.type === 'failed' ? t('任务遇到了问题') : t('已完成')),
       silent: !this.settings.get().petSound,
       ...(['darwin', 'win32'].includes(process.platform) && !multiple ? { actions: [
         ...(item.request?.kind === 'approval' ? [{ type: 'button' as const, text: t('批准') }, { type: 'button' as const, text: t('拒绝') }] : []),

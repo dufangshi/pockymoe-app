@@ -95,11 +95,17 @@ square and failure a red diamond. Quick-window rows are 34 px with live timers, 
 when there is no activity. Native HUD vibrancy/acrylic remains visible through
 the transparent renderer.
 Activity snapshots preserve optional `rootThreadKey` / `rootThreadTitle`. Tray, quick
-window and badges count conversations (`rootThreadKey ?? key`) per activity group;
-agent members fold beneath the root title with their role, device and workspace.
-Native notifications use the root conversation group and title while retaining
-actual alert IDs. Replies, approvals and thread opening keep the selected member
-key/threadId/requestId. The shared `activityGroups.ts` helpers also serve the pet.
+window and badges count conversations (`rootThreadKey ?? key`) per activity group.
+The quick window shows exactly one row per conversation across all activity states.
+A small robot and count represent its active child threads; location context is
+available on hover, instead of repeated device/workspace text. Search matches any
+member while keeping its conversation/count intact. Replies and opening use the
+most urgent actual member (waiting first, then failure, completion, running).
+Native notifications use the root conversation group/title, deduplicated location
+context and the same robot count, without an Agent/智能体 prefix; approvals retain
+actual thread/request IDs. Tray menus continue to expose individual request actions.
+Replies, approvals and opening keep the selected member key/threadId/requestId.
+The shared `activityGroups.ts` helpers also serve the pet.
 Local DOM controls follow the approved Electron utility-window exception in
 upstream `docs/ui-principles.md`, including keyboard/focus behavior, ErrorMark
 feedback and custom overlay scrollbars. Local forms use drawn switches and a
@@ -150,7 +156,7 @@ for the pet's matching action.
 ```sh
 pnpm typecheck
 pnpm lint
-pnpm test test/activityBaseline.test.ts test/nativeControls.test.ts test/petCatalog.test.ts test/activity.test.ts test/delivery.test.ts test/security.test.ts test/store.test.ts test/discovery.test.ts test/appearance.test.ts test/nativeSurfaces.test.ts test/activityGroups.test.ts test/i18n.test.ts
+pnpm test test/quickConversations.test.ts test/activityBaseline.test.ts test/nativeControls.test.ts test/petCatalog.test.ts test/activity.test.ts test/delivery.test.ts test/security.test.ts test/store.test.ts test/discovery.test.ts test/appearance.test.ts test/nativeSurfaces.test.ts test/activityGroups.test.ts test/i18n.test.ts
 pnpm build
 pnpm exec playwright test test/localPolish.e2e.ts --project=electron
 pnpm exec playwright test test/shell.e2e.ts --project=electron --grep 'split origins bridge|agent conversations preserve targets \(classic light\)|one language across surfaces \(classic light\)'

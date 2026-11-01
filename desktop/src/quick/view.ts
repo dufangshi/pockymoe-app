@@ -1,7 +1,8 @@
 import { t, localizeMessage } from '../shared/i18n';
 // Approved local-UI exception: docs/ui-principles.md (Electron utility windows).
 import type { ActivityItem } from '../shared/contract';
-import { activitySecondary, conversationTitle, groupActivities, isAgentActivity } from '../shared/activityGroups';
+import { conversationKey, conversationTitle } from '../shared/activityGroups';
+import { quickConversations } from './conversations';
 import { activityStatus, statusMarkSvg } from '../shared/statusMarks';
 import { showError } from '../local/errorMark';
 import { enhanceScrollbars } from '../local/scrollbars';
@@ -10,8 +11,8 @@ import { localBridge, type LocalState } from '../shared/local';
 // relay page through the main process, which owns the command acknowledgement.
 export function mountQuick(root: HTMLElement, initial: LocalState): void {
   let state = initial, selected: string | null = null, query = '';
+  let selectedConversation: string | null = null;
   let visible: ActivityItem[] = [];
-  const expanded = new Set<string>();
   let rendered = '';
   root.className = 'quick';
   root.innerHTML = `<div class="quick-search"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4 4"/></svg><input id="search" placeholder="${t("搜索活动线程…")}" aria-label="${t("搜索活动线程")}" autocomplete="off"/><kbd>esc</kbd></div><div id="quick-list" data-scroll role="listbox" aria-label="${t("活动线程")}"></div><form id="reply-form"><span class="reply-arrow" aria-hidden="true">↳</span><input id="reply" placeholder="${t("给选中的线程快速回复…")}" aria-label="${t("快速回复")}" autocomplete="off"/><button id="send" type="submit" title="${t("发送回复")}" aria-label="${t("发送回复")}">↑</button></form><footer class="quick-footer" hidden role="status"><span></span></footer>`;
@@ -48,17 +49,16 @@ export function mountQuick(root: HTMLElement, initial: LocalState): void {
   };
   const select = (key: string): void => {
     selected = key;
+    const target = visible.find(item => item.key === key); if (target) selectedConversation = conversationKey(target);
     for (const row of list.querySelectorAll<HTMLElement>('[role="option"]')) { const active = row.dataset.key === key; row.classList.toggle('selected', active); row.setAttribute('aria-selected', String(active)); }
-    const item = visible.find(i => i.key === selected); reply.placeholder = item ? t('回复「{title}」{agent}…', { title: conversationTitle(item, state.snapshot?.items), agent: isAgentActivity(item) ? ` · ${t('智能体')}${item.agentName ? ` ${item.agentName}` : ''}` : '' }) : t('给选中的线程快速回复…');
+    const item = visible.find(i => i.key === selected); reply.placeholder = item ? t('回复 {title}…', { title: conversationTitle(item, state.snapshot?.items) }) : t('给选中的线程快速回复…');
   };
   const render = (): void => {
-    const signature = JSON.stringify([state.snapshot?.items, state.snapshot?.recent, state.locale, query, [...expanded]]);
+    const signature = JSON.stringify([state.snapshot?.items, state.snapshot?.recent, state.locale, query]);
     if (signature === rendered) return; rendered = signature;
     const all = state.snapshot?.items || [];
-    const rank = (item: ActivityItem): number => ({ needsInput: 0, failed: 1, interrupted: 1, completed: 2, running: 3, idle: 4 })[item.state];
     const recent: ActivityItem[] = !all.length ? (state.snapshot?.recent || []).map(item => ({ ...item, workspaceId: '', state: 'idle' as const, since: state.snapshot!.generatedAt, unread: false })) : [];
-    const matches = [...all, ...recent].filter(i => `${conversationTitle(i, all)} ${i.title} ${i.agentName || ''} ${i.deviceName} ${i.workspaceLabel}`.toLocaleLowerCase().includes(query));
-    const conversations = groupActivities(matches, all).map(group => ({ ...group, items: [...group.items].sort((a, b) => rank(a) - rank(b)) })).sort((a, b) => rank(a.items[0]) - rank(b.items[0]));
+    const conversations = quickConversations([...all, ...recent], query);
     visible = [];
     const scrollTop = list.scrollTop;
     list.replaceChildren();
@@ -66,46 +66,28 @@ export function mountQuick(root: HTMLElement, initial: LocalState): void {
       const empty = document.createElement('div'); empty.className = 'quick-empty';
       empty.textContent = query ? t('没有找到匹配的线程') : t('一切就绪，安静专注。'); list.append(empty);
     }
-      for (const conversation of conversations) {
-        const container = document.createElement('div'); container.className = 'quick-conversation'; container.role = 'group'; container.setAttribute('aria-label', conversation.title);
-        const open = expanded.has(conversation.key) || !!query;
-        const appendRow = (item: ActivityItem, nested = false): void => {
-          visible.push(item);
-          const row = document.createElement('div'); row.className = `quick-row ${nested ? 'agent-row' : 'conversation-summary'}`; row.role = 'option'; row.tabIndex = -1; row.dataset.key = item.key;
-          row.title = `${conversation.title}\n${activitySecondary(item)}${item.request ? `\n${item.request.summary}` : ''}`;
-          if (item.state === 'idle') row.classList.add('recent-row');
-          const dot = document.createElement('span'); dot.className = 'row-status'; dot.innerHTML = statusMarkSvg(activityStatus(item));
-          const copy = document.createElement('div'); copy.className = 'row-copy';
-          const name = document.createElement('strong'); name.textContent = conversation.title;
-          const meta = document.createElement('span'); meta.textContent = activitySecondary(item);
-          copy.append(name);
-          if (isAgentActivity(item)) copy.append(meta);
-          const detail = document.createElement('span'); detail.className = 'row-detail'; detail.textContent = item.state === 'running' ? elapsed(item.since) : item.deviceName;
-          if (item.state === 'running') { detail.classList.add('elapsed'); detail.dataset.since = item.since; }
-
-          row.append(dot, copy, detail);
-          row.onclick = () => { select(item.key); void run('open'); };
-          row.onmousemove = () => select(item.key);
-          container.append(row);
-        };
-        appendRow(conversation.items[0]);
-        if (conversation.items.length > 1) {
-          const toggle = document.createElement('button'); toggle.className = 'conversation-toggle'; toggle.type = 'button'; toggle.dataset.conversation = conversation.key;
-          toggle.setAttribute('aria-label', t(open ? '收起「{title}」的线程' : '展开「{title}」的线程', { title: conversation.title })); toggle.setAttribute('aria-expanded', String(open));
-          toggle.innerHTML = `<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="${open ? 'm4 6 4 4 4-4' : 'm6 4 4 4-4 4'}"/></svg>`;
-          toggle.onclick = e => {
-            if (open) expanded.delete(conversation.key); else expanded.add(conversation.key);
-            render();
-            if (e.detail === 0) [...list.querySelectorAll<HTMLButtonElement>('[data-conversation]')].find(button => button.dataset.conversation === conversation.key)?.focus();
-          };
-          container.append(toggle);
-          const count = document.createElement('span'); count.className = 'conversation-count'; count.textContent = t('{count} 个线程', { count: conversation.items.length });
-          container.querySelector('.row-copy strong')!.append(count);
-          if (open) for (const item of conversation.items.slice(1)) appendRow(item, true);
-        }
-        list.append(container);
+    for (const conversation of conversations) {
+      const item = conversation.target; visible.push(item);
+      const row = document.createElement('div'); row.className = 'quick-row'; row.role = 'option'; row.tabIndex = -1; row.dataset.key = item.key; row.dataset.conversation = conversation.key;
+      row.title = `${conversation.title}\n${[...new Set(conversation.items.map(item => [item.deviceName, item.workspaceLabel].filter(Boolean).join(' · ')))].join('\n')}${item.request ? `\n${item.request.summary}` : ''}`;
+      if (item.state === 'idle') row.classList.add('recent-row');
+      const dot = document.createElement('span'); dot.className = 'row-status'; dot.innerHTML = statusMarkSvg(activityStatus(item));
+      const copy = document.createElement('div'); copy.className = 'row-copy';
+      const name = document.createElement('strong'); name.textContent = conversation.title; copy.append(name);
+      row.append(dot, copy);
+      if (conversation.agentCount) {
+        const count = document.createElement('span'); count.className = 'conversation-count';
+        count.setAttribute('aria-label', t('{count} 个子线程', { count: conversation.agentCount })); count.title = t('{count} 个子线程', { count: conversation.agentCount });
+        count.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><rect x="4" y="7" width="16" height="13" rx="3"/><path d="M12 3v4M1 12v4m22-4v4M9 16h6"/><circle cx="9" cy="12" r=".8"/><circle cx="15" cy="12" r=".8"/></svg>';
+        count.append(document.createTextNode(String(conversation.agentCount))); row.append(count);
       }
-    if (!visible.some(i => i.key === selected)) selected = visible[0]?.key ?? null;
+      if (item.state === 'running') {
+        const timer = document.createElement('span'); timer.className = 'row-detail elapsed'; timer.dataset.since = item.since; timer.textContent = elapsed(item.since); row.append(timer);
+      }
+      row.onclick = () => { select(item.key); void run('open'); };
+      row.onmousemove = () => select(item.key); list.append(row);
+    }
+    selected = visible.find(item => conversationKey(item) === selectedConversation)?.key ?? visible[0]?.key ?? null;
     list.scrollTop = scrollTop;
     if (selected) select(selected);
     reply.disabled = !selected; send.disabled = !selected;

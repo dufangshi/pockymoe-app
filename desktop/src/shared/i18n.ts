@@ -1,6 +1,7 @@
 /** One source for app-owned desktop strings. Thread titles, summaries and names
  * are user content and are intentionally never translated. */
 export const english = {
+  "{count} 个子线程": "{count} child threads",
   "活动面板": "Activity panel",
   "一切就绪": "All caught up",
   "回复 {title}…": "Reply to {title}…",
