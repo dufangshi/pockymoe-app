@@ -125,6 +125,8 @@ export interface PockymoeHost {
   window: {
     openThread(path: string, options?: { newWindow?: boolean }): void;
     setTitle(title: string): void;
+    /** Opens the shell's native Preferences window (system notifications, pet, shortcuts). */
+    openPreferences(section?: 'general' | 'pet' | 'shortcuts'): void;
   };
   shell: { openExternal(url: string): void };
   files: {
