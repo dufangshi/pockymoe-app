@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { Appearance, HostCommand, HostCommandResult } from '../shared/contract';
 import { channels as c } from '../shared/channels';
-import { deepLinkPath, externalUrl, isWebFrame, threadPath } from './security';
+import { deepLinkPath, externalUrl, isSignInUrl, isWebFrame, threadPath } from './security';
 import { readJson, writeJson, type SettingsStore } from './store';
 
 export type CommandInput = HostCommand extends infer T ? T extends HostCommand ? Omit<T, 'id'> : never : never;
@@ -17,6 +17,7 @@ export class Windows {
   private bounds: Record<string, Rectangle>;
   private pending = new Map<number, (() => void)[]>();
   private positionTimer?: ReturnType<typeof setTimeout>;
+  private signInWindow?: BrowserWindow;
   quitting = false;
   private appearance: Appearance | null = null;
   setAppearance(appearance: Appearance): void {
@@ -84,7 +85,11 @@ export class Windows {
     return w;
   }
   secure(w: BrowserWindow, remote: boolean): void {
-    const external = (url: string): void => { const safe = externalUrl(url); if (safe) void shell.openExternal(safe); };
+    const signIn = (url: string): boolean => remote && isSignInUrl(url, this.settings.get().relayOrigin);
+    const external = (url: string): void => {
+      if (signIn(url)) { this.openSignIn(w, url); return; }
+      const safe = externalUrl(url); if (safe) void shell.openExternal(safe);
+    };
     w.webContents.setWindowOpenHandler(({ url }) => {
       if (remote && isWebFrame(url, this.settings.get().webOrigin, true)) {
         const u = new URL(url); this.createMain(`${u.pathname}${u.search}${u.hash}`);
@@ -100,6 +105,33 @@ export class Windows {
       e.preventDefault(); external(url);
     });
     w.webContents.on('will-attach-webview', e => e.preventDefault());
+  }
+  /**
+   * Google and GitHub sign-in gets a plain window on the page's session: in the system
+   * browser the relay's cookie would never reach the app. The window has no preload, so
+   * a provider's page cannot touch the host bridge. Returning to the Web origin ends it
+   * and hands that URL to the page that started it.
+   */
+  private openSignIn(owner: BrowserWindow, url: string): void {
+    if (this.signInWindow && !this.signInWindow.isDestroyed()) { this.signInWindow.focus(); void this.signInWindow.loadURL(url).catch(() => undefined); return; }
+    const w = new BrowserWindow({
+      width: 520, height: 720, title: 'Pockymoe', parent: owner, autoHideMenuBar: true,
+      webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false, partition: 'persist:remote-codex' },
+    });
+    this.signInWindow = w;
+    // Providers refuse browsers that announce themselves as an embedded Electron app.
+    w.webContents.setUserAgent(w.webContents.getUserAgent().replace(/ (?:Electron|Pockymoe|pockymoe|@pockymoe\/desktop)\/\S+/g, ''));
+    const finish = (e: { preventDefault(): void }, target: string): void => {
+      if (!isWebFrame(target, this.settings.get().webOrigin, true)) return;
+      e.preventDefault(); w.close();
+      if (!owner.isDestroyed()) { void owner.loadURL(target).catch(() => undefined); owner.show(); owner.focus(); }
+    };
+    w.webContents.on('will-navigate', finish);
+    w.webContents.on('will-redirect', finish);
+    w.webContents.setWindowOpenHandler(({ url: opened }) => { const safe = externalUrl(opened); if (safe) void shell.openExternal(safe); return { action: 'deny' }; });
+    w.webContents.on('will-attach-webview', e => e.preventDefault());
+    w.on('closed', () => { if (this.signInWindow === w) this.signInWindow = undefined; });
+    void w.loadURL(url).catch(() => undefined);
   }
   createLocal(role: LocalRole): BrowserWindow {
     const existing = [...this.local].find(([w, r]) => r === role && !w.isDestroyed())?.[0];

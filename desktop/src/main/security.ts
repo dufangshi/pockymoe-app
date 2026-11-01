@@ -10,6 +10,14 @@ export function relayOrigin(value: unknown): string {
 export function isWebFrame(url: string, origin: string, isTop: boolean): boolean {
   try { return isTop && new URL(url).origin === origin; } catch { return false; }
 }
+/** A step of the relay's Google or GitHub sign-in, which must finish in the app's own session. */
+export function isSignInUrl(url: string, relayOrigin: string): boolean {
+  try {
+    const u = new URL(url);
+    if (u.origin === relayOrigin) return /^\/relay\/auth\/oauth\/[^/]+\/start$/.test(u.pathname);
+    return u.protocol === 'https:' && (u.hostname === 'accounts.google.com' || (u.hostname === 'github.com' && u.pathname.startsWith('/login')));
+  } catch { return false; }
+}
 export function externalUrl(value: unknown): string | null {
   if (typeof value !== 'string' || value.length > 8192) return null;
   try { const url = new URL(value); return ['http:', 'https:', 'mailto:'].includes(url.protocol) && !url.username && !url.password ? url.href : null; } catch { return null; }

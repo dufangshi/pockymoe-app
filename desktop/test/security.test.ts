@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { deepLinkPath, externalUrl, isWebFrame, relayOrigin, threadPath } from '../src/main/security';
+import { deepLinkPath, externalUrl, isSignInUrl, isWebFrame, relayOrigin, threadPath } from '../src/main/security';
 import { validateSettings } from '../src/main/store';
 describe('origin and navigation guard', () => {
+  it('recognizes only sign-in steps as belonging in the sign-in window', () => {
+    const relay = 'https://remote.lnz-study.com';
+    for (const url of [`${relay}/relay/auth/oauth/google/start?x=1`, `${relay}/relay/auth/oauth/github/start`, 'https://accounts.google.com/o/oauth2/v2/auth?client_id=x', 'https://github.com/login/oauth/authorize?client_id=x']) expect(isSignInUrl(url, relay)).toBe(true);
+    for (const url of [`${relay}/relay/account`, `https://remote.lnz-study.com.attacker.test/relay/auth/oauth/google/start`, 'https://github.com/dufangshi/pockymoe', 'http://accounts.google.com/', 'https://accounts.google.com.attacker.test/', 'not a url']) expect(isSignInUrl(url, relay)).toBe(false);
+  });
   it('allows exact origins only in the top frame', () => {
     const origin = 'https://remote.lnz-study.com';
     expect(isWebFrame(`${origin}/devices`, origin, true)).toBe(true);
