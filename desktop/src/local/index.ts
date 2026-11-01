@@ -98,7 +98,8 @@ async function init(): Promise<void> {
   if (view === 'quick') { mountQuick(root, state); return; }
   if (view === 'preferences') renderPreferences(); else renderRelay();
   localBridge().onState(next => {
-    const sectionChanged = next.preferencesSection !== state.preferencesSection;
+    // A repeated request must still reveal its section after the user changed tabs.
+    const sectionChanged = next.preferencesRequestId !== state.preferencesRequestId;
     if (sectionChanged) section = next.preferencesSection;
     const changed = sectionChanged || JSON.stringify([state.settings, state.petPacks, state.petAvailable]) !== JSON.stringify([next.settings, next.petPacks, next.petAvailable]);
     state = next;

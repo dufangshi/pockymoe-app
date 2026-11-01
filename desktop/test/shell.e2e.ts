@@ -112,6 +112,15 @@ test('split origins bridge, activity delivery, tray and quick-window command rou
   await app.evaluate(({ webContents }, id) => webContents.fromId(id)?.close(), foreignId);
   await page.evaluate(() => window.pockymoeHost!.window.openPreferences('pet'));
   const prefs = await pageAt(app, 'view=preferences'); await expect(prefs.getByRole('heading', { name: '桌宠', exact: true })).toBeVisible();
+  await prefs.getByRole('button', { name: '通用', exact: true }).click();
+  await expect(prefs.getByRole('heading', { name: '通用', exact: true })).toBeVisible();
+  await page.evaluate(() => window.pockymoeHost!.window.openPreferences('pet'));
+  await expect(prefs.getByRole('heading', { name: '桌宠', exact: true })).toBeVisible();
+  await page.evaluate(() => window.pockymoeHost!.window.openPreferences('shortcuts'));
+  await expect(prefs.getByRole('heading', { name: '快捷键', exact: true })).toBeVisible();
+  await page.evaluate(() => window.pockymoeHost!.window.openPreferences());
+  await expect(prefs.getByRole('heading', { name: '通用', exact: true })).toBeVisible();
+  expect(await app.evaluate(() => [...globalThis.__pockymoeDesktopTest.windows.local.values()].filter(role => role === 'preferences').length)).toBe(1);
   await app.evaluate(() => { void globalThis.__pockymoeDesktopTest.windows.dispatch({ type: 'openMap' }); void globalThis.__pockymoeDesktopTest.windows.dispatch({ type: 'revealInMap', key: 'mac:thread-1' }); });
   await expect.poll(() => page.evaluate(() => window.commands)).toEqual(expect.arrayContaining([expect.objectContaining({ type: 'openMap' }), expect.objectContaining({ type: 'revealInMap', key: 'mac:thread-1' })]));
 });

@@ -42,6 +42,7 @@ else {
     const hub = new ActivityHub(join(dataDir, 'delivered-alerts.json'));
     const manager = new Windows(settings, dataDir); windows = manager;
     const appearance = new AppearanceStore();
+    let preferencesRequestId = 0;
     let preferencesSection: LocalState['preferencesSection'] = 'general';
     const focusedThreads = new Map<number, string | null>();
     let pet: PetController | undefined;
@@ -89,6 +90,7 @@ else {
     listen(c.openThread, (_e, path, options) => { const safe = threadPath(path); if (options && typeof options === 'object' && (options as { newWindow?: boolean }).newWindow === true) manager.createMain(safe); else void manager.dispatch({ type: 'navigate', path: safe }); });
     listen(c.preferences, (_e, section) => {
       if (section !== undefined && !['general', 'pet', 'shortcuts'].includes(String(section))) return;
+      preferencesRequestId++;
       preferencesSection = (section || 'general') as LocalState['preferencesSection'];
       manager.createLocal('preferences'); broadcast();
     });
@@ -142,7 +144,7 @@ else {
       }
       return [...entries].map(([id, name]) => ({ id, name }));
     }
-    const localState = (): LocalState => ({ preferencesSection, settings: settings.get(), appearance: appearance.get(), snapshot: hub.snapshot(), petAvailable: !!pet, petPacks: packs(), version: app.getVersion() });
+    const localState = (): LocalState => ({ preferencesRequestId, preferencesSection, settings: settings.get(), appearance: appearance.get(), snapshot: hub.snapshot(), petAvailable: !!pet, petPacks: packs(), version: app.getVersion() });
     const broadcast = (): void => { for (const w of manager.local.keys()) if (!w.isDestroyed()) w.webContents.send(c.localState, localState()); };
     appearance.onChange(next => { manager.setAppearance(next); tray.setAppearance(next); broadcast(); });
     ipcMain.handle(c.localGet, e => { guardLocal(e); return localState(); });
