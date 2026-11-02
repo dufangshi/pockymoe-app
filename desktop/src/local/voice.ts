@@ -46,7 +46,8 @@ export function voiceSection(state: LocalState, picker: (id: string, label: stri
     <details class="voice-advanced"${remote.extra ? ' open' : ''}><summary>${t('额外参数')}</summary><p>${t('并入请求的 JSON，例如固定音色用的 seed 或 ref_audio。')}</p><textarea id="voice-extra" rows="3" spellcheck="false" placeholder='{"seed": 42}'>${escapeHtml(remote.extra)}</textarea></details>
   ` : `${modelRow(state)}<div class="setting-row"><label for="petVoiceSpeaker">${t('音色')}</label>${picker('petVoiceSpeaker', t('音色'))}</div>`;
   const privacy = remote ? `<p class="voice-note">${t('提醒文字（含线程标题）会发送到这个服务。')}${http ? ` ${t('这是未加密的 HTTP 地址。')}` : ''}</p>` : '';
-  return `<div class="setting-row"><div><label for="petVoice">${t('语音播报')}</label><p>${t('用自然的人声读出提醒。')}</p></div><input id="petVoice" class="switch" type="checkbox" ${settings.petVoice ? 'checked' : ''}/></div>
+  return `<div class="setting-row"><div><label for="petAgentAlerts">${t('子线程')}</label><p>${t('子线程等待你处理时仍会提醒')}</p></div>${picker('petAgentAlerts', t('子线程'))}</div>
+    <div class="setting-row"><div><label for="petVoice">${t('语音播报')}</label><p>${t('用自然的人声读出提醒。')}</p></div><input id="petVoice" class="switch" type="checkbox" ${settings.petVoice ? 'checked' : ''}/></div>
     <div class="setting-row"><label for="petVoiceProvider">${t('声音来源')}</label>${picker('petVoiceProvider', t('声音来源'))}</div>
     ${rows}
     <div class="setting-row"><label for="petVoiceSpeed">${t('语速')}</label>${picker('petVoiceSpeed', t('语速'))}</div>
@@ -131,6 +132,7 @@ export function bindVoice(root: HTMLElement, state: LocalState, cleanups: (() =>
   const trigger = (id: string): HTMLButtonElement | null => root.querySelector<HTMLButtonElement>(`#${id}`);
   const labels = providerLabels();
   const mount = (id: string, options: { value: string; label: string }[], value: string, change: (value: string) => void): void => { const button = trigger(id); if (button) cleanups.push(mountSelect(button, options, value, change)); };
+  mount('petAgentAlerts', [{ value: 'all', label: t('提醒并播报') }, { value: 'silent', label: t('只提醒，不播报') }, { value: 'off', label: t('不提醒') }], settings.petAgentAlerts ?? 'all', value => { void save({ petAgentAlerts: value as DesktopSettings['petAgentAlerts'] }); });
   mount('petVoiceProvider', (Object.keys(labels) as VoiceProvider[]).map(value => ({ value, label: labels[value] })), provider, value => { void save({ petVoiceProvider: value as VoiceProvider }); });
   mount('petVoiceSpeaker', LOCAL_SPEAKERS.map(speaker => ({ value: String(speaker.sid), label: speakerLabel(speaker) })), String(settings.petVoiceSpeaker), value => { void save({ petVoiceSpeaker: Number(value) }); });
   mount('petVoiceSpeed', SPEEDS.map(speed => ({ value: String(speed), label: `${speed}×` })), String(settings.petVoiceSpeed), value => { void save({ petVoiceSpeed: Number(value) }); });

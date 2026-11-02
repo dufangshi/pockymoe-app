@@ -127,3 +127,17 @@ minutes, and she gets up when the time is over or anything happens.
 
 `build_pose_clips.py` scales every pose so its head matches the first pose's and tweens between
 drawings along the optical flow, which needs `opencv-python-headless`.
+
+Agent alerts use `conversation.agent` (unnamed: `conversation.智能体` /
+`conversation.agent`); root titles stay plain. Merged agents use
+`conversation · n child threads`, with English singular/plural. Local titles
+ellipsize the conversation in the middle and retain the agent suffix. Routing,
+activity grouping and running counts are unchanged. Speech identifies both names,
+and summary prompts explicitly carry agent-thread kind, conversation and agent.
+
+Preferences → Pet → Agent threads stores `petAgentAlerts` (`all` by default,
+`silent`, `off`). The delivery policy suppresses completed/failed agent alerts in
+`off`; `silent` retains bubbles/chimes/system notifications without speech or
+summary requests. Waiting-for-input alerts keep their existing delivery. Stricter
+mute/focus/snooze rules still apply. The setting is validated, persisted and
+excluded from both Web PageSettings reads and writes.

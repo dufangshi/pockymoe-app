@@ -5,7 +5,8 @@ import { join } from 'node:path';
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import type { ActivityItem, ActivityRecent, Appearance, DesktopSettings, HostCommand, HostCommandResult, PetController, PetControllerDeps } from '../shared/contract';
 import { resolveLocale, setLocale, t } from '../shared/i18n';
-import { conversationKey, conversationTitle } from '../shared/activityGroups';
+import { agentAlertPolicy } from '../main/delivery';
+import { conversationKey, conversationTitle, spokenActivityTitle } from '../shared/activityGroups';
 import { isMuted, type MuteRule } from '../shared/mutes';
 import { ANIMATIONS } from './animation';
 import { BUBBLE_MS, BubbleQueue } from './bubbles';
@@ -333,12 +334,12 @@ export function createPetController(deps: PetControllerDeps): PetController {
       reaction = completedConversations.size > 1 ? 'jumping' : 'waving';
     }
     if (delivered) {
-      const title = conversationTitle(event.item);
+      const title = spokenActivityTitle(event.item, items);
       // The summary runs only when its turn comes up to be read, so a burst costs one model call.
       const line = (fallback: string) => async (): Promise<string> => (await deps.summarize(event)) ?? fallback;
       if (event.type === 'needsInput') cue('needsInput', t('{title} 需要你处理', { title }, uiLocale));
-      else if (event.type === 'completed') cue('completed', isMuted(event.item, settings.petMutes) ? undefined : line(t('{title} 完成了', { title }, uiLocale)));
-      else if (event.type === 'failed') cue('failed', line(t('{title} 失败了', { title }, uiLocale)));
+      else if (event.type === 'completed') cue('completed', !agentAlertPolicy(event, settings).voice || isMuted(event.item, settings.petMutes) ? undefined : line(t('{title} 完成了', { title }, uiLocale)));
+      else if (event.type === 'failed') cue('failed', agentAlertPolicy(event, settings).voice ? line(t('{title} 失败了', { title }, uiLocale)) : undefined);
     }
     moods.onEvent(event.type, now, delivered, reaction, reactionMs(event.type === 'failed' ? 'failed' : reaction));
     if (delivered && ['completed', 'failed'].includes(event.type)) moodEpoch++;

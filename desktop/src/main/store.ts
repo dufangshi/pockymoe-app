@@ -9,7 +9,7 @@ import { parseExtra, voiceEndpoint } from './voice/remote';
 
 export const defaults: DesktopSettings = {
   webOrigin: '', relayOrigin: '', alertMode: 'petFirst', petVisible: true,
-  petId: 'moe', petSize: 'M', petMini: false, petSound: true, petVoice: false, petVoiceProvider: 'local', petVoiceSpeaker: DEFAULT_SPEAKER, petVoiceSpeed: 1, petVoiceRemotes: {}, petVoiceSummary: false, petSummaryConnection: null, petSummaryLanguage: 'auto', petMutes: [], petMuteAlerts: false, petEdgeHide: true, launchAtLogin: false,
+  petId: 'moe', petSize: 'M', petMini: false, petSound: true, petVoice: false, petVoiceProvider: 'local', petVoiceSpeaker: DEFAULT_SPEAKER, petVoiceSpeed: 1, petVoiceRemotes: {}, petVoiceSummary: false, petSummaryConnection: null, petSummaryLanguage: 'auto', petMutes: [], petMuteAlerts: false, petAgentAlerts: 'all', petEdgeHide: true, launchAtLogin: false,
   quickWindowShortcut: 'Alt+Space', snoozeUntil: null
 };
 export function readJson(path: string): unknown { try { return JSON.parse(readFileSync(path, 'utf8')); } catch { return null; } }
@@ -18,7 +18,7 @@ export function writeJson(path: string, data: unknown): void {
   writeFileSync(`${path}.tmp`, JSON.stringify(data), { mode: 0o600 });
   renameSync(`${path}.tmp`, path);
 }
-const VOICE_SERVICE_KEYS = ['petVoiceProvider', 'petVoiceSpeaker', 'petVoiceSpeed', 'petVoiceRemotes', 'petVoiceSummary', 'petSummaryConnection', 'petSummaryLanguage', 'petMutes', 'petMuteAlerts'] as const;
+const VOICE_SERVICE_KEYS = ['petVoiceProvider', 'petVoiceSpeaker', 'petVoiceSpeed', 'petVoiceRemotes', 'petVoiceSummary', 'petSummaryConnection', 'petSummaryLanguage', 'petMutes', 'petMuteAlerts', 'petAgentAlerts'] as const;
 /** Settings as the Web page may see them. */
 export function pageSettings(settings: DesktopSettings): PageSettings {
   const visible = { ...settings } as Partial<DesktopSettings>;
@@ -74,6 +74,7 @@ export function validateSettings(patch: unknown): Partial<DesktopSettings> {
       case 'petVoiceSpeaker': if (!LOCAL_SPEAKERS.some(speaker => speaker.sid === value)) throw new Error(t('语音服务设置无效')); out.petVoiceSpeaker = value as number; break;
       case 'petVoiceSpeed': if (!SPEEDS.includes(value as number)) throw new Error(t('语音服务设置无效')); out.petVoiceSpeed = value as number; break;
       case 'petVoiceRemotes': out.petVoiceRemotes = validateRemotes(value); break;
+      case 'petAgentAlerts': if (!['all', 'silent', 'off'].includes(String(value))) throw new Error(t('提醒方式无效')); out.petAgentAlerts = value as DesktopSettings['petAgentAlerts']; break;
       case 'petMutes': out.petMutes = validateMutes(value); break;
       case 'petSummaryLanguage': if (!SUMMARY_LANGUAGES.includes(value as SummaryLanguage)) throw new Error(t('语音服务设置无效')); out.petSummaryLanguage = value as SummaryLanguage; break;
       case 'petSummaryConnection': out.petSummaryConnection = validateSummaryConnection(value); break;

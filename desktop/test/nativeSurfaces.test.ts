@@ -67,7 +67,7 @@ it('groups native notices by root title while approvals retain actual request ID
   const notifications = new Notifications(hub, settings, { relay: new Set(), dispatch } as unknown as Windows, () => undefined, () => null);
   hub.sync(snapshot([item({ key: 'mac:agent', threadId: 'agent', state: 'needsInput', agentName: 'Planner', rootThreadKey: 'mac:root', rootThreadTitle: '根对话', request: { id: 'own-request', kind: 'approval', summary: '运行测试' } })]));
   vi.advanceTimersByTime(1500);
-  expect(notices[0].options).toMatchObject({ id: 'mac:own-request', groupId: 'pockymoe:mac:root', title: '根对话', subtitle: 'MacBook Pro · remoteCodex · 🤖 1' });
+  expect(notices[0].options).toMatchObject({ id: 'mac:own-request', groupId: 'pockymoe:mac:root', title: '根对话.Planner', subtitle: 'MacBook Pro · remoteCodex · 🤖 1' });
   expect(String(notices[0].options.subtitle)).not.toMatch(/智能体|Agent|Planner/);
   notices[0].emit('action', {}, 0); await Promise.resolve();
   expect(dispatch).toHaveBeenCalledWith({ type: 'resolveRequest', deviceId: 'mac', threadId: 'agent', requestId: 'own-request', decision: 'approve' });
@@ -79,10 +79,10 @@ it('counts conversations in a completion burst rather than each agent event', ()
   const notifications = new Notifications(hub, settings, { relay: new Set(), dispatch } as unknown as Windows, () => undefined, () => null);
   hub.sync(snapshot(['a', 'b', 'c'].map(name => item({ key: `mac:${name}`, threadId: name, turnId: `turn-${name}`, state: 'completed', unread: true, rootThreadKey: 'mac:root', rootThreadTitle: '根对话' }))));
   vi.advanceTimersByTime(1500);
-  expect(notices).toHaveLength(1); expect(notices[0].options).toMatchObject({ id: 'mac:turn-a', title: '根对话', groupId: 'pockymoe:mac:root' });
+  expect(notices).toHaveLength(1); expect(notices[0].options).toMatchObject({ id: 'mac:turn-a', title: '根对话 · 3 个子线程', groupId: 'pockymoe:mac:root' });
   expect(notices[0].options.subtitle).toBe('MacBook Pro · remoteCodex · 🤖 3');
   expect(String(notices[0].options.body).split('MacBook Pro')).toHaveLength(2);
-  expect(String(notices[0].options.title)).not.toContain('3'); notifications.dispose();
+  expect(String(notices[0].options.title)).toContain('3 个子线程'); notifications.dispose();
 });
 
 it('refreshes already delivered notification actions in the page language with the same ID', () => {

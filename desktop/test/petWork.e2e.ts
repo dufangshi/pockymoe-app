@@ -376,3 +376,31 @@ test('empty panel omits reply row and settles without moving the sprite', async 
   await expect.poll(async () => (await glassBounds()).height).toBe(height);
   expect(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find(window => window.webContents.getURL().includes('pet/index.html') && !window.getParentWindow())!.getBounds())).toEqual(before);
 });
+
+test('agent alerts: picker, names and six theme appearances', async () => {
+  await baseline();
+  const preferences = await openPreferences(), glass = await pet('glass');
+  await expect(preferences.locator('#petAgentAlerts')).toContainText('Alert and announce');
+  await preferences.locator('#petAgentAlerts').click();
+  await preferences.getByRole('option', { name: 'Alert without announcing', exact: true }).click();
+  await expect.poll(() => app.evaluate(() => globalThis.__pockymoeDesktopTest.settings.get().petAgentAlerts)).toBe('silent');
+  const a = item({ key: 'mac:agent-a', threadId: 'agent-a', rootThreadKey: 'mac:root', rootThreadTitle: 'A long conversation title with a meaningful ending', agentName: 'terminal' });
+  await sync([a]); await sync([{ ...a, state: 'completed', unread: true }]);
+  await expect(glass.locator('.bubble-title')).toContainText('.terminal');
+  for (const pack of ['classic', 'plum-pocket', 'terminal'] as const) for (const effective of ['light', 'dark'] as const) {
+    await app.evaluate((_e, value) => globalThis.__pockymoeDesktopTest.appearance.sync(value), { pack, effective, accent: '#8f5a9e', locale: 'zh-CN' });
+    await glass.screenshot({ path: join(evidence, `agent-bubble-${pack}-${effective}.png`), animations: 'disabled' });
+    await preferences.locator('#petAgentAlerts').scrollIntoViewIfNeeded();
+    await expect(preferences.locator('#petAgentAlerts')).toContainText('只提醒，不播报');
+    await preferences.screenshot({ path: join(evidence, `agent-setting-${pack}-${effective}.png`), animations: 'disabled' });
+  }
+  await preferences.locator('#petAgentAlerts').click();
+  await preferences.getByRole('option', { name: '不提醒', exact: true }).click();
+  await expect.poll(() => app.evaluate(() => globalThis.__pockymoeDesktopTest.settings.get().petAgentAlerts)).toBe('off');
+  await settings({ petVisible: false }); await settings({ petVisible: true });
+  const b = { ...a, key: 'mac:agent-b', threadId: 'agent-b', agentName: 'tests' };
+  await sync([b]); await sync([{ ...b, state: 'failed', unread: true }]);
+  await expect(glass.locator('.bubble')).toHaveCount(0);
+  await sync([{ ...b, state: 'needsInput', request: { id: 'agent-input', kind: 'input', summary: 'Please choose' } }]);
+  await expect(glass.locator('.bubble-title')).toContainText('.tests');
+});

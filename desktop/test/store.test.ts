@@ -2,7 +2,7 @@ import { expect, it } from 'vitest';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { defaults, SettingsStore } from '../src/main/store';
+import { defaults, pageSettings, pageSettingsPatch, validateSettings, SettingsStore } from '../src/main/store';
 it('round-trips all settings and rejects invalid patches without mutation', () => {
   const dir = mkdtempSync(join(tmpdir(), 'rc-settings-'));
   try {
@@ -78,4 +78,18 @@ it('retires former built-in pets but preserves user imports across restarts', ()
       expect(new SettingsStore(path).get().petId).toBe(petId);
     }
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+it('validates and persists agent preferences locally, with all as the legacy default', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'agent-settings-')), path = join(dir, 'settings.json');
+  try {
+    writeFileSync(path, '{}'); expect(new SettingsStore(path).get().petAgentAlerts).toBe('all');
+    const store = new SettingsStore(path);
+    for (const petAgentAlerts of ['all', 'silent', 'off'] as const) {
+      store.set({ petAgentAlerts }); expect(new SettingsStore(path).get().petAgentAlerts).toBe(petAgentAlerts);
+      expect(pageSettings(store.get())).not.toHaveProperty('petAgentAlerts');
+      expect(() => pageSettingsPatch({ petAgentAlerts })).toThrow();
+    }
+    for (const petAgentAlerts of ['', 'none', null, 1, true]) expect(() => validateSettings({ petAgentAlerts })).toThrow();
+  } finally { rmSync(dir, { recursive: true }); }
 });

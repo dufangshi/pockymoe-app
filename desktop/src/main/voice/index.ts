@@ -9,6 +9,7 @@ import { REMOTE_DEFAULTS, speechText, type RemoteProvider, type RemoteVoice, typ
 import { VoiceKeys } from './keys';
 import { LocalModel, MODEL } from './model';
 import { listModels, listVoices, speechRequest, synthesizeRemote, VoiceError, voiceEndpoint } from './remote';
+import { isAgentActivity, conversationTitle, agentActivityName } from '../../shared/activityGroups';
 import { cleanSummary, concreteLanguage, summaryPrompt, type Summarizer, type TurnContext } from './summary';
 
 const IDLE_UNLOAD_MS = 5 * 60_000, SYNTH_TIMEOUT_MS = 120_000;
@@ -143,7 +144,7 @@ export class VoiceService {
       const text = result.ok ? result.data as { request?: unknown; answer?: unknown } : {};
       const answer = typeof text.answer === 'string' && text.answer.trim() ? text.answer : item.resultSummary ?? '';
       if (!answer.trim()) return null;
-      const line = await this.complete({ title: item.rootThreadTitle ?? item.title, workspace: item.workspaceLabel, request: typeof text.request === 'string' ? text.request : '', answer, failed: event.type === 'failed' });
+      const line = await this.complete({ title: item.title, ...(isAgentActivity(item) ? { conversation: conversationTitle(item), agent: agentActivityName(item) } : {}), workspace: item.workspaceLabel, request: typeof text.request === 'string' ? text.request : '', answer, failed: event.type === 'failed' });
       if (this.summaryState.lastError) this.setSummaryState({ lastError: null });
       return line;
     } catch (error) { this.setSummaryState({ lastError: message(error) }); return null; }
