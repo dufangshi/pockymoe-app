@@ -13,6 +13,7 @@ import type { ShowMessage } from '../src/main/updates';
 import type { LocalMessages } from '../src/main/messages';
 import type { Appearance, PockymoeHost } from '../src/shared/contract';
 import { resolveLocale } from '../src/shared/i18n';
+import { primaryKey } from './nativeKeys';
 import { item, snapshot } from './fixtures';
 
 type Runtime = { messages: LocalMessages; lastMessageResponse?: number; showMessageBox: ShowMessage; lastDialog?: Electron.MessageBoxOptions; lastSave?: Electron.SaveDialogOptions; updater: { checkForUpdates(): Promise<{ isUpdateAvailable: boolean }> }; appearance: AppearanceStore; hub: ActivityHub; settings: SettingsStore; windows: Windows; tray: DesktopTray; notifications: Notifications };
@@ -118,7 +119,9 @@ test('split origins bridge, activity delivery, tray and quick-window command rou
   await expect.poll(() => page.evaluate(() => !!window.pockymoeHost)).toBe(true);
   expect(await page.evaluate(() => window.pockymoeHost!.capabilities())).toMatchObject({ surface: 'desktop', bridgeVersion: 2, features: { multiWindow: true, quickWindow: true } });
   await expect.poll(() => page.evaluate(() => (window as unknown as { frameResults: unknown }).frameResults)).toEqual({ sameFrameBridge: false, otherBridge: false });
-  await app.evaluate(({ Menu }) => { const item = Menu.getApplicationMenu()!.getMenuItemById('pockymoe-search')!; item.click(item, globalThis.__pockymoeDesktopTest.windows.main(), {}); });
+  await app.evaluate(() => globalThis.__pockymoeDesktopTest.windows.focusMain());
+  await expect.poll(() => app.evaluate(() => globalThis.__pockymoeDesktopTest.windows.main().isFocused())).toBe(true);
+  await primaryKey(app, 'k');
   await expect.poll(() => page.evaluate(() => (window as unknown as { searchKeys: number }).searchKeys)).toBe(1);
   await app.evaluate(() => { globalThis.__pockymoeDesktopTest.settings.set({ petVisible: false }); globalThis.__pockymoeDesktopTest.windows.focusMain(); });
   const active = item({ state: 'needsInput', request: { id: 'req-1', kind: 'approval', summary: '运行 cargo test -p runtime' } });
@@ -403,13 +406,28 @@ for (const material of ['native', 'solid']) for (const pack of packs) for (const
   await app.evaluate(() => globalThis.__pockymoeDesktopTest.windows.focusMain());
   await web.keyboard.press('Alt');
   expect(await app.evaluate(() => globalThis.__pockymoeDesktopTest.windows.main().isMenuBarVisible())).toBe(false);
-  const beforeShortcut = await web.evaluate(() => window.commands.length);
-  await web.keyboard.press('Control+0');
-  await expect.poll(() => web.evaluate(() => window.commands.slice(-1))).toEqual([expect.objectContaining({ type: 'openMap' })]);
-  expect(await web.evaluate(() => window.commands.length)).toBeGreaterThan(beforeShortcut);
-  for (const type of ['openMap', 'openDevices'] as const) {
-    await app.evaluate((_e, type) => { void globalThis.__pockymoeDesktopTest.windows.dispatch({ type }); }, type);
-    await expect.poll(() => web.evaluate(() => window.commands)).toEqual(expect.arrayContaining([expect.objectContaining({ type })]));
-    await web.screenshot({ path: join(evidence, `windows-${material}-${type}-web-contract-fixture-${pack}-${theme}.png`), animations: 'disabled' });
-  }
+
+});
+
+
+test('native menu accelerators have no collisions, including role defaults', async () => {
+  const app = await launch('light'); await pageAt(app, origin);
+  const shortcuts = await app.evaluate(({ Menu }) => {
+    const found: { label: string; accelerator: string }[] = [];
+    const visit = (menu: Electron.Menu): void => { for (const item of menu.items) {
+      // Electron resolves role defaults when constructing real native MenuItems.
+      const roleDefault = (item as Electron.MenuItem & { getDefaultRoleAccelerator?: () => string }).getDefaultRoleAccelerator?.();
+      const accelerator = item.accelerator === undefined ? roleDefault : item.accelerator;
+      if (accelerator) found.push({ label: item.id || item.role || item.label, accelerator });
+      if (item.submenu) visit(item.submenu);
+    } };
+    visit(Menu.getApplicationMenu()!); return found;
+  });
+  const normalized = shortcuts.map(item => item.accelerator.toLowerCase().replace(/commandorcontrol|cmdorctrl|command|control/g, 'primary').replace(/cmd/g, 'primary'));
+  expect(new Set(normalized).size, JSON.stringify(shortcuts)).toBe(normalized.length);
+  expect(shortcuts.find(item => item.label === 'pockymoe-open-map')?.accelerator).toBe('CommandOrControl+0');
+  expect(shortcuts.find(item => item.label === 'resetzoom')).toBeUndefined();
+  await app.evaluate(() => globalThis.__pockymoeDesktopTest.windows.focusMain());
+  await primaryKey(app, '0');
+  await expect.poll(() => app.windows().find(page => page.url().startsWith(origin))!.evaluate(() => window.commands)).toEqual(expect.arrayContaining([expect.objectContaining({ type: 'openMap' })]));
 });

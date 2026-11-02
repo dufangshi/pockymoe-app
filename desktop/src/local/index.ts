@@ -104,7 +104,7 @@ function renderPreferences(): void {
   const content = root.querySelector<HTMLDivElement>('#pref-content')!, s = state.settings;
   const picker = (id: string, label: string, disabled = false): string => `<button type="button" id="${id}" aria-label="${label}" ${disabled ? 'disabled' : ''}></button>`;
   if (section === 'general') content.innerHTML = `<h2>${t('连接')}</h2><section class="settings-group"><div class="connection-row"><div><label>${t('网页地址')}</label><p class="origin-value">${escapeHtml(s.webOrigin)}</p><label>${t('Relay 地址')}</label><p class="origin-value">${escapeHtml(s.relayOrigin)}</p></div><button id="change-relay">${t('更改…')}</button></div></section>
-    <h2>${t('启动')}</h2><section class="settings-group">${toggle('launchAtLogin', t('登录时启动'), t('关闭窗口后仍在菜单栏或托盘中运行。'), s.launchAtLogin)}</section>
+    <h2>${t('启动')}</h2><section class="settings-group">${toggle('launchAtLogin', t('登录时启动'), t(state.platform === 'win32' ? '关闭窗口后仍在通知区域中运行。' : '关闭窗口后仍在菜单栏中运行。'), s.launchAtLogin)}</section>
     <h2>${t('提醒')}</h2><section class="settings-group"><div class="setting-row"><div><label for="alertMode">${t('提醒方式')}</label><p>${t('当前正在查看的线程不会打扰你。')}${state.platform === 'win32' ? ` ${t('Windows 仅在 Pockymoe 运行时提供提醒。')}` : ''}</p></div>${picker('alertMode', t('提醒方式'))}</div>
     <div class="setting-row"><div><label>${t('暂停提醒')}</label><p>${Date.parse(s.snoozeUntil || '') > Date.now() ? t('暂停至 {time}', { time: new Date(s.snoozeUntil!).toLocaleTimeString(getLocale(), { hour: '2-digit', minute: '2-digit' }) }) : t('暂时收起气泡和系统通知。')}</p></div><button id="snooze">${Date.parse(s.snoozeUntil || '') > Date.now() ? t('恢复提醒') : t('暂停 1 小时')}</button></div></section>`;
   else if (section === 'pet') {

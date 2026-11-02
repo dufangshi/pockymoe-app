@@ -50,3 +50,9 @@ NSIS 按用户安装，不要求管理员权限，也不弹 UAC。安装过程�
 ## 8. 验收
 
 在 Classic、Plum Pocket、Terminal 三个主题的浅色和深色下，分别在 100% 和 150% 缩放下截图检查主窗口、线程地图、设备页、偏好设置、快捷窗口、桌宠与浮层。截图和测试结果都要来自真实的 Windows 环境，不能用 Mac 上的结果代替。
+
+## 实机修订
+
+- Cmd/Ctrl+0 只打开地图；「实际大小」在所有平台都没有快捷键。
+- 常驻说明按平台写「通知区域 / notification area」或「菜单栏 / menu bar」。
+- 按用户安装的目录为 `%LOCALAPPDATA%\Programs\Pockymoe`，不更改 appId 或更新身份。

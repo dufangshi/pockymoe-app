@@ -36,7 +36,7 @@ export function installMenu(windows: Windows, settings: SettingsStore): void {
     ] },
     { label: t('视图'), submenu: [
       { role: 'reload', label: t('重新载入') }, { role: 'forceReload', label: t('强制重新载入') }, { role: 'toggleDevTools', label: t('开发者工具') },
-      { type: 'separator' }, { role: 'resetZoom', label: t('实际大小') }, { role: 'zoomIn', label: t('放大') }, { role: 'zoomOut', label: t('缩小') },
+      { type: 'separator' }, { role: 'resetZoom', label: t('实际大小'), accelerator: '' }, { role: 'zoomIn', label: t('放大') }, { role: 'zoomOut', label: t('缩小') },
       { type: 'separator' }, { role: 'togglefullscreen', label: t('切换全屏') }
     ] },
     { role: 'windowMenu', label: t('窗口'), submenu: [
