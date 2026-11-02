@@ -6,6 +6,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 interface Job { pid: number; current: string; sibling: string; requirement: string; work: string; env: Record<string, string> }
 async function main(): Promise<void> {
   const job = JSON.parse(readFileSync(process.argv[2], 'utf8')) as Job;
+  writeFileSync(join(job.work, 'ready'), 'ready', { mode: 0o600, flag: 'wx' });
   const backup = `${job.current}.update-backup-${job.pid}`;
   let backedUp = false, swapped = false, exited = false;
   const launch = (): ReturnType<typeof spawn> => {

@@ -1,5 +1,6 @@
 import { app } from 'electron';
 import { execFile, spawn } from 'node:child_process';
+import { setTimeout as delay } from 'node:timers/promises';
 import { promisify } from 'node:util';
 import { access, cp, mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { constants } from 'node:fs';
@@ -47,6 +48,16 @@ export async function installVerified(file: string, entry: SignedUpdate): Promis
     await writeFile(job, JSON.stringify({ pid: process.pid, current, sibling, requirement, work, env }), { mode: 0o600, flag: 'wx' });
     const child = spawn(process.execPath, [join(__dirname, 'updateHelper.js'), job], { detached: true, stdio: 'ignore', shell: false, env: { ...env, ELECTRON_RUN_AS_NODE: '1' } });
     await new Promise<void>((resolve, reject) => { child.once('spawn', resolve); child.once('error', reject); });
+    // Do not quit merely because exec succeeded: wait until the helper loaded
+    // its job and is actively waiting for this process to exit.
+    let ready = false;
+    for (let i = 0; i < 50; i++) {
+      ready = await access(join(work, 'ready')).then(() => true, () => false);
+      if (ready) break;
+      if (child.exitCode !== null || child.signalCode !== null) throw new Error('Update helper exited before readiness');
+      await delay(100);
+    }
+    if (!ready) { child.kill(); throw new Error('Update helper did not become ready'); }
     helperStarted = true; child.unref(); app.quit();
   } finally {
     if (mounted) await exec('/usr/bin/hdiutil', ['detach', mount]).catch(() => undefined);

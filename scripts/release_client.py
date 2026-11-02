@@ -138,7 +138,7 @@ def build(version, code, output, work):
     run('pnpm', 'install', '--frozen-lockfile', cwd=DESKTOP)
     artifacts = work / 'builder'
     env = dict(os.environ, CSC_IDENTITY_AUTO_DISCOVERY='false')
-    # Ignore inherited signing overrides: public Mac output must be ad-hoc signed.
+    # Ignore inherited signing overrides: public Mac output must use the dedicated non-personal identity.
     for key in list(env):
         if key.startswith(('CSC_', 'WIN_CSC_', 'APPLE_', 'POCKYMOE_UPDATER_TEST_')):
             env.pop(key)
@@ -244,7 +244,7 @@ def main():
         notes.write_text(original.rstrip() + '\n\n' + metadata.read_text())
     scan(notes)
     if args.publish:
-        run('gh' , 'release', 'create', f'v{args.version}', '--repo', REPO, '--target', sha,
+        run('gh', 'release', 'create', f'v{args.version}', '--repo', REPO, '--target', sha,
             '--latest', '--notes-file', notes, *(output / name for name in asset_names(args.version)))
     else:
         print('Not published. Publishing requires a separate invocation with --publish --notes-file FILE.')
