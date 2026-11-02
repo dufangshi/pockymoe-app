@@ -73,8 +73,10 @@ const baseline = (): Promise<void> => page.evaluate(async value => { window.pock
 const finish = async (): Promise<void> => { await baseline(); await sync([item()]); await sync([item({ state: 'completed', unread: true })]); };
 const movePetUnderPointer = (): Promise<void> => app.evaluate(({ BrowserWindow, screen }) => {
   const sprite = BrowserWindow.getAllWindows().find(window => window.webContents.getURL().includes('pet/index.html') && !window.getParentWindow())!;
-  const point = screen.getCursorScreenPoint(), bounds = sprite.getBounds();
-  sprite.setBounds({ ...bounds, x: point.x - Math.round(bounds.width / 2), y: point.y - Math.round(bounds.height / 2) });
+  const bounds = sprite.getBounds();
+  // Pin the input, not the native window: another test or the owner moving the
+  // real pointer must not change the hover condition during this regression.
+  screen.getCursorScreenPoint = () => ({ x: bounds.x + Math.round(bounds.width / 2), y: bounds.y + Math.round(bounds.height / 2) });
 });
 const glassBounds = (): Promise<{ y: number; visible: boolean; height: number }> => app.evaluate(({ BrowserWindow }) => {
   const glass = BrowserWindow.getAllWindows().find(window => window.webContents.getURL().includes('pet/index.html') && !!window.getParentWindow())!;
@@ -86,11 +88,13 @@ test('a bubble stays solid and is not redrawn while the pointer is on it', async
   const glass = await pet('glass');
   await expect(glass.locator('.bubble')).toBeVisible();
   await movePetUnderPointer();
-  await glass.waitForTimeout(600);
+  await expect(glass.locator('.controls')).toBeVisible();
+  await glass.evaluate(() => document.fonts.ready);
+  await expect.poll(async () => (await glassBounds()).height === await glass.locator('#app').evaluate(root => Math.ceil(root.getBoundingClientRect().height))).toBe(true);
   await glass.evaluate(() => { const w = window as unknown as { rewrites: number }; w.rewrites = 0; new MutationObserver(records => { w.rewrites += records.length; }).observe(document.querySelector('#app')!, { childList: true, subtree: true }); });
   const heights: number[] = [];
   for (let i = 0; i < 20; i++) { heights.push((await glassBounds()).y); await glass.waitForTimeout(100); }
-  // This reads the real pointer, which may move once. The bug redrew ten times a second.
+  // Constant hover after the measured size is acknowledged must not redraw or drift.
   expect(await glass.evaluate(() => (window as unknown as { rewrites: number }).rewrites)).toBeLessThan(8);
   expect(new Set(heights).size).toBeLessThanOrEqual(2);
   // Past the old six-second fade.

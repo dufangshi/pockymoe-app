@@ -19,11 +19,15 @@ it('round-trips all settings and rejects invalid patches without mutation', () =
   } finally { rmSync(dir, { recursive: true }); }
 });
 
-it('migrates a v1 relay-only configuration to the origin pair', () => {
+it('marks a v1 relay-only configuration for probing without guessing its Web origin', () => {
   const dir = mkdtempSync(join(tmpdir(), 'pockymoe-migrate-'));
   try {
     const path = join(dir, 'settings.json'); writeFileSync(path, JSON.stringify({ relayOrigin: 'https://custom.example.com', petId: 'moe' }));
-    expect(new SettingsStore(path).get()).toMatchObject({ webOrigin: 'https://custom.example.com', relayOrigin: 'https://custom.example.com' });
+    const store = new SettingsStore(path);
+    expect(store.legacyRelay).toBe('https://custom.example.com');
+    expect(store.get()).toMatchObject({ webOrigin: '', relayOrigin: 'https://custom.example.com' });
+    store.set({ webOrigin: '' });
+    expect(new SettingsStore(path).legacyRelay).toBeNull();
   } finally { rmSync(dir, { recursive: true }); }
 });
 it('persists unchanged defaults without recursively publishing identical settings', () => {

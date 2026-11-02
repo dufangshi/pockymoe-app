@@ -91,9 +91,10 @@ export class SettingsStore implements SettingsStoreLike {
   private value: DesktopSettings;
   private listeners = new Set<(settings: DesktopSettings) => void>();
   readonly firstRun: boolean;
+  readonly legacyRelay: string | null;
   constructor(private path: string, overrides: Partial<Pick<DesktopSettings, 'webOrigin' | 'relayOrigin'>> = {}) {
     const stored = readJson(path) as Partial<DesktopSettings> | null;
-    if (stored?.relayOrigin && !stored.webOrigin) stored.webOrigin = stored.relayOrigin;
+    this.legacyRelay = stored?.relayOrigin && stored.webOrigin === undefined && !overrides.webOrigin ? stored.relayOrigin : null;
     // Sound used to be off and nearly inaudible; settings saved before petVoice existed get the new default.
     if (stored && stored.petVoice === undefined) stored.petSound = true;
     // The pack it named was replaced by an original one under a new id.

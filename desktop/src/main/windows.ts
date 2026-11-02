@@ -12,7 +12,7 @@ import { deepLinkPath, externalUrl, isSignInUrl, isWebFrame, threadPath } from '
 import { readJson, writeJson, type SettingsStore } from './store';
 
 export type CommandInput = HostCommand extends infer T ? T extends HostCommand ? Omit<T, 'id'> : never : never;
-export type LocalRole = 'quick' | 'preferences' | 'relay' | 'about';
+export type LocalRole = 'quick' | 'preferences' | 'relay' | 'about' | 'offline';
 export class Windows {
   readonly relay = new Set<BrowserWindow>();
   readonly local = new Map<BrowserWindow, LocalRole>();
@@ -22,6 +22,11 @@ export class Windows {
   private pending = new Map<number, (() => void)[]>();
   private positionTimer?: ReturnType<typeof setTimeout>;
   private signInWindow?: BrowserWindow;
+  private failedPath = '/';
+  retryConnection(): BrowserWindow {
+    for (const window of [...this.relay]) window.destroy();
+    return this.createMain(this.failedPath);
+  }
   private shownQuick = new WeakSet<BrowserWindow>();
   quitting = false;
   private appearance: Appearance | null = null;
@@ -106,12 +111,17 @@ export class Windows {
       }, 250);
     };
     w.on('move', savePosition); w.on('resize', savePosition);
-    void w.loadURL(`${this.settings.get().webOrigin}${threadPath(path)}`).catch(() => {
-      if (!w.isDestroyed()) {
-        w.show();
-        this.createLocal('relay');
-      }
+    const offline = (): void => {
+      if (this.quitting || w.isDestroyed() || !this.relay.has(w)) return;
+      backgrounded = true;
+      this.failedPath = path;
+      w.hide();
+      this.createLocal('offline');
+    };
+    w.webContents.on('did-fail-load', (_event, code, _description, _url, mainFrame) => {
+      if (mainFrame && code !== -3) offline(); // An intentional navigation abort is not an outage.
     });
+    void w.loadURL(`${this.settings.get().webOrigin}${threadPath(path)}`).catch(error => { if (error.code !== 'ERR_ABORTED') offline(); });
     return w;
   }
   secure(w: BrowserWindow, remote: boolean): void {

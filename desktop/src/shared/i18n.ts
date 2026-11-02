@@ -1,6 +1,12 @@
 /** One source for app-owned desktop strings. Thread titles, summaries and names
  * are user content and are intentionally never translated. */
 export const english = {
+  "无法连接此 Pockymoe 地址，请检查后重试。": "Couldn't connect to Pockymoe here. Check the address and try again.",
+  "无法发现 Relay，请检查地址或填写高级设置。": "Couldn't find the Relay. Check the address or use Advanced.",
+  "暂时无法连接": "Can't connect right now",
+  "更改地址": "Change address",
+  "无法连接已保存的地址，请检查后重试。": "Couldn't connect to the saved address. Check it and try again.",
+  "无法连接此 Relay 地址，请检查后重试。": "Couldn't connect to this Relay address. Check it and try again.",
   "此版本不再提供默认地址。请填写你的 Pockymoe 地址以继续。": "This version no longer provides a default address. Enter your Pockymoe address to continue.",
   "关闭窗口后仍在通知区域中运行。": "Keep running in the notification area after closing a window.",
   "关闭窗口后仍在菜单栏中运行。": "Keep running in the menu bar after closing a window.",

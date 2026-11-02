@@ -12,7 +12,7 @@ declare global { interface Window { pockymoeHost?: PockymoeHost; commands: unkno
 let server: Server, origin: string, app: ElectronApplication, profile: string;
 const evidence = process.env.POCKYMOE_DESKTOP_EVIDENCE || join(tmpdir(), 'pockymoe-local-evidence');
 test.beforeAll(async () => {
-  server = createServer((_req, res) => { res.setHeader('Content-Type', 'text/html'); res.end(`<!doctype html><title>Isolated shell fixture</title><script>window.commands=[];window.pockymoeHost?.onCommand(command=>{window.commands.push(command);window.pockymoeHost.commandResult(command.id,{ok:true});});</script>`); });
+  server = createServer((req, res) => { if (req.url === '/healthz') { res.setHeader('Content-Type', 'application/json'); res.end('{"status":"ok"}'); return; } res.setHeader('Content-Type', 'text/html'); res.end(`<!doctype html><title>Pockymoe isolated shell fixture</title><script>window.commands=[];window.pockymoeHost?.onCommand(command=>{window.commands.push(command);window.pockymoeHost.commandResult(command.id,{ok:true});});</script>`); });
   await new Promise<void>(done => server.listen(0, '127.0.0.1', done));
   const address = server.address(); if (!address || typeof address === 'string') throw new Error('Fixture port missing'); origin = `http://127.0.0.1:${address.port}`;
   mkdirSync(evidence, { recursive: true });
@@ -87,7 +87,7 @@ test('custom pickers support keyboard, pet thumbnails/credits and recent quick t
   await expect.poll(() => web.evaluate(() => window.commands)).toEqual(expect.arrayContaining([expect.objectContaining({ type: 'navigate', path: '/devices/old/threads/recent' })]));
   await app.evaluate(() => globalThis.__pockymoeDesktopTest.windows.createLocal('relay'));
   const setup = await pageAt('view=relay'); await setup.getByText('Advanced', { exact: true }).click();
-  await setup.getByLabel('Web address', { exact: true }).fill(origin); await setup.getByLabel('Relay address', { exact: true }).fill(origin);
+  await setup.getByLabel('Pockymoe address', { exact: true }).fill(origin); await setup.getByLabel('Relay address', { exact: true }).fill(origin);
   await setup.getByRole('button', { name: 'Connect', exact: true }).click();
   await expect.poll(() => app.windows().some(page => page.url().includes('view=relay'))).toBe(false);
 });

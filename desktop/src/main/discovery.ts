@@ -30,11 +30,19 @@ async function healthy(fetcher: Fetcher, base: string): Promise<boolean> {
 }
 /** Pages staticHosting.ts publishes VITE_POCKYMOE_RELAY_ORIGIN in this text file
  * and the HTML meta CSP. API-only relay roots redirect to POCKYMOE_WEB_ORIGIN. */
-export async function discoverOrigins(input: string, fetcher: Fetcher = fetch): Promise<OriginPair> {
+export async function discoverOrigins(input: string, fetcher: Fetcher = fetch, relayOverride?: string): Promise<OriginPair> {
   const entered = origin(input);
   const page = await read(fetcher, `${entered}/`);
-  if (!page || !/<(?:html|script|head)\b/i.test(page.text)) throw new Error(t('无法识别此 Pockymoe 地址，请检查连接或在“高级”中填写两个地址。'));
+  if (!page || !/<(?:html|script|head)\b/i.test(page.text) || !/Pockymoe/i.test(page.text)) throw new Error(t('无法连接此 Pockymoe 地址，请检查后重试。'));
   const webOrigin = origin(new URL(page.url).origin);
+  if (relayOverride) {
+    const relay = origin(relayOverride);
+    if (!await healthy(fetcher, relay)) throw new Error(t('无法连接此 Relay 地址，请检查后重试。'));
+    return { webOrigin, relayOrigin: relay };
+  }
+  // A typed API root is authoritative when it redirects to the Web.
+  if (webOrigin !== entered && await healthy(fetcher, entered)) return { webOrigin, relayOrigin: entered };
+  if (webOrigin === entered && await healthy(fetcher, entered)) return { webOrigin, relayOrigin: entered };
   const metadata = await read(fetcher, `${webOrigin}/STATIC_HOSTING.txt`);
   const configured = metadata?.text.match(/^Relay API origin:\s*(https?:\/\/[^\s]+)\s*$/m)?.[1];
   const candidates = new Set<string>();
@@ -49,5 +57,5 @@ export async function discoverOrigins(input: string, fetcher: Fetcher = fetch): 
   if (webOrigin !== entered) candidates.add(entered);
   candidates.add(webOrigin);
   for (const relay of [...candidates].slice(0, 6)) if (await healthy(fetcher, relay)) return { webOrigin, relayOrigin: relay };
-  throw new Error(t('无法发现 Relay。请在“高级”中填写网页地址与 Relay 地址。'));
+  throw new Error(t('无法发现 Relay，请检查地址或填写高级设置。'));
 }

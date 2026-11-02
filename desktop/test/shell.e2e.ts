@@ -210,10 +210,10 @@ for (const pack of packs) for (const theme of ['light', 'dark'] as const) test(`
   await setup.getByText('高级', { exact: true }).click();
   await capture(app, setup, 'relay-advanced', pack, theme, [380, 1440]);
   if (pack === 'classic' && theme === 'light') {
-    await setup.getByLabel('网页地址', { exact: true }).fill(origin);
+    await setup.getByLabel('Pockymoe 地址', { exact: true }).fill(origin);
     await setup.getByLabel('Relay 地址', { exact: true }).fill(relayOriginValue);
   } else await setup.getByText('高级', { exact: true }).click();
-  await setup.getByLabel('Pockymoe 地址', { exact: true }).fill(theme === 'light' ? relayOriginValue : origin); await setup.getByRole('button', { name: '连接', exact: true }).click();
+  await setup.getByLabel('Pockymoe 地址', { exact: true }).fill(pack === 'classic' && theme === 'light' ? origin : theme === 'light' ? relayOriginValue : origin); await setup.getByRole('button', { name: '连接', exact: true }).click();
   const page = await pageAt(app, origin); await expect.poll(() => page.evaluate(() => !!window.pockymoeHost)).toBe(true);
   expect(await page.evaluate(() => window.pockymoeHost!.settings.get())).toMatchObject({ webOrigin: origin, relayOrigin: relayOriginValue });
   await page.evaluate(a => window.pockymoeHost!.appearance.sync(a), appearance);
@@ -294,7 +294,7 @@ for (const pack of packs) for (const theme of ['light', 'dark'] as const) test(`
   const page = await pageAt(app, origin);
   await page.evaluate(a => { window.pockymoeHost!.appearance.sync(a); }, appearanceFor(pack, theme));
   const rows = [item({ title: 'Review desktop shell', state: 'needsInput', request: { id: 'locale-request', kind: 'approval', summary: 'Approve targeted tests' }, workspaceLabel: 'pockymoe' }), item({ key: 'mac:locale-running', threadId: 'locale-running', title: 'Verify activity updates', workspaceLabel: 'pockymoe', since: new Date(Date.now() - 65_000).toISOString() })];
-  await page.evaluate(s => { window.pockymoeHost!.activity.sync({ ...s, items: [], generatedAt: '2026-11-01T05:59:00.000Z', syncedDeviceIds: ['mac', 'pc'] }); window.pockymoeHost!.activity.sync(s); }, snapshot(rows));
+  await page.evaluate(async s => { window.pockymoeHost!.activity.sync({ ...s, items: [], generatedAt: '2026-11-01T05:59:00.000Z', syncedDeviceIds: ['mac', 'pc'] }); window.pockymoeHost!.activity.sync(s); await window.pockymoeHost!.capabilities(); }, snapshot(rows));
   await page.evaluate(() => window.pockymoeHost!.window.openPreferences('general'));
   const prefs = await pageAt(app, 'view=preferences');
   await app.evaluate(() => globalThis.__pockymoeDesktopTest.windows.createLocal('quick'));
