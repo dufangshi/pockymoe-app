@@ -1,6 +1,6 @@
 import type { Appearance } from './contract';
 
-/** Native chrome uses the same palette as the local renderer. Unknown packs use Classic. */
+/** Local windows and native fallbacks share this palette. Unknown packs use Classic. */
 export function windowPalette(appearance: Appearance | null, dark = false): { background: string; foreground: string } {
   const mode = appearance?.effective ?? (dark ? 'dark' : 'light');
   const palettes: Record<string, Record<string, [string, string]>> = {

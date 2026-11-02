@@ -403,3 +403,13 @@ The real-Web audit distinguishes unstyled native scrollbars from the release
 Web's shared theme-painted WebKit thumbs (explicit size/color and no arrows).
 An Electron regression demonstrates that the audit rejects a default scrollbar
 and a Mac modifier label while accepting that fully styled scrollbar form.
+
+Map captures move the pointer off content and wait for hover cards to close.
+Device captures wait for the seeded model-usage row, so an initial empty loading
+state is not presented as the final devices page.
+
+Windows main-window caption colours resolve the configured page's actual
+`--matter-chrome`, `--theme-bg` and `--theme-fg` tokens after load/theme changes.
+Only flat validated RGB colours reach the native API; utility windows retain
+their local palettes, and Mac behaviour is unchanged. Failed page reads keep
+the existing fallback. Native captures precede Web audit assertions.

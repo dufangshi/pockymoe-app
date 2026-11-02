@@ -62,12 +62,30 @@ for (const surface of ['main', 'map', 'devices'] as const) for (const pack of ['
     } else {
       await app.evaluate((_electron, type: 'openMap' | 'openDevices') => { void globalThis.__pockymoeDesktopTest.windows.dispatch({ type }); }, surface === 'map' ? 'openMap' : 'openDevices');
       await expect(page.locator(surface === 'map' ? '.thread-map-canvas' : '.pd-page').first()).toBeVisible({ timeout: 20_000 });
+      if (surface === 'devices') await expect(page.locator('.pd-account-usage')).toContainText('gpt-5.4', { timeout: 15_000 });
     }
+    if (surface === 'map') await page.locator('.thread-map-filter').hover(); else await page.mouse.move(700, 12);
+    await expect(page.locator('.thread-map-tip').first()).toBeHidden();
     await page.evaluate(async () => { await document.fonts.ready; await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))); });
     mkdirSync(evidence, { recursive: true });
     await page.screenshot({ path: join(evidence, `${surface}-${pack}-${mode}.png`), animations: 'disabled' });
     if (process.platform === 'win32') {
-      expect(await auditSurface(page)).toEqual({ macLabels: false, scrollbars: [] });
+      const expectedChrome = await page.locator('.desktop-window-titlebar').evaluate(element => {
+        const style = getComputedStyle(element), canvas = document.createElement('canvas'); canvas.width = canvas.height = 1;
+        const context = canvas.getContext('2d')!;
+        const rgb = (color: string): string => {
+          context.clearRect(0, 0, 1, 1); context.fillStyle = color; context.fillRect(0, 0, 1, 1);
+          return '#' + Array.from(context.getImageData(0, 0, 1, 1).data).slice(0, 3).map(value => value.toString(16).padStart(2, '0')).join('');
+        };
+        return { toolbar: rgb(style.backgroundColor), foreground: rgb(style.color) };
+      });
+      await app.evaluate(({ BrowserWindow }, url) => {
+        const window = BrowserWindow.getAllWindows().find(window => window.webContents.getURL() === url)!;
+        const original = window.setTitleBarOverlay.bind(window);
+        window.setTitleBarOverlay = options => { (globalThis as unknown as { __capturedChrome: unknown }).__capturedChrome = options; original(options); };
+        globalThis.__pockymoeDesktopTest.windows.setAppearance(globalThis.__pockymoeDesktopTest.appearance.get()!);
+      }, page.url());
+      await expect.poll(() => app!.evaluate(() => (globalThis as unknown as { __capturedChrome: unknown }).__capturedChrome)).toEqual({ color: expectedChrome.toolbar, symbolColor: expectedChrome.foreground, height: 38 });
       expect(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().some(window => window.isMenuBarVisible() || window.isMenuBarAutoHide()))).toBe(false);
       const native = await app.evaluate(async ({ BrowserWindow, desktopCapturer }, url) => {
         const window = BrowserWindow.getAllWindows().find(window => window.webContents.getURL() === url)!;
@@ -79,6 +97,8 @@ for (const surface of ['main', 'map', 'devices'] as const) for (const pack of ['
     }
     const facts = await page.evaluate(() => ({ devicePixelRatio, pack: document.documentElement.dataset.themePreset, mode: document.documentElement.dataset.themeEffective, width: innerWidth, height: innerHeight }));
     writeFileSync(join(evidence, `${surface}-${pack}-${mode}.json`), JSON.stringify(facts, null, 2));
+    stage = 'audit real Web labels and scrollbars';
+    if (process.platform === 'win32') expect(await auditSurface(page)).toEqual({ macLabels: false, scrollbars: [] });
   } catch {
     if (authenticated && app) {
       mkdirSync(evidence, { recursive: true });

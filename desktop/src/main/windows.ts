@@ -1,3 +1,4 @@
+import { pageChrome, readPageChrome } from './pageChrome';
 import { t } from '../shared/i18n';
 import { BrowserWindow, nativeTheme, screen, shell, type Rectangle } from 'electron';
 import { join } from 'node:path';
@@ -23,6 +24,7 @@ export class Windows {
   private shownQuick = new WeakSet<BrowserWindow>();
   quitting = false;
   private appearance: Appearance | null = null;
+  private chromeEpoch = new WeakMap<BrowserWindow, number>();
   setAppearance(appearance: Appearance): void {
     this.appearance = { ...appearance };
     this.refreshChrome();
@@ -39,8 +41,20 @@ export class Windows {
   private refreshChrome(): void {
     if (process.platform !== 'win32') return;
     for (const w of [...this.relay, ...[...this.local].filter(([, role]) => role !== 'quick').map(([window]) => window)]) {
+      if (w.isDestroyed()) continue;
       w.setTitleBarOverlay(this.overlay()); w.setBackgroundColor(this.palette().background);
+      if (this.relay.has(w)) this.syncPageChrome(w);
     }
+  }
+  private syncPageChrome(window: BrowserWindow): void {
+    if (process.platform !== 'win32' || window.isDestroyed() || !isWebFrame(window.webContents.getURL(), this.settings.get().webOrigin, true)) return;
+    const epoch = (this.chromeEpoch.get(window) || 0) + 1; this.chromeEpoch.set(window, epoch);
+    void window.webContents.executeJavaScript(`(${readPageChrome.toString()})()`).then(value => {
+      if (window.isDestroyed() || this.chromeEpoch.get(window) !== epoch || !isWebFrame(window.webContents.getURL(), this.settings.get().webOrigin, true)) return;
+      const colors = pageChrome(value); if (!colors) return;
+      window.setBackgroundColor(colors.background);
+      window.setTitleBarOverlay({ color: colors.toolbar, symbolColor: colors.foreground, height: 38 });
+    }).catch(() => { /* Keep the palette fallback while the page navigates or is unavailable. */ });
   }
   private palette() { return windowPalette(this.appearance, nativeTheme.shouldUseDarkColors); }
   private overlay(): { color: string; symbolColor: string; height: number } {
@@ -69,6 +83,7 @@ export class Windows {
     });
     const webContentsId = w.webContents.id;
     this.relay.add(w);
+    w.webContents.on('did-finish-load', () => this.syncPageChrome(w));
     this.secure(w, true);
     w.on('close', e => { if (!this.quitting) { e.preventDefault(); w.hide(); } });
     w.on('closed', () => {

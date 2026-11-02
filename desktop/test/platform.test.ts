@@ -3,6 +3,7 @@ import { localFileMatches, modelTar, windowsVoiceAvailable } from '../src/main/p
 import { windowsPanelPalette, saveName, shortcutLabel, windowPalette, windowsMaterial, windowsGlassMaterial, windowsReservedName } from '../src/shared/platform';
 import { toastActivation, toastXml } from '../src/main/windowsToast';
 import { dockPosition, petLayout, restorePosition } from '../src/pet/geometry';
+import { pageChrome } from '../src/main/pageChrome';
 import { parseManifest } from '../src/pet/packs';
 
 describe('Windows platform decisions', () => {
@@ -89,4 +90,11 @@ it('keeps Windows panel text above 4.5:1 over white and black compositor backdro
       }
     }
   }
+});
+
+
+it('accepts only resolved page colors for native window chrome', () => {
+  const colors = { background: '#d8dfda', foreground: '#253b35', toolbar: '#d2dbd5' };
+  expect(pageChrome(colors)).toEqual(colors);
+  for (const value of [null, [], {}, { ...colors, toolbar: 'url(https://example.test)' }, { ...colors, foreground: '#fff' }, { ...colors, background: 'transparent' }, { ...colors, toolbar: 12 }]) expect(pageChrome(value)).toBeNull();
 });
