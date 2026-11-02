@@ -160,9 +160,9 @@ def build(version, code, output, work):
     run('pnpm', 'exec', 'electron-builder', '--win', 'nsis', '--x64', '--publish', 'never',
         f'-c.directories.output={artifacts}', cwd=DESKTOP, env=env)
     # Check the builder output itself, not just files selected for copying.
-    generated = sorted(p.name for p in artifacts.iterdir() if p.suffix in ('.dmg', '.zip', '.exe', '.yml', '.blockmap'))
+    generated = sorted(p.name for p in artifacts.iterdir() if p.suffix in ('.dmg', '.zip', '.exe', '.yml', '.blockmap') and p.name != 'builder-debug.yml' and not p.name.endswith('.__uninstaller.exe'))
     if generated != sorted(asset_names(version)[1:]):
-        raise RuntimeError('Unexpected builder artifacts (including update metadata/blockmaps)')
+        raise RuntimeError('Unexpected builder artifacts (including update metadata/blockmaps): ' + ', '.join(generated))
     if list(artifacts.rglob('app-update.yml')) or list(artifacts.rglob('*.blockmap')) or list(artifacts.rglob('latest*.yml')):
         raise RuntimeError('Unexpected update metadata/blockmap')
     win = artifacts / 'win-unpacked'
@@ -188,7 +188,7 @@ def build(version, code, output, work):
     finally:
         run('hdiutil', 'detach', mount, capture=True)
     # Extract the actual NSIS installer, including its compressed app payload.
-    seven = run('node', '-p', "require(require('node:module').createRequire(require.resolve('electron-builder')).resolve('7zip-bin')).path7za", cwd=DESKTOP, capture=True).decode().strip()
+    seven = run('node', DESKTOP / 'scripts/7zip-path.cjs', cwd=DESKTOP, capture=True).decode().splitlines()[-1].strip()
     installer = work / 'scan-installer'
     run(seven, 'x', artifacts / asset_names(version)[2], f'-o{installer}', '-y', capture=True)
     payloads = list(installer.rglob('app-64.7z'))
