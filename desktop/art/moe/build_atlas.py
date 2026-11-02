@@ -39,7 +39,8 @@ def chroma_key(path):
     if source.mode == 'RGBA' and source.getchannel('A').getextrema()[0] < 255:
         a = np.array(source).astype(np.float32)
         a[..., 1] = np.minimum(a[..., 1], np.maximum(a[..., 0], a[..., 2]))
-        a[a[..., 3] <= 0] = 0
+        # The model leaves a faint haze across the sheet that would join the frames into one shape.
+        a[a[..., 3] < 48] = 0
         return Image.fromarray(a.astype(np.uint8), 'RGBA')
     a = np.array(source.convert('RGB')).astype(np.float32)
     r, g, b = a[..., 0], a[..., 1], a[..., 2]
