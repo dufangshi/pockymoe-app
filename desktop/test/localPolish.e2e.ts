@@ -169,8 +169,7 @@ test('local confirmations trap and restore focus, cancel safely and follow every
 
 
 // Skip before fixtures start Electron; the locale repair is Windows-only.
-const windowsOnly = process.platform === 'win32' ? test : test.skip;
-windowsOnly('Windows empty quick reply placeholder follows language changes', async () => {
+test('empty quick reply placeholder follows language changes', async () => {
   await pageAt(origin);
   await mode();
   await app.evaluate(() => globalThis.__pockymoeDesktopTest.windows.createLocal('quick'));

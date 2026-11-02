@@ -166,13 +166,13 @@ describe('local model', () => {
     return { bytes, source: { name, url: 'https://example.invalid/m', sha256: createHash('sha256').update(bytes).digest('hex'), bytes: bytes.length } };
   }
   it('verifies, unpacks and removes', async () => {
-    const { bytes, source } = fixture(), dir = temp(), states: string[] = [];
+    const { bytes, source } = fixture(), dir = join(temp(), '张三 voice data'), states: string[] = [];
     const model: LocalModel = new LocalModel(dir, async () => new Response(new Uint8Array(bytes)), () => states.push(model.state), source);
     expect(model.state).toBe('absent');
     await model.download();
     expect(model.state).toBe('ready'); expect(states).toContain('extracting'); expect(readFileSync(join(model.path, 'model.int8.onnx'), 'utf8')).toBe('weights');
     expect(new LocalModel(dir, async () => new Response(), () => undefined, source).state).toBe('ready');
-    model.remove(); expect(model.state).toBe('absent'); expect(existsSync(model.path)).toBe(false);
+    await model.remove(); expect(model.state).toBe('absent'); expect(existsSync(model.path)).toBe(false);
   });
   it('resumes a partial download with a range request', async () => {
     const { bytes, source } = fixture(), dir = temp();

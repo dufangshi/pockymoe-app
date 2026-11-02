@@ -314,3 +314,52 @@ test('clips: a pack with clips plays them and survives a click', async () => {
   await sprite.screenshot({ path: join(evidence, 'clip-poked.png'), omitBackground: true });
   await expect(sprite.locator('#character')).toHaveClass(/clips/);
 });
+
+for (const surface of ['glass', 'sprite'] as const) test(`native close on ${surface} keeps a usable sprite`, async () => {
+  await baseline(); await settings({ petVisible: true, petEdgeHide: false });
+  const sprite = await pet('sprite'), glass = await pet('glass');
+  const act = (value: unknown) => sprite.evaluate(input => (window as unknown as { rcDesktop: { pet: { action(value: unknown): Promise<unknown> } } }).rcDesktop.pet.action(input), value);
+  await act({ type: 'toggleTray' }); await expect(glass.locator('.panel')).toBeVisible();
+  await app.evaluate(({ BrowserWindow }, surface) => {
+    const window = BrowserWindow.getAllWindows().find(window => window.webContents.getURL().includes('pet/index.html') && !!window.getParentWindow() === (surface === 'glass'))!;
+    window.close();
+  }, surface);
+  await expect(glass.locator('.panel')).toHaveCount(0);
+  if (surface === 'sprite') {
+    expect(await app.evaluate(() => globalThis.__pockymoeDesktopTest.settings.get().petVisible)).toBe(false);
+    await settings({ petVisible: true });
+  }
+  expect(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().filter(window => window.webContents.getURL().includes('pet/index.html')).length)).toBe(2);
+  await act({ type: 'toggleTray' }); await expect(glass.locator('.panel')).toBeVisible();
+  await expect(sprite.locator('#character')).toBeVisible();
+  expect(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find(window => window.webContents.getURL().includes('pet/index.html') && !window.getParentWindow())!.isVisible())).toBe(true);
+});
+
+for (const surface of ['glass', 'sprite'] as const) test(`destroying ${surface} retires both pet windows`, async () => {
+  await app.evaluate(({ BrowserWindow }, surface) => {
+    BrowserWindow.getAllWindows().find(window => window.webContents.getURL().includes('pet/index.html') && !!window.getParentWindow() === (surface === 'glass'))!.destroy();
+  }, surface);
+  await expect.poll(() => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().filter(window => window.webContents.getURL().includes('pet/index.html')).length)).toBe(0);
+  await page.evaluate(() => window.pockymoeHost!.window.openPreferences('pet'));
+  await expect.poll(() => app.windows().some(page => page.url().includes('view=preferences'))).toBe(true);
+  const prefs = app.windows().find(page => page.url().includes('view=preferences'))!;
+  await expect.poll(() => prefs.evaluate(async () => (await (window as unknown as { pockymoeDesktop: { getState(): Promise<{ petAvailable: boolean }> } }).pockymoeDesktop.getState()).petAvailable)).toBe(false);
+});
+
+test('empty panel omits reply row and settles without moving the sprite', async () => {
+  await baseline(); await settings({ petVisible: true, petEdgeHide: false });
+  const sprite = await pet('sprite'), glass = await pet('glass');
+  const act = (value: unknown) => sprite.evaluate(input => (window as unknown as { rcDesktop: { pet: { action(value: unknown): Promise<unknown> } } }).rcDesktop.pet.action(input), value);
+  await act({ type: 'toggleTray' });
+  await expect(glass.locator('.empty')).toHaveText('All caught up');
+  await expect(glass.locator('#chat-form')).toHaveCount(0);
+  const before = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find(window => window.webContents.getURL().includes('pet/index.html') && !window.getParentWindow())!.getBounds());
+  const height = (await glassBounds()).height;
+  await sync([item()]); await expect(glass.locator('#chat-form')).toBeVisible();
+  await page.evaluate(value => window.pockymoeHost!.activity.sync(value), snapshot([], { accountId: 'empty-panel-account', syncedDeviceIds: ['mac', 'pc'] }));
+  await act({ type: 'toggleTray' });
+  await expect(glass.locator('.empty')).toHaveText('All caught up');
+  await expect(glass.locator('#chat-form')).toHaveCount(0);
+  await expect.poll(async () => (await glassBounds()).height).toBe(height);
+  expect(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find(window => window.webContents.getURL().includes('pet/index.html') && !window.getParentWindow())!.getBounds())).toEqual(before);
+});

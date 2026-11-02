@@ -131,9 +131,9 @@ it('matches the Web waiting badge, excluding unread failures and counting conver
 it('routes Windows protocol toast buttons once, even if Windows closed the banner first', async () => {
   vi.stubGlobal('process', { ...process, platform: 'win32' });
   try {
-    const hub = connected(new ActivityHub()), dispatch = vi.fn().mockResolvedValue({ ok: true });
+    const hub = connected(new ActivityHub()), dispatch = vi.fn().mockResolvedValue({ ok: true }), focusMain = vi.fn();
     const settings = { get: () => ({ ...defaults, alertMode: 'system' }), onChange: () => () => undefined } as unknown as SettingsStore;
-    const notifications = new Notifications(hub, settings, { relay: new Set(), dispatch } as unknown as Windows, () => undefined, () => null);
+    const notifications = new Notifications(hub, settings, { relay: new Set(), dispatch, focusMain } as unknown as Windows, () => undefined, () => null);
     hub.sync(snapshot([item({ state: 'needsInput', request: { id: 'windows-request', kind: 'approval', summary: 'Run tests & checks' } })]));
     vi.advanceTimersByTime(1500);
     const notice = notices[0] as typeof notices[number] & { toastXml: string };
@@ -143,7 +143,9 @@ it('routes Windows protocol toast buttons once, even if Windows closed the banne
     expect(notifications.activate(target)).toBe(true);
     await Promise.resolve();
     expect(dispatch).toHaveBeenCalledWith({ type: 'resolveRequest', deviceId: 'mac', threadId: 'thread-1', requestId: 'windows-request', decision: 'approve' });
-    notifications.activate(target); expect(dispatch).toHaveBeenCalledTimes(1);
+    notifications.activate(target); expect(dispatch).toHaveBeenCalledTimes(1); expect(focusMain).toHaveBeenCalledTimes(1);
+    for (const action of ['open', '0', '1']) expect(notifications.activate(`pockymoe://notification/00000000-0000-0000-0000-000000000000/${action}`)).toBe(true);
+    expect(focusMain).toHaveBeenCalledTimes(4); expect(dispatch).toHaveBeenCalledTimes(1);
     notifications.dispose(); hub.dispose();
   } finally { vi.unstubAllGlobals(); }
 });

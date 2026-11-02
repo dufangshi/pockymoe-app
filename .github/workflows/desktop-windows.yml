@@ -76,6 +76,9 @@ jobs:
         run: |
           pnpm exec playwright test --project=electron --reporter=list 2>&1 | Tee-Object "$env:POCKYMOE_DESKTOP_EVIDENCE/electron.log"
           exit $LASTEXITCODE
+      - name: Build six-surface contact sheets from original captures
+        if: always()
+        run: node scripts/contact-sheets.mjs "$env:POCKYMOE_DESKTOP_EVIDENCE"
       - name: Stop only the recorded disposable backend
         if: always()
         run: python ../scripts/desktop-fixture/backend.py stop

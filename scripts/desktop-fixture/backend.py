@@ -377,7 +377,7 @@ def start(dev_web=False):
             launch_device(state, device)
             write_json(STATE, state)
         for device in state["devices"]:
-            retry(lambda: device_api(state, device, "/agent-runtimes"), device["name"] + " tunnel", started + 20)
+            retry(lambda: device_api(state, device, "/agent-runtimes"), device["name"] + " tunnel", time.monotonic() + 20)
         # Independent devices seed concurrently; a lineage's parents stay ordered.
         with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
             futures = [pool.submit(seed_device, state, device, device_api) for device in state["devices"]]
@@ -393,7 +393,7 @@ def start(dev_web=False):
         write_json(STATE, state)
         for device in state["devices"]:
             retry(lambda: device_api(state, device, "/threads?includeAgentThreads=true"),
-                  device["name"] + " seeded tunnel", started + 27)
+                  device["name"] + " seeded tunnel", time.monotonic() + 20)
         seed_live(state)
         state["ready"] = True
         state["startupSeconds"] = round(time.monotonic() - started, 3)

@@ -36,6 +36,7 @@ export function createPetController(deps: PetControllerDeps): PetController {
   const initial = deps.hub.snapshot();
   if (initial) { items = initial.items; recent = initial.recent ?? []; accountId = initial.accountId; }
   let packs: PetPack[] = [], pack: PetPack | undefined, error: string | null = null;
+  let quitting = false;
   let disposed = false, visible = settings.petVisible, near = false, peek = false, dockAmount = 0;
   let mode: PetViewState['mode'] = 'controls', panel = false, menu = false, detailOpen = false;
   let lastSprite = '', lastGlass = '', readySprite = false, readyGlass = false, glassDismissed = false;
@@ -146,7 +147,7 @@ export function createPetController(deps: PetControllerDeps): PetController {
   const live = (): boolean => !disposed && !window.isDestroyed() && !glass.isDestroyed();
   function retireDestroyed(error: unknown): void {
     if (!windowWasDestroyed(error)) throw error;
-    dispose(false);
+    dispose();
   }
   function emit(): void {
     if (!live()) return;
@@ -382,8 +383,11 @@ export function createPetController(deps: PetControllerDeps): PetController {
     try { pollPointer(); } catch (error) { retireDestroyed(error); }
   }, 100);
   // Stop native-window polling before Electron begins destroying those windows.
-  const beforeQuit = (): void => dispose(false);
-  const nativeClosed = (): void => dispose(false);
+  const beforeQuit = (): void => { quitting = true; dispose(false); };
+  const closeGlass = (event: Electron.Event): void => { if (!quitting) { event.preventDefault(); dismissSurface(); } };
+  const closeSprite = (event: Electron.Event): void => { if (!quitting) { event.preventDefault(); deps.settings.set({ petVisible: false }); } };
+  const nativeClosed = (): void => dispose();
+  glass.on('close', closeGlass); window.on('close', closeSprite);
   app.once('before-quit', beforeQuit);
   window.once('closed', nativeClosed); glass.once('closed', nativeClosed);
   const devUrl = process.env.ELECTRON_RENDERER_URL;
@@ -392,6 +396,7 @@ export function createPetController(deps: PetControllerDeps): PetController {
     if (disposed) return; disposed = true; clearInterval(timer); clearTimeout(blurTimer); savePosition();
     app.removeListener('before-quit', beforeQuit);
     window.removeListener('closed', nativeClosed); glass.removeListener('closed', nativeClosed);
+    glass.removeListener('close', closeGlass); window.removeListener('close', closeSprite);
     for (const unsubscribe of unsubscribes) unsubscribe();
     screen.removeListener('display-removed', displayChanged); screen.removeListener('display-metrics-changed', displayChanged);
     ipcMain.removeListener('rcDesktop:pet:ready', onReady); ipcMain.removeListener('rcDesktop:pet:hitTest', onHitTest); ipcMain.removeHandler('rcDesktop:pet:action'); ipcMain.removeHandler('rcDesktop:pet:clip');
@@ -402,7 +407,7 @@ export function createPetController(deps: PetControllerDeps): PetController {
   }
   return {
     async reloadPacks() { await refreshPacks(); packEpoch++; emit(); },
-    setVisible(value) { if (deps.settings.get().petVisible !== value) deps.settings.set({ petVisible: value }); }, isVisible: () => visible && !disposed, play, say(text) { cue(undefined, text); },
+    setVisible(value) { if (deps.settings.get().petVisible !== value) deps.settings.set({ petVisible: value }); }, isVisible: () => visible && !disposed, isAvailable: live, play, say(text) { cue(undefined, text); },
     dispose,
   };
 }

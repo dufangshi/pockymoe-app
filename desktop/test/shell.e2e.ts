@@ -279,7 +279,17 @@ for (const pack of packs) for (const theme of ['light', 'dark'] as const) test(`
   const first = await pageAt(app, 'view=relay');
   const fallback = resolveLocale(await app.evaluate(({ app }) => app.getLocale()));
   await expect(first.locator('html')).toHaveAttribute('lang', fallback);
-  await app.evaluate((_electron, pair) => { globalThis.__pockymoeDesktopTest.settings.set(pair); }, { webOrigin: origin, relayOrigin: relayOriginValue, petVisible: false });
+  await app.evaluate(async (_electron, pair) => {
+    const runtime = globalThis.__pockymoeDesktopTest;
+    runtime.settings.set(pair);
+    // Origin changes create a new native window. Observe its completed navigation,
+    // rather than treating the initial about:blank URL as a failed ready window.
+    const contents = runtime.windows.main().webContents;
+    if (contents.isLoading()) await new Promise<void>((resolve, reject) => {
+      contents.once('did-finish-load', () => resolve());
+      contents.once('did-fail-load', (_event, code) => reject(new Error(`Fixture navigation failed: ${code}`)));
+    });
+  }, { webOrigin: origin, relayOrigin: relayOriginValue, petVisible: false });
   const page = await pageAt(app, origin);
   await page.evaluate(a => { window.pockymoeHost!.appearance.sync(a); }, appearanceFor(pack, theme));
   const rows = [item({ title: 'Review desktop shell', state: 'needsInput', request: { id: 'locale-request', kind: 'approval', summary: 'Approve targeted tests' }, workspaceLabel: 'pockymoe' }), item({ key: 'mac:locale-running', threadId: 'locale-running', title: 'Verify activity updates', workspaceLabel: 'pockymoe', since: new Date(Date.now() - 65_000).toISOString() })];

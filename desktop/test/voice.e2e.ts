@@ -38,7 +38,7 @@ test.beforeEach(async () => {
   test.skip(test.info().title.includes('synthesizes real speech') && !realModel, 'POCKYMOE_VOICE_MODEL is not set');
   test.skip(test.info().title.includes('downloads, verifies') && !process.env.POCKYMOE_VOICE_DOWNLOAD, 'POCKYMOE_VOICE_DOWNLOAD is not set');
   test.skip(test.info().title.includes('offers the download') && !!realModel);
-  seen = []; profile = mkdtempSync(join(tmpdir(), 'pockymoe-voice-'));
+  seen = []; profile = mkdtempSync(join(tmpdir(), 'pockymoe-张三 voice-'));
   if (realModel && test.info().title.startsWith('local')) { mkdirSync(join(profile, 'voice')); symlinkSync(realModel, join(profile, 'voice', MODEL.name), process.platform === 'win32' ? 'junction' : 'dir'); }
   const env: Record<string, string> = {};
   for (const key of ['PATH', 'HOME', 'TMPDIR', 'USER', 'LOGNAME', 'SystemRoot', 'WINDIR', 'TEMP', 'TMP', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'ComSpec', 'PATHEXT']) if (process.env[key]) env[key] = process.env[key]!;

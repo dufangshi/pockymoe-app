@@ -23,6 +23,7 @@ export class Notifications {
     const target = toastActivation(url); if (!target) return false;
     const entry = this.activations.get(target.token);
     if (entry) { this.activations.delete(target.token); if (target.action === 'open') entry.open(); else entry.action(Number(target.action)); }
+    else this.windows.focusMain();
     return true;
   }
   private active = new Map<string, Notification>();

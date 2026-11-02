@@ -89,7 +89,7 @@ else {
       surface: 'desktop', bridgeVersion: 2, platform: process.platform as HostCapabilities['platform'], shellVersion: app.getVersion(),
       notifications: apnsEnabled() ? 'local+apns' : 'local',
       windowChrome: { kind: process.platform === 'darwin' ? 'hiddenInset' : 'titleBarOverlay', trafficLightsWidth: process.platform === 'darwin' ? 78 : 138, toolbarHeight: 38, controlsSide: process.platform === 'darwin' ? 'left' : 'right' },
-      features: { pet: !!pet, quickWindow: true, multiWindow: true, nativeSave: true, badge: true }
+      features: { pet: pet?.isAvailable() ?? false, quickWindow: true, multiWindow: true, nativeSave: true, badge: true }
     });
     const guardRelay = (e: IpcMainEvent | IpcMainInvokeEvent): void => {
       const w = BrowserWindow.fromWebContents(e.sender);
@@ -162,7 +162,7 @@ else {
     }
     const messages = new LocalMessages(() => broadcast());
     const showMessageBox: ShowMessage = options => process.platform === 'win32' ? messages.show(options, manager.createLocal('preferences')) : dialog.showMessageBox(options);
-    const localState = (window?: BrowserWindow): LocalState => ({ message: window ? messages.view(window.id) : null, platform: process.platform, glassFallback: process.platform === 'win32' && windowsGlassMaterial(release(), process.env.POCKYMOE_WINDOWS_GLASS === 'solid') === 'solid', locale: getLocale(), preferencesRequestId, preferencesSection, settings: settings.get(), appearance: appearance.get(), snapshot: hub.snapshot(), petAvailable: !!pet, petPacks: petCatalog.list(), version: app.getVersion(), voice: voice.status(), summary: voice.summaryStatus() });
+    const localState = (window?: BrowserWindow): LocalState => ({ message: window ? messages.view(window.id) : null, platform: process.platform, glassFallback: process.platform === 'win32' && windowsGlassMaterial(release(), process.env.POCKYMOE_WINDOWS_GLASS === 'solid') === 'solid', locale: getLocale(), preferencesRequestId, preferencesSection, settings: settings.get(), appearance: appearance.get(), snapshot: hub.snapshot(), petAvailable: pet?.isAvailable() ?? false, petPacks: petCatalog.list(), version: app.getVersion(), voice: voice.status(), summary: voice.summaryStatus() });
     const broadcast = (): void => { for (const w of manager.local.keys()) if (!w.isDestroyed()) w.webContents.send(c.localState, localState(w)); };
     voice.onChange(broadcast);
     let nativeLocale = getLocale();
@@ -234,7 +234,7 @@ else {
           case 'voiceModel':
             if (action.command === 'download') void voice.model.download();
             else if (action.command === 'cancel') voice.model.cancel();
-            else if (action.command === 'remove') { voice.stopWorker(); voice.model.remove(); }
+            else if (action.command === 'remove') { voice.stopWorker(); await voice.model.remove(); }
             break;
           case 'voiceInstall': voice.install(); break;
           case 'openUpstreams': {

@@ -420,3 +420,17 @@ is treated as a retired handle; other exceptions still fail. The quit regression
 destroys glass during state delivery, after the entry guard, to cover reentrancy.
 Windows key automation temporarily joins input queues when required to focus
 the exact HWND, detaches them immediately, and verifies the target before typing.
+
+Native pet close requests preserve the controller: closing the glass dismisses
+its current panel, while closing the sprite writes the same hidden setting as
+Hide Pet. Forced destruction retires both windows and reports the pet unavailable.
+An empty panel omits the reply row on both platforms (design v3 §2.3).
+Unknown/stale Windows Toast activation tokens focus the main window without
+executing an approval or rejection. Model extraction cancellation kills tar and
+waits for its close before removing files; Windows file-lock retries are bounded.
+The voice fixtures use a Chinese path containing a space.
+
+Windows CI uploads six-theme contact sheets under
+`scale-<scale>/contact-sheets/{main,map,devices,preferences,quick,glass}.png`, along
+with the full original PNGs. Fixture tunnel deadlines start when that phase begins,
+so browser bootstrap time cannot exhaust a device's connection budget.
