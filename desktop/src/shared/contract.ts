@@ -2,7 +2,7 @@
 // page half in apps/supervisor-web/src/desktop/host.ts; bump
 // HOST_BRIDGE_VERSION on any breaking change and feature-detect, never assume.
 // Design: docs/desktop-design.zh.md §6.
-import type { RemoteProvider, RemoteVoice, VoiceProvider } from './voice';
+import type { RemoteProvider, RemoteVoice, SummaryLanguage, VoiceProvider } from './voice';
 
 export const HOST_BRIDGE_VERSION = 2;
 
@@ -104,7 +104,13 @@ export type HostCommand =
   | { id: string; type: 'revealInMap'; key: string }
   | { id: string; type: 'openMap' }
   | { id: string; type: 'newThread' }
-  | { id: string; type: 'openDevices' };
+  | { id: string; type: 'openDevices' }
+  /** Text of a finished turn, for spoken summaries. Answers in `data`. */
+  | { id: string; type: 'turnText'; deviceId: string; threadId: string; turnId?: string | null }
+  /** Saved upstream connections on every connected device. Answers in `data`. */
+  | { id: string; type: 'listConnections' }
+  /** One completion through a saved connection; the key stays on that device. Answers in `data`. */
+  | { id: string; type: 'completeWithConnection'; deviceId: string; connectionId: string; model: string; system: string; user: string };
 
 export interface HostCommandResult {
   ok: boolean;
@@ -112,6 +118,8 @@ export interface HostCommandResult {
   error?: string;
   /** Machine-readable reason; 'needsThread' means the request must be answered inside the thread. */
   code?: 'needsThread';
+  /** Result of a command that asks for data rather than performing an action. */
+  data?: unknown;
 }
 
 export interface DesktopSettings {
@@ -133,6 +141,13 @@ export interface DesktopSettings {
   petVoiceSpeed: number;
   /** Per service, so switching does not lose an address. API keys are stored separately. */
   petVoiceRemotes: Partial<Record<RemoteProvider, RemoteVoice>>;
+  /** Have a model say what a finished turn achieved, instead of only that it finished. */
+  petVoiceSummary: boolean;
+  /** A saved upstream on a device, or null for petSummaryCustom. */
+  petSummaryConnection: { deviceId: string; id: string; name: string; model: string } | null;
+  /** An OpenAI-format endpoint called from here. Its API key is stored separately. */
+  petSummaryCustom: { url: string; model: string };
+  petSummaryLanguage: SummaryLanguage;
   /** Hide the character past the screen edge when docked; default true. */
   petEdgeHide: boolean;
   launchAtLogin: boolean;
@@ -142,7 +157,7 @@ export interface DesktopSettings {
 }
 
 /** The page never sees or changes where spoken alerts are sent. */
-export type PageSettings = Omit<DesktopSettings, 'petVoiceProvider' | 'petVoiceSpeaker' | 'petVoiceSpeed' | 'petVoiceRemotes'>;
+export type PageSettings = Omit<DesktopSettings, 'petVoiceProvider' | 'petVoiceSpeaker' | 'petVoiceSpeed' | 'petVoiceRemotes' | 'petVoiceSummary' | 'petSummaryConnection' | 'petSummaryCustom' | 'petSummaryLanguage'>;
 
 export interface Appearance {
   effective: 'light' | 'dark';
@@ -214,6 +229,8 @@ export type PetMood =
   | 'failed'
   | 'waving'
   | 'jumping'
+  /** The reaction to being clicked. */
+  | 'poked'
   | 'review'
   | 'sleeping';
 
@@ -227,6 +244,8 @@ export interface PetControllerDeps {
   openPreferences(section?: 'general' | 'pet' | 'shortcuts'): void;
   /** Encoded audio for an alert, or null when no voice is available yet. */
   speak(text: string): Promise<Uint8Array | null>;
+  /** The line to read for a finished turn, or null to fall back to saying it finished. */
+  summarize(event: ActivityEvent): Promise<string | null>;
   /** Whether the delivery policy wants the pet to speak for this event (§5.2). */
   shouldSpeak(event: ActivityEvent): boolean;
   /** Directory holding bundled and imported pet packs. */

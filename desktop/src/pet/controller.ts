@@ -6,8 +6,8 @@ import { resolveLocale, setLocale, t } from '../shared/i18n';
 import { conversationKey, conversationTitle } from '../shared/activityGroups';
 import { ANIMATIONS } from './animation';
 import { BUBBLE_MS, BubbleQueue } from './bubbles';
-import { dockPosition, exposedRect, PET_HEIGHT, petLayout, restorePosition, surfaceLayout, type PetPosition } from './geometry';
-import { importPetPack as importPack, listPetPacks, imageDimensions, type PetPack } from './packs';
+import { dockPosition, exposedRect, PET_HEIGHT, petLayout, restorePosition, surfaceLayout, surfaceSide, type PetPosition, type SurfaceSide } from './geometry';
+import { importPetPack as importPack, listPetPacks, imageDimensions, readClip, type ClipState, type PetPack } from './packs';
 import { petConversations } from './conversations';
 import { StableMood, withoutResolvedRequest } from './stability';
 import { configureOverlay, glassOptions } from './windows';
@@ -36,6 +36,13 @@ export function createPetController(deps: PetControllerDeps): PetController {
   let disposed = false, visible = settings.petVisible, near = false, peek = false, dockAmount = 0;
   let mode: PetViewState['mode'] = 'controls', panel = false, menu = false, detailOpen = false;
   let lastSprite = '', lastGlass = '', readySprite = false, readyGlass = false, glassDismissed = false;
+  let moodEpoch = 0;
+  // How long a reaction holds: a pack's own clip decides, since its art can run for seconds.
+  const reactionMs = (mood: ClipState & keyof typeof ANIMATIONS): number => {
+    const clips = pack?.manifest.remoteCodex?.clips?.[mood], format = pack?.manifest.remoteCodex?.clipFormat;
+    if (clips?.length && format) return Math.max(...clips.map(clip => clip.frames)) / format.fps * 1000;
+    return ANIMATIONS[mood].durations.reduce((a: number, b: number) => a + b, 0) * (pack?.manifest.remoteCodex?.frameScale ?? 1);
+  };
   let hoverSince = 0, awaySince = 0, alertPeekUntil = 0, lastOpacity = 1, lastCue = 0, lastSpeech = 0, controlsPinned = false;
   let blurTimer: ReturnType<typeof setTimeout> | undefined;
   let drag: { x: number; y: number; origin: PetPosition; moved: boolean } | null = null;
@@ -68,27 +75,28 @@ export function createPetController(deps: PetControllerDeps): PetController {
   // Only moving/resizing the character (or a display change) may ever change these bounds.
   function placeSprite(): void {
     const bounds = petLayout(position, display().workArea, PET_HEIGHT[settings.petSize]).window;
-    window.setBounds(bounds); placeGlass();
+    window.setBounds(bounds); glassSide = null; placeGlass();
   }
-  let glassSize = { width: 132, height: 36 };
+  let glassSize = { width: 132, height: 36 }, glassSide: SurfaceSide | null = null, glassContent = '';
   function placeGlass(): void {
-    const bounds = surfaceLayout(window.getBounds(), display().workArea, glassSize.width, glassSize.height);
+    glassSide ??= surfaceSide(window.getBounds(), display().workArea, glassSize.height);
+    const bounds = surfaceLayout(window.getBounds(), display().workArea, glassSize.width, glassSize.height, glassSide);
     const before = glass.getBounds();
     if (Object.keys(bounds).some(key => bounds[key as keyof typeof bounds] !== before[key as keyof typeof before])) glass.setBounds(bounds);
   }
   function closeSurface(): void { panel = false; menu = false; detailOpen = false; controlsPinned = false; mode = 'controls'; glassDismissed = true; emit(); }
   function play(audio: Uint8Array): void { if (readySprite && !window.isDestroyed()) window.webContents.send('rcDesktop:pet:speech', audio); }
   // Synthesis takes seconds: read one at a time, and only the newest of whatever piled up meanwhile.
-  let synthesizing = false, nextSpeech: string | null = null;
-  async function say(text: string): Promise<void> {
+  let synthesizing = false, nextSpeech: string | (() => Promise<string>) | null = null;
+  async function say(text: string | (() => Promise<string>)): Promise<void> {
     if (synthesizing) { nextSpeech = text; return; }
     synthesizing = true;
-    try { const audio = await deps.speak(text); if (audio && !disposed) play(audio); }
+    try { const audio = await deps.speak(typeof text === 'string' ? text : await text()); if (audio && !disposed) play(audio); }
     catch { /* The chime already told them; the voice service records why. */ }
     synthesizing = false;
     if (nextSpeech) { const next = nextSpeech; nextSpeech = null; void say(next); }
   }
-  function cue(sound: PetCue['sound'] | undefined, speech?: string): void {
+  function cue(sound: PetCue['sound'] | undefined, speech?: string | (() => Promise<string>)): void {
     const now = Date.now();
     if (sound && settings.petSound && now - lastCue >= 800 && readySprite && !window.isDestroyed()) { lastCue = now; window.webContents.send('rcDesktop:pet:cue', { sound }); }
     if (speech && settings.petVoice && now - lastSpeech >= 2500) { lastSpeech = now; void say(speech); }
@@ -122,7 +130,10 @@ export function createPetController(deps: PetControllerDeps): PetController {
     const layout = petLayout(position, display().workArea, PET_HEIGHT[settings.petSize], { dockAmount });
     const effectiveTargets = [...new Map([...items, ...targets.values(), ...recent.map(item => ({ ...item, workspaceId: '', state: 'idle' as const, since: new Date(0).toISOString(), unread: false }))].map(item => [item.key, item])).values()];
     const sleeping = pack?.manifest.remoteCodex?.sleeping;
-    const shared = { appearance, accountId, items, recent, targets: effectiveTargets, mood: moods.value(items, now, snoozed), bubble,
+    const shared = { appearance, accountId, items, recent, targets: effectiveTargets, mood: moods.value(items, now, snoozed), moodEpoch, pinned: controlsPinned && !panel && !menu,
+      clips: pack?.manifest.remoteCodex?.clips && pack.manifest.remoteCodex.clipFormat ? { format: pack.manifest.remoteCodex.clipFormat, states: pack.manifest.remoteCodex.clips } : null,
+      // Timing stays here: while the pointer holds a bubble, its restart must not reach the renderer as a change.
+      bubble: bubble && { ...bubble, createdAt: 0, shownAt: null },
       settings: { petSize: settings.petSize, petMini: settings.petMini, petSound: settings.petSound, petVoice: settings.petVoice, petId: settings.petId },
       imageUrl: pack ? `data:image/${pack.manifest.spritesheetPath.endsWith('png') ? 'png' : 'webp'};base64,${pack.image.toString('base64')}` : '',
       ...(pack?.sleepingImage && sleeping ? { sleeping: { imageUrl: `data:image/${sleeping.path.endsWith('png') ? 'png' : 'webp'};base64,${pack.sleepingImage.toString('base64')}`, frames: sleeping.frames, durationsMs: sleeping.durationsMs } } : {}),
@@ -143,7 +154,7 @@ export function createPetController(deps: PetControllerDeps): PetController {
     const opacity = mode === 'controls' && !controlsShown && !settings.petMini ? Math.max(0, 1 - (now - awaySince) / 220) : 1;
     if (opacity !== lastOpacity && process.platform !== 'linux') { lastOpacity = opacity; glass.setOpacity(opacity); }
     if (show && !glass.isVisible()) { placeGlass(); glass.showInactive(); }
-    if (!show && glass.isVisible()) glass.hide();
+    if (!show && glass.isVisible()) { glass.hide(); glassSide = null; }
     glass.setFocusable(panel || menu || detailOpen);
   }
   async function refreshPacks(): Promise<void> {
@@ -189,8 +200,8 @@ export function createPetController(deps: PetControllerDeps): PetController {
       case 'dismiss': for (const event of [...(bubbles.current?.events ?? [])]) deps.hub.acknowledge(event.alertId, 'pet'); break;
       case 'toggleTray': case 'toggleChat': if (panel) closeSurface(); else openSurface('panel'); break;
       case 'click':
-        moods.react('jumping', Date.now(), ANIMATIONS.jumping.durations.reduce((a, b) => a + b, 0) * (pack?.manifest.remoteCodex?.frameScale ?? 1)); cue('click');
-        // A click reveals the control capsule; the panel opens from there.
+        moods.react('poked', Date.now(), reactionMs('poked')); moodEpoch++; cue('click');
+        // A click reveals what is running, above the control capsule; the panel opens from there.
         if (panel || menu) closeSurface(); else { controlsPinned = !controlsPinned; glassDismissed = false; peek = true; }
         break;
       case 'menu': if (action.value) openSurface('menu'); else closeSurface(); break;
@@ -208,7 +219,13 @@ export function createPetController(deps: PetControllerDeps): PetController {
       case 'setPack': if (packs.some(candidate => candidate.manifest.id === action.id)) deps.settings.set({ petId: action.id }); break;
       case 'reducedMotion': break; // Renderer owns CSS motion and frame stepping.
       case 'surfaceMeasure':
-        if (Number.isFinite(action.width) && Number.isFinite(action.height) && action.width >= 100 && action.width <= 320 && action.height >= 32 && action.height <= 900) { glassSize = { width: Math.ceil(action.width), height: Math.ceil(action.height) }; placeGlass(); } break;
+        if (Number.isFinite(action.width) && Number.isFinite(action.height) && action.width >= 100 && action.width <= 320 && action.height >= 32 && action.height <= 900) {
+          glassSize = { width: Math.ceil(action.width), height: Math.ceil(action.height) };
+          // New content picks a side for its own size; the same content growing on hover keeps it.
+          const content = `${mode}:${controlsPinned}`;
+          if (content !== glassContent) { glassContent = content; glassSide = null; }
+          placeGlass();
+        } break;
       case 'importFolder': case 'importZip': {
         const choice = await dialog.showOpenDialog({ title: t('导入 Codex 宠物包', {}, uiLocale), buttonLabel: t('打开', {}, uiLocale), properties: [action.type === 'importFolder' ? 'openDirectory' : 'openFile'], ...(action.type === 'importZip' ? { filters: [{ name: t('Codex 宠物包', {}, uiLocale), extensions: ['zip'] }] } : {}) });
         if (!choice.canceled && choice.filePaths[0]) {
@@ -242,6 +259,7 @@ export function createPetController(deps: PetControllerDeps): PetController {
   };
   const onHitTest = (event: Electron.IpcMainEvent, hit: unknown): void => { if (trusted(event) === window && typeof hit === 'boolean') window.setIgnoreMouseEvents(!hit, { forward: true }); };
   ipcMain.on('rcDesktop:pet:ready', onReady); ipcMain.on('rcDesktop:pet:hitTest', onHitTest);
+  ipcMain.handle('rcDesktop:pet:clip', async (event, path: unknown) => trusted(event) === window && pack && typeof path === 'string' ? readClip(pack, path) : null);
   ipcMain.handle('rcDesktop:pet:action', (event, value: unknown) => trusted(event) ? action(value) : { ok: false, error: t('不受信任的桌宠页面', {}, uiLocale) });
   const unsubscribes = [deps.onAppearance(next => { appearance = next; if (next.locale) uiLocale = resolveLocale(next.locale); setLocale(uiLocale); emit(); }), deps.hub.onSnapshot(snapshot => {
     if (accountId !== snapshot.accountId) { bubbles.clear(); targets.clear(); completedConversations.clear(); moods.reset(Date.now()); targetKey = null; panel = false; menu = false; }
@@ -263,11 +281,14 @@ export function createPetController(deps: PetControllerDeps): PetController {
     }
     if (delivered) {
       const title = conversationTitle(event.item);
+      // The summary runs only when its turn comes up to be read, so a burst costs one model call.
+      const line = (fallback: string) => async (): Promise<string> => (await deps.summarize(event)) ?? fallback;
       if (event.type === 'needsInput') cue('needsInput', t('{title} 需要你处理', { title }, uiLocale));
-      else if (event.type === 'completed') cue('completed', t('{title} 完成了', { title }, uiLocale));
-      else if (event.type === 'failed') cue('failed', t('{title} 失败了', { title }, uiLocale));
+      else if (event.type === 'completed') cue('completed', line(t('{title} 完成了', { title }, uiLocale)));
+      else if (event.type === 'failed') cue('failed', line(t('{title} 失败了', { title }, uiLocale)));
     }
-    moods.onEvent(event.type, now, delivered, reaction, ANIMATIONS[reaction].durations.reduce((a, b) => a + b, 0) * (pack?.manifest.remoteCodex?.frameScale ?? 1));
+    moods.onEvent(event.type, now, delivered, reaction, reactionMs(event.type === 'failed' ? 'failed' : reaction));
+    if (delivered && ['completed', 'failed'].includes(event.type)) moodEpoch++;
     if (delivered && bubbles.push(event, now)) {
       targetKey = event.item.key; targets.set(event.item.key, event.item); while (targets.size > 20) targets.delete(targets.keys().next().value!);
       alertPeekUntil = now + BUBBLE_MS; glassDismissed = false;
@@ -312,7 +333,7 @@ export function createPetController(deps: PetControllerDeps): PetController {
       if (disposed) return; disposed = true; clearInterval(timer); clearTimeout(blurTimer); savePosition();
       for (const unsubscribe of unsubscribes) unsubscribe();
       screen.removeListener('display-removed', displayChanged); screen.removeListener('display-metrics-changed', displayChanged);
-      ipcMain.removeListener('rcDesktop:pet:ready', onReady); ipcMain.removeListener('rcDesktop:pet:hitTest', onHitTest); ipcMain.removeHandler('rcDesktop:pet:action'); glass.destroy(); window.destroy();
+      ipcMain.removeListener('rcDesktop:pet:ready', onReady); ipcMain.removeListener('rcDesktop:pet:hitTest', onHitTest); ipcMain.removeHandler('rcDesktop:pet:action'); ipcMain.removeHandler('rcDesktop:pet:clip'); glass.destroy(); window.destroy();
     },
   };
 }

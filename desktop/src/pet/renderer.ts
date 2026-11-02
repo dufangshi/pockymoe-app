@@ -12,6 +12,7 @@ import { showError } from '../local/errorMark';
 import { commandErrorMessage } from './errors';
 import { scrollGeometry } from './scroll';
 import { playSound, playSpeech } from './sounds';
+import type { PetClip } from './packs';
 import type { ActivityItem, HostCommandResult } from '../shared/contract';
 import type { PetAction, PetBridge, PetViewState } from './bridge';
 const bridge = (window as unknown as { rcDesktop: { pet: PetBridge } }).rcDesktop.pet;
@@ -28,6 +29,7 @@ let scrollDrag: { id: number; grab: number } | null = null;
 let animationState: SpriteState = 'idle', animationStart = performance.now(), frame = 0;
 let spriteImage: HTMLImageElement | null = null, alpha: Uint8ClampedArray | null = null, lastImage = '', hit = false;
 let lastPointer: { clientX: number; clientY: number } | null = null;
+let lastEpoch = 0;
 const canvas = document.createElement('canvas'), context = canvas.getContext('2d', { willReadFrequently: true })!;
 const paths: Record<string, string> = {
   robot: '<rect x="3" y="4" width="10" height="9" rx="2"/><path d="M8 2v2M1 7v3M15 7v3M6 10h4"/><circle cx="6" cy="7.5" r=".6"/><circle cx="10" cy="7.5" r=".6"/>', chevron: '<path d="m6 4 4 4-4 4"/>',
@@ -70,6 +72,12 @@ function taskRow(group: PetConversation, duplicateTitle = false): string {
   const toggle = group.requests.length > 1 ? button('toggleRequests', t(expanded ? '收起「{title}」的线程' : '展开「{title}」的线程', { title: group.title }), icon('chevron'), `class="request-toggle ${expanded ? 'expanded' : ''}" aria-expanded="${expanded}"`) : '';
   return `<article class="conversation-row ${waiting ? 'waiting' : ''}" data-conversation-key="${escape(group.key)}"><div class="task-row ${active && !selectedRequest ? 'selected' : ''} ${item.state === 'idle' ? 'recent' : ''}" data-key="${escape(group.key)}" role="option" aria-selected="${active && !selectedRequest}" tabindex="0" title="${escape(`${group.title} · ${petMetadata(group.root)}`)}"><div class="row-main">${toggle}${status(item)}<span class="row-title">${escape(group.title)}</span><span class="row-meta">${item.state === 'running' && !duplicateTitle ? `<span data-since="${escape(item.since)}">${elapsed(Date.now() - Date.parse(item.since))}</span>` : escape(item.deviceName)}</span><span class="row-actions">${button('open', t('打开'), icon('open'))}${button('revealInMap', t('在地图中显示'), icon('map'))}</span>${robotBadge(group)}${primary && !expanded && primary.request?.kind === 'approval' ? `<span data-key="${escape(primary.key)}">${decisions(primary, 'row')}${errorSlot(`row:${primary.key}`)}</span>` : errorSlot(`row:${group.key}`)}</div></div>${expanded ? `<div class="request-lines">${group.requests.map(request => requestLine(request, group, true)).join('')}</div>` : primary ? requestLine(primary, group, false, group.requests.length > 1 ? button('toggleRequests', `${t('活动面板')} (${group.requests.length})`, `+${group.requests.length - 1}`, 'class="request-more"') : '') : ''}</article>`;
 }
+/** Everything running on the account, one row per conversation. */
+function runningList(): string {
+  const groups = petConversations((state?.items ?? []).filter(item => item.state === 'running'), state?.items ?? []);
+  const rows = groups.length ? groups.map(group => `<div data-key="${escape(group.root.key)}"><button type="button" class="running-row" data-action="open" title="${escape(`${group.title} · ${petMetadata(group.root)}`)}" aria-label="${escape(group.title)}">${status(group.statusItem)}<span class="running-title">${escape(group.title)}</span><span class="running-device">${escape(group.root.deviceName)}</span></button></div>`).join('') : `<div class="empty">${icon('check')}${escape(t('没有运行中的线程'))}</div>`;
+  return `<section class="running-list" aria-label="${escape(t('运行中的线程'))}"><div class="scroll-frame" data-scroll-area><div class="task-list scroll-content" id="pet-running-list">${rows}</div><div class="scroll-track" role="scrollbar" aria-label="${escape(t('滚动活动任务'))}" aria-controls="pet-running-list" aria-orientation="vertical" aria-valuemin="0" tabindex="0" hidden><div class="scroll-thumb"></div></div></div></section>`;
+}
 function renderGlass(): void {
   if (!state || state.surface !== 'glass') return;
   const input = document.querySelector<HTMLInputElement>('#reply-input'), focused = document.activeElement === input;
@@ -79,8 +87,8 @@ function renderGlass(): void {
   const selectedGroup = rows.find(group => group.key === selected);
   if (selectedRequest && !selectedGroup?.requests.some(item => item.key === selectedRequest)) selectedRequest = null;
   const target = selectedGroup ? conversationReplyTarget(selectedGroup, selectedRequest) : undefined;
-  root.className = `glass mode-${state.mode}`;
-  let content = controls();
+  root.className = `glass mode-${state.mode}${state.mode === 'controls' && state.pinned ? ' has-running' : ''}`;
+  let content = state.mode === 'controls' && state.pinned ? runningList() + controls() : controls();
   if (state.mode === 'panel') content = `<section class="panel" aria-label="${escape(t('活动面板'))}"><header class="panel-header"><span aria-hidden="true">${icon('tasks')}</span>${button('close', t('关闭任务'), icon('close'))}</header><div class="scroll-frame" data-scroll-area><div class="task-list scroll-content" role="listbox" aria-label="${escape(t('活动任务'))}" id="pet-task-list">${rows.length ? rows.map(group => taskRow(group, rows.some(other => other.key !== group.key && other.title === group.title))).join('') : `<div class="empty">${icon('check')}${escape(t('一切就绪'))}</div>`}</div><div class="scroll-track" role="scrollbar" aria-label="${escape(t('滚动活动任务'))}" aria-controls="pet-task-list" aria-orientation="vertical" aria-valuemin="0" tabindex="0" hidden><div class="scroll-thumb"></div></div></div><form id="chat-form" class="chat" data-key="${escape(target?.key ?? '')}"><input id="reply-input" aria-label="${escape(t('发送回复'))}" placeholder="${escape(target ? t('回复 {title}…', { title: title(target) }) : t('一切就绪'))}" value="${escape(draft)}" maxlength="16000" autocomplete="off" ${!target || sendState === 'sending' ? 'disabled' : ''}>${errorSlot(`chat:${target?.key}`)}${button('send', sendState === 'sent' ? t('已发送') : sendState === 'sending' ? t('正在发送…') : t('发送回复'), sendState === 'sent' ? icon('check') : icon('send'), `class="send ${sendState === 'sending' ? 'sending' : ''}" ${!target || !draft.trim() || sendState === 'sending' ? 'disabled' : ''}`)}</form><span class="live-announcement" role="status">${sendState === 'error' ? escape(t('未发送')) : sendState === 'sent' ? escape(t('已发送')) : ''}</span></section>`;
   if (state.mode === 'menu') content = `<section class="more" role="menu" aria-label="${escape(t('宠物偏好'))}">${button('mini', t('Mini 模式'), `${escape(t('Mini 模式'))}${state.settings.petMini ? icon('check') : ''}`, 'role="menuitemcheckbox" aria-checked="'+state.settings.petMini+'"')}<div class="menu-sizes" role="group" aria-label="${escape(t('宠物大小'))}">${(['S', 'M', 'L'] as const).map(size => button(`size-${size}`, size, size, `role="menuitemradio" aria-checked="${state!.settings.petSize === size}"`)).join('')}</div>${button('edgeHide', t('贴边自动隐藏'), `<span class="menu-copy">${escape(t('贴边自动隐藏'))}</span>` + (state.edgeHide ? icon('check') : ''), `role="menuitemcheckbox" aria-checked="${state.edgeHide}"`)}${button('sound', t('提示音'), `<span class="menu-copy">${escape(t('提示音'))}</span>` + (state.settings.petSound ? icon('check') : ''), `role="menuitemcheckbox" aria-checked="${state.settings.petSound}"`)}${button('voice', t('语音播报'), `<span class="menu-copy">${escape(t('语音播报'))}</span>` + (state.settings.petVoice ? icon('check') : ''), `role="menuitemcheckbox" aria-checked="${state.settings.petVoice}"`)}<hr>${button('preferences', t('偏好设置…'), escape(t('偏好设置…')), 'role="menuitem"')}${button('hide', t('隐藏桌宠'), escape(t('隐藏桌宠')), 'role="menuitem"')}</section>`;
   const bubble = state.bubble;
@@ -147,7 +155,7 @@ root.addEventListener('submit', event => {
 });
 function renderSprite(): void {
   if (!state) return;
-  if (!root.querySelector('#character')) root.innerHTML = `<div id="character" role="button" tabindex="0"><div id="sprite-old"></div><div id="sprite"></div><svg class="sleep-motes" viewBox="0 0 36 48" aria-hidden="true"><path d="M7 34h6l-6 6h6"/><path d="M17 24h7l-7 7h7"/><path d="M23 13h5l-5 5h5"/></svg></div>`;
+  if (!root.querySelector('#character')) root.innerHTML = `<div id="character" role="button" tabindex="0"><div id="sprite-old"></div><div id="sprite"></div><canvas id="clip"></canvas><svg class="sleep-motes" viewBox="0 0 36 48" aria-hidden="true"><path d="M7 34h6l-6 6h6"/><path d="M17 24h7l-7 7h7"/><path d="M23 13h5l-5 5h5"/></svg></div>`;
   const character = root.querySelector<HTMLElement>('#character')!;
   character.setAttribute('aria-label', t('桌宠，点击查看任务，拖动以移动'));
   character.style.width = `${state.pet.width}px`; character.style.height = `${state.pet.height}px`;
@@ -155,10 +163,11 @@ function renderSprite(): void {
   character.style.transform = `translate(${state.pet.x}px,${state.pet.y}px) rotate(${tilt}deg)`;
   character.hidden = state.settings.petMini; character.classList.toggle('sleeping', state.mood === 'sleeping');
   root.dataset.mood = state.mood; root.dataset.edge = state.edge ?? ''; root.dataset.dockAmount = String(state.dockAmount);
-  if (animationState !== state.mood) {
+  if (animationState !== state.mood || lastEpoch !== state.moodEpoch) {
+    lastEpoch = state.moodEpoch;
     const old = root.querySelector<HTMLElement>('#sprite-old')!, sprite = root.querySelector<HTMLElement>('#sprite')!;
     old.style.cssText = sprite.style.cssText; old.style.opacity = '1'; sprite.style.opacity = motion.matches ? '1' : '0';
-    animationState = state.mood; animationStart = performance.now(); frame = 0; paintSprite();
+    animationState = state.mood; animationStart = performance.now(); frame = 0; paintSprite(); playClips();
     requestAnimationFrame(() => { old.style.opacity = '0'; sprite.style.opacity = '1'; });
   }
   const image = state.mood === 'sleeping' && state.sleeping ? state.sleeping.imageUrl : state.imageUrl;
@@ -169,6 +178,56 @@ function renderSprite(): void {
   }
   paintSprite();
 }
+// A pack's clips replace the atlas for the states they cover; any other state, or a clip that
+// fails to decode, draws from the atlas. Sheets are decoded when needed and few are kept.
+const CLIP_CACHE = 6, ONE_SHOT = ['failed', 'waving', 'jumping', 'poked'];
+const clipCache = new Map<string, Promise<ImageBitmap | null>>(), clipCursor = new Map<string, number>();
+let clipPlayer: { clip: PetClip; bitmap: ImageBitmap; start: number; drawn: number } | null = null, clipToken = 0, clipPack = '';
+function loadClip(path: string): Promise<ImageBitmap | null> {
+  let loading = clipCache.get(path);
+  if (!loading) {
+    loading = bridge.clip(path).then(bytes => bytes ? createImageBitmap(new Blob([bytes as BlobPart], { type: 'image/webp' })) : null).catch(() => null);
+    clipCache.set(path, loading);
+    if (clipCache.size > CLIP_CACHE) { const [oldest, entry] = clipCache.entries().next().value!; clipCache.delete(oldest); void entry.then(bitmap => { if (clipPlayer?.bitmap !== bitmap) bitmap?.close(); }); }
+  }
+  return loading;
+}
+function playClips(): void {
+  const list = state?.clips?.states[animationState], token = ++clipToken;
+  if (!list?.length) { clipPlayer = null; root.querySelector('#character')?.classList.remove('clips'); return; }
+  const index = motion.matches ? 0 : clipCursor.get(animationState) ?? 0, clip = list[index % list.length]!;
+  clipCursor.set(animationState, index + 1);
+  // Keep showing the current frame until the next clip is ready, so nothing ever blanks.
+  void loadClip(clip.path).then(bitmap => {
+    if (token !== clipToken) return;
+    if (!bitmap) { clipPlayer = null; root.querySelector('#character')?.classList.remove('clips'); paintSprite(); return; }
+    clipPlayer = { clip, bitmap, start: performance.now(), drawn: -1 };
+    root.querySelector('#character')?.classList.add('clips');
+    const next = list[(index + 1) % list.length]!; if (next !== clip) void loadClip(next.path);
+  });
+}
+let clipContext: CanvasRenderingContext2D | null = null;
+function drawClip(index: number): void {
+  const element = root.querySelector<HTMLCanvasElement>('#clip'), format = state?.clips?.format;
+  if (!element || !format || !clipPlayer || !state) return;
+  const scale = window.devicePixelRatio || 1, width = Math.round(state.pet.width * scale), height = Math.round(state.pet.height * scale);
+  if (element.width !== width || element.height !== height) { element.width = width; element.height = height; clipContext = null; }
+  clipContext ??= element.getContext('2d', { willReadFrequently: true });
+  if (!clipContext) return;
+  clipContext.clearRect(0, 0, width, height); clipContext.imageSmoothingQuality = 'high';
+  clipContext.drawImage(clipPlayer.bitmap, (index % format.columns) * format.width, Math.floor(index / format.columns) * format.height, format.width, format.height, 0, 0, width, height);
+}
+function stepClip(now: number): void {
+  if (!clipPlayer || !state?.clips) return;
+  const format = state.clips.format, { clip } = clipPlayer;
+  let index = motion.matches ? 0 : Math.floor((now - clipPlayer.start) / 1000 * format.fps);
+  if (index >= clip.frames) {
+    index = clip.frames - 1;
+    // Clips start and end on the same pose, so the next one follows without a jump.
+    if (!ONE_SHOT.includes(animationState)) { const player = clipPlayer; clipPlayer = { ...player, start: Infinity, drawn: player.drawn }; playClips(); }
+  }
+  if (index !== clipPlayer.drawn && index >= 0) { clipPlayer.drawn = index; drawClip(index); updateHit(); }
+}
 function paintSprite(): void {
   const sprite = root.querySelector<HTMLElement>('#sprite'); if (!sprite || !state) return;
   const sleeping = animationState === 'sleeping' ? state.sleeping : undefined;
@@ -177,7 +236,7 @@ function paintSprite(): void {
   sprite.style.backgroundPosition = `${-frame * state.pet.width}px ${sleeping ? 0 : -ANIMATIONS[animationState].row * state.pet.height}px`;
 }
 function opaqueAt(point: { clientX: number; clientY: number }): boolean {
-  if (!state || !alpha || state.settings.petMini) return false;
+  if (!state || !(alpha || clipPlayer) || state.settings.petMini) return false;
   const character = root.querySelector<HTMLElement>('#character'); if (!character) return false;
   const centerX = state.pet.width / 2, centerY = state.pet.height / 2;
   const matrix = new DOMMatrix(getComputedStyle(character).transform).inverse();
@@ -185,6 +244,8 @@ function opaqueAt(point: { clientX: number; clientY: number }): boolean {
   const x = Math.floor((pointInBody.x + centerX) / state.pet.width * 192);
   const y = Math.floor((pointInBody.y + centerY) / state.pet.height * 208);
   if (x < 0 || x >= 192 || y < 0 || y >= 208) return false;
+  if (clipPlayer && clipContext) { const element = clipContext.canvas; return clipContext.getImageData(Math.floor(x / 192 * element.width), Math.floor(y / 208 * element.height), 1, 1).data[3]! > 24; }
+  if (!alpha) return false;
   const row = animationState === 'sleeping' && state.sleeping ? 0 : ANIMATIONS[animationState].row;
   return alpha[((row * 208 + y) * (spriteImage?.width ?? 1536) + frame * 192 + x) * 4 + 3] > 24;
 }
@@ -241,18 +302,23 @@ bridge.onState(next => {
   state = next; setLocale(next.locale); applyAppearance(next.appearance); document.title = `Pockymoe · ${t('桌宠')}`; root.setAttribute('aria-label', document.title);
   const accent = next.appearance.accent; canvas.width = 1; canvas.height = 1; context.clearRect(0, 0, 1, 1); context.fillStyle = accent; context.fillRect(0, 0, 1, 1); const [r, g, b] = context.getImageData(0, 0, 1, 1).data; document.documentElement.style.setProperty('--accent-fg', accentForeground(r, g, b));
   document.body.dataset.surface = next.surface; root.dataset.visible = String(next.near || next.settings.petMini || next.mode !== 'controls');
-  if (next.surface === 'sprite') { renderSprite(); updateHit(); return; }
+  if (next.surface === 'sprite') {
+    // Another pack's sheets share nothing with this one's.
+    if (next.packName !== clipPack) { clipPack = next.packName; for (const entry of clipCache.values()) void entry.then(bitmap => bitmap?.close()); clipCache.clear(); clipCursor.clear(); clipPlayer = null; clipToken++; lastEpoch = -1; }
+    renderSprite(); updateHit(); return;
+  }
   if (old?.detailOpen && !next.detailOpen) root.querySelector<HTMLButtonElement>('.error-mark[aria-expanded="true"]')?.click();
   if (changedMode && next.mode === 'panel') { selected = next.targetKey; selectedRequest = null; collapsedRequests.clear(); }
-  const contentKey = JSON.stringify([next.accountId, next.items, next.recent, next.mode, next.mode === 'bubble' && next.near, next.bubble, next.settings, next.locale, next.appearance, next.edgeHide]);
+  const contentKey = JSON.stringify([next.accountId, next.items, next.recent, next.mode, next.pinned, next.mode === 'bubble' && next.near, next.bubble, next.settings, next.locale, next.appearance, next.edgeHide]);
   if (signature !== contentKey) { signature = contentKey; renderGlass(); }
   if (changedMode && next.mode === 'menu') root.querySelector<HTMLElement>('[role^="menuitem"]')?.focus();
 });
 function animate(now: number): void {
-  if (state?.surface === 'sprite') {
+  if (state?.surface === 'sprite') stepClip(now);
+  if (state?.surface === 'sprite' && !clipPlayer) {
     const elapsedMs = now - animationStart, idleTime = elapsedMs % 46000;
     const cycle = animationState === 'idle' ? idleTime >= 31000 ? idleTime - 31000 : idleTime >= 14000 ? idleTime - 14000 : idleTime : elapsedMs;
-    let next = frameAt(animationState, animationState === 'idle' && cycle > 1100 * state.frameScale ? 0 : cycle, motion.matches, state.frameScale, ['failed', 'waving', 'jumping'].includes(animationState));
+    let next = frameAt(animationState, animationState === 'idle' && cycle > 1100 * state.frameScale ? 0 : cycle, motion.matches, state.frameScale, ONE_SHOT.includes(animationState));
     if (animationState === 'sleeping' && state.sleeping && !motion.matches) { const durations = state.sleeping.durationsMs; let remaining = elapsedMs / state.frameScale % durations.reduce((a, b) => a + b, 0); next = 0; while (remaining >= durations[next] && next < durations.length - 1) { remaining -= durations[next]; next++; } }
     if (frame !== next) { frame = next; paintSprite(); updateHit(); }
   }

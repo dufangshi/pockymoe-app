@@ -160,8 +160,9 @@ def main():
         'failed': [R(slump), R(slump, sy=0.994), R(slump, sy=0.988), R(slump, sy=0.984),
                    R(slump, sy=0.984), R(slump, sy=0.988), R(slump, sy=0.994), R(slump)],
         'waiting': [R(hope), R(hope, dy=-1), R(hope, dy=-2), R(hope, dy=-2), R(hope, dy=-1), R(hope)],
-        'running': [R(type2, glow=0.02), R(type2, glow=0.05, dy=-0.5), R(type2, glow=0.08, dy=-1),
-                    R(type2, glow=0.1, dy=-1), R(type2, glow=0.07, dy=-0.5), R(type2, glow=0.04)],
+        # Both typing poses are nearly the same drawing, so this reads as work and not as flashing.
+        'running': [R(type2, glow=0.02), R(type2, glow=0.05, dy=-1), R(type1, glow=0.08, dy=-2),
+                    R(type1, glow=0.1, dy=-1), R(type2, glow=0.07, dy=-1), R(type1, glow=0.04)],
         'review': [R(mag2), R(mag2, rot=0.6), R(mag2, rot=1.2), R(mag2, rot=1.2), R(mag2, rot=0.6), R(mag2)],
     }
     rows['running-left'] = [R(p, dy=dy, mirror=True) for p, dy in

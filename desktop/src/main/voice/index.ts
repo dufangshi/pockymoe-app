@@ -1,14 +1,19 @@
 import { app, net, safeStorage, utilityProcess, type UtilityProcess } from 'electron';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import type { DesktopSettings, SettingsStoreLike } from '../../shared/contract';
-import { t } from '../../shared/i18n';
-import { REMOTE_DEFAULTS, speechText, type RemoteProvider, type RemoteVoice, type VoiceOption, type VoiceStatus } from '../../shared/voice';
+import type { ActivityEvent, DesktopSettings, HostCommand, HostCommandResult, SettingsStoreLike } from '../../shared/contract';
+import { getLocale, t } from '../../shared/i18n';
+import { REMOTE_DEFAULTS, speechText, type RemoteProvider, type RemoteVoice, type SummaryConnection, type SummaryStatus, type VoiceOption, type VoiceStatus } from '../../shared/voice';
 import { VoiceKeys } from './keys';
 import { LocalModel, MODEL } from './model';
 import { listVoices, speechRequest, synthesizeRemote, VoiceError, voiceEndpoint } from './remote';
+import { chatEndpoint, chatSummarizer, cleanSummary, concreteLanguage, summaryPrompt, type Summarizer, type TurnContext } from './summary';
 
 const IDLE_UNLOAD_MS = 5 * 60_000, SYNTH_TIMEOUT_MS = 120_000;
+const COMPLETE_TIMEOUT_MS = 45_000;
+/** The page reaches the account's devices; none of this may open or raise a window. */
+type PageCommand = Extract<HostCommand, { type: 'turnText' | 'listConnections' | 'completeWithConnection' }>;
+export type PageQuery = (command: PageCommand extends infer C ? C extends { id: string } ? Omit<C, 'id'> : never : never, timeoutMs?: number) => Promise<HostCommandResult>;
 const fetcher = (url: string, init: RequestInit): Promise<Response> => net.fetch(url, init as never);
 /** The addon ships per platform; where none exists (or it fails to load) remote services still work. */
 function addonAvailable(): boolean {
@@ -20,7 +25,7 @@ function message(error: unknown): string {
   const known: Record<string, string> = {
     invalidUrl: t('服务地址无效'), missingUrl: t('请先填写服务地址'), missingVoice: t('请先选择音色'), invalidExtra: t('额外参数必须是 JSON 对象'),
     insecureKey: t('公网地址要用 HTTPS 才能发送 API Key'), timeout: t('语音服务超时'), unreachable: t('无法连接语音服务'), notAudio: t('服务返回的不是音频'),
-    tooLarge: t('音频太大'), notVoices: t('服务没有提供音色列表，请手动填写'), keychainUnavailable: t('系统钥匙串不可用，无法保存 API Key'), modelAbsent: t('本地模型还没有下载'),
+    missingModel: t('请先填写模型'), notSummary: t('上游没有返回文字'), tooLarge: t('音频太大'), notVoices: t('服务没有提供音色列表，请手动填写'), keychainUnavailable: t('系统钥匙串不可用，无法保存 API Key'), modelAbsent: t('本地模型还没有下载'),
   };
   return known[code] ?? (code || t('操作失败'));
 }
@@ -35,9 +40,12 @@ export class VoiceService {
   private lastError: string | null = null;
   private supported = addonAvailable();
   private listeners = new Set<() => void>();
-  constructor(dataDir: string, private settings: SettingsStoreLike, private ready: () => void) {
+  private summaryKeys: VoiceKeys;
+  private summaryState: SummaryStatus = { connections: [], keySet: false, lastError: null, sample: null };
+  constructor(dataDir: string, private settings: SettingsStoreLike, private ready: () => void, private query: PageQuery) {
     let wasReady = false;
     this.keys = new VoiceKeys(join(dataDir, 'voice-keys.json'), safeStorage);
+    this.summaryKeys = new VoiceKeys(join(dataDir, 'summary-keys.json'), safeStorage);
     this.model = new LocalModel(join(dataDir, 'voice'), fetcher, () => {
       const nowReady = this.model.state === 'ready';
       if (nowReady && !wasReady && settings.get().petVoice && settings.get().petVoiceProvider === 'local') this.ready();
@@ -68,6 +76,69 @@ export class VoiceService {
   status(): VoiceStatus {
     const settings = this.settings.get(), origin = this.origin(settings);
     return { model: { state: this.supported ? this.model.state : 'unsupported', progress: this.model.progress, error: this.model.error }, keySet: !!origin && this.keys.has(origin), voices: this.voices, lastError: this.lastError };
+  }
+  summaryStatus(): SummaryStatus {
+    const origin = this.summaryOrigin();
+    return { ...this.summaryState, keySet: !!origin && this.summaryKeys.has(origin) };
+  }
+  private summaryOrigin(): string | null {
+    try { const root = chatEndpoint(this.settings.get().petSummaryCustom.url); return root ? new URL(root).origin : null; } catch { return null; }
+  }
+  setSummaryKey(key: string | null): void {
+    const origin = this.summaryOrigin();
+    if (!origin) throw new Error(message(new VoiceError('missingUrl')));
+    try { if (key?.trim()) this.summaryKeys.set(origin, key.trim()); else this.summaryKeys.clear(origin); } catch (error) { throw new Error(message(error)); }
+    this.changed();
+  }
+  async refreshConnections(): Promise<void> {
+    const result = await this.query({ type: 'listConnections' });
+    if (result.ok && Array.isArray(result.data)) this.summaryState = { ...this.summaryState, connections: result.data as SummaryConnection[] };
+    this.changed();
+  }
+  private summarizer(): Summarizer {
+    const settings = this.settings.get(), connection = settings.petSummaryConnection;
+    if (connection) return {
+      complete: async prompt => {
+        const result = await this.query({ type: 'completeWithConnection', deviceId: connection.deviceId, connectionId: connection.id, model: connection.model, system: prompt.system, user: prompt.user }, COMPLETE_TIMEOUT_MS);
+        const text = (result.data as { text?: unknown } | undefined)?.text;
+        if (!result.ok || typeof text !== 'string') throw new Error(result.error || t('上游没有返回文字'));
+        return text;
+      },
+    };
+    const origin = this.summaryOrigin();
+    return chatSummarizer(fetcher, settings.petSummaryCustom, origin ? this.summaryKeys.get(origin) : null);
+  }
+  private async complete(turn: TurnContext): Promise<string> {
+    const language = concreteLanguage(this.settings.get().petSummaryLanguage, getLocale());
+    const line = cleanSummary(await this.summarizer().complete(summaryPrompt(turn, language)));
+    if (!line) throw new VoiceError('notSummary');
+    return line;
+  }
+  private setSummaryState(patch: Partial<SummaryStatus>): void { this.summaryState = { ...this.summaryState, ...patch }; this.changed(); }
+  /** Null means saying the turn finished, whatever went wrong; the reason shows in Preferences. */
+  async summarize(event: ActivityEvent): Promise<string | null> {
+    if (!this.settings.get().petVoiceSummary || !['completed', 'failed'].includes(event.type)) return null;
+    try {
+      const { item } = event;
+      const result = await this.query({ type: 'turnText', deviceId: item.deviceId, threadId: item.threadId, turnId: item.turnId ?? null });
+      const text = result.ok ? result.data as { request?: unknown; answer?: unknown } : {};
+      const answer = typeof text.answer === 'string' && text.answer.trim() ? text.answer : item.resultSummary ?? '';
+      if (!answer.trim()) return null;
+      const line = await this.complete({ title: item.rootThreadTitle ?? item.title, request: typeof text.request === 'string' ? text.request : '', answer, failed: event.type === 'failed' });
+      if (this.summaryState.lastError) this.setSummaryState({ lastError: null });
+      return line;
+    } catch (error) { this.setSummaryState({ lastError: message(error) }); return null; }
+  }
+  /** Runs a fixed turn through the configured upstream, so the setting can be checked before relying on it. */
+  async testSummary(): Promise<string> {
+    const zh = getLocale().toLowerCase().startsWith('zh');
+    try {
+      const line = await this.complete(zh
+        ? { title: '修复登录白屏', failed: false, request: '登录后页面白屏，帮我查一下并修好。', answer: '原因是登录回调里读取了尚未加载的用户信息，导致渲染报错。我在 src/auth/callback.ts 里加了加载判断，并补了两个回归测试，全部通过。白屏已修复。这次没有改接口，部署前端即可生效。' }
+        : { title: 'Fix blank page after sign-in', failed: false, request: 'The page is blank after signing in. Please find out why and fix it.', answer: 'The sign-in callback read user data before it had loaded, which crashed rendering. I added a loading check in src/auth/callback.ts and two regression tests, which pass. The blank page is fixed. No API changed, so deploying the frontend is enough.' });
+      this.setSummaryState({ sample: line, lastError: null });
+      return line;
+    } catch (error) { const reason = message(error); this.setSummaryState({ sample: null, lastError: reason }); throw new Error(reason); }
   }
   setKey(key: string | null): void {
     const origin = this.origin(this.settings.get());
@@ -133,6 +204,11 @@ export class VoiceService {
       this.pending.clear();
     });
     return worker;
+  }
+  /** One click on a new computer: fetch the model, use it, and turn voice on. */
+  install(): void {
+    this.settings.set({ petVoiceProvider: 'local', petVoice: true });
+    void this.model.download();
   }
   stopWorker(): void { this.stop(); }
   private stop(): void { clearTimeout(this.idle); this.worker?.kill(); this.worker = null; }

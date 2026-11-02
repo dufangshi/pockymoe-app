@@ -10,7 +10,7 @@ export function clampRect(rect: Rect, area: Rect): Rect {
 }
 export function defaultPosition(display: PetDisplay, height: number): PetPosition {
   return { displayId: display.id, x: display.workArea.x + display.workArea.width - height - 32,
-    y: display.workArea.y + display.workArea.height - height - CONTROLS_CLEARANCE - 8, edge: null };
+    y: display.workArea.y + display.workArea.height - height - LIST_CLEARANCE, edge: null };
 }
 export function restorePosition(position: PetPosition | undefined, displays: PetDisplay[], primary: PetDisplay, height: number): PetPosition {
   const display = displays.find((candidate) => candidate.id === position?.displayId);
@@ -46,10 +46,16 @@ export function exposedRect(window: Rect, edge: DockEdge, visible = .25): Rect {
   if (edge === 'top') return { ...window, height };
   return { ...window, y: window.y + window.height - height, height };
 }
-/** Room kept under the pet so its controls fit there. */
-export const CONTROLS_CLEARANCE = 44;
+/** Room kept under the pet so a bubble with its controls fits there. */
+export const CONTROLS_CLEARANCE = 78;
+/** A new pet also starts with room for the list of running threads. */
+const LIST_CLEARANCE = 240;
 /** The glass child sits below the pet; only a surface with no room there goes above it. */
-export function surfaceLayout(sprite: Rect, area: Rect, width: number, height: number): Rect {
-  const below = sprite.y + sprite.height + 8, room = below + height <= area.y + area.height;
-  return clampRect({ x: Math.round(sprite.x + sprite.width / 2 - width / 2), y: Math.round(room ? below : sprite.y - height - 8), width, height }, area);
+export type SurfaceSide = 'below' | 'above';
+export function surfaceSide(sprite: Rect, area: Rect, height: number): SurfaceSide {
+  return sprite.y + sprite.height + 8 + height <= area.y + area.height ? 'below' : 'above';
+}
+/** Pass the side a visible surface already has: growing on hover must not flip it away from the pointer. */
+export function surfaceLayout(sprite: Rect, area: Rect, width: number, height: number, side = surfaceSide(sprite, area, height)): Rect {
+  return clampRect({ x: Math.round(sprite.x + sprite.width / 2 - width / 2), y: Math.round(side === 'below' ? sprite.y + sprite.height + 8 : sprite.y - height - 8), width, height }, area);
 }

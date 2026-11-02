@@ -159,7 +159,7 @@ async function init(): Promise<void> {
     const sectionChanged = next.preferencesRequestId !== state.preferencesRequestId;
     if (sectionChanged) section = next.preferencesSection;
     // Download progress updates its own text; a full render would close an open picker every percent.
-    const voiceShape = (value: LocalState) => ({ ...value.voice, model: { ...value.voice.model, progress: 0 } });
+    const voiceShape = (value: LocalState) => ({ ...value.voice, model: { ...value.voice.model, progress: 0 }, summary: value.summary });
     const changed = localeChanged || sectionChanged || JSON.stringify([state.settings, state.petPacks, state.petAvailable, voiceShape(state)]) !== JSON.stringify([next.settings, next.petPacks, next.petAvailable, voiceShape(next)]);
     state = next;
     if (view === 'preferences') updateVoiceProgress(root, next);

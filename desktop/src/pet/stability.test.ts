@@ -1,3 +1,4 @@
+import { moodFor } from './animation';
 import { describe, expect, it } from 'vitest';
 import type { ActivityItem, ActivitySnapshot } from '../shared/contract';
 import { StableMood, withoutResolvedRequest } from './stability';
@@ -55,5 +56,17 @@ describe('v3 stability under sparse multi-device history', () => {
       const policy = deliveryPolicy(event, { settings: { ...defaults, ...(reason === 'system' ? { alertMode: 'system' as const } : {}), snoozeUntil: reason === 'snoozed' ? new Date(10000).toISOString() : null }, focused: reason === 'focused', focusedThreadKey: reason === 'focused' ? event.item.key : null, petVisible: reason !== 'hidden', idleSeconds: 0, now: 2100 });
       mood.onEvent(type, 2100, policy.pet); expect(mood.value(waiting, 2101)).toBe('waiting');
     }
+  });
+});
+describe('working animation', () => {
+  const now = Date.parse('2026-11-01T12:00:00Z');
+  const at = (state: ActivityItem['state'], ageMs: number): ActivityItem => ({ ...item(state, state), since: new Date(now - ageMs).toISOString() });
+  it('shows work whenever something runs, unless a request just arrived', () => {
+    expect(moodFor([at('running', 1000)], { now })).toBe('running');
+    expect(moodFor([at('running', 1000), at('needsInput', 5000)], { now })).toBe('waiting');
+    expect(moodFor([at('running', 1000), at('needsInput', 120_000)], { now })).toBe('running');
+    expect(moodFor([at('needsInput', 120_000)], { now })).toBe('waiting');
+    expect(moodFor([], { now })).toBe('idle');
+    expect(moodFor([at('running', 1000)], { now, snoozed: true })).toBe('sleeping');
   });
 });

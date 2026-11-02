@@ -95,6 +95,7 @@ test('local model: offers the download with its size before anything is fetched'
   test.skip(!!realModel);
   const page = await preferences();
   await expect(page.locator('#voice-model-status')).toContainText('147 MB');
+  await expect(page.locator('#voice-install')).toBeVisible();
   await expect(page.locator('#voice-preview')).toBeDisabled();
   expect(existsSync(join(profile, 'voice'))).toBe(false);
   for (const [pack, effective] of [['classic', 'light'], ['classic', 'dark'], ['plum-pocket', 'light'], ['plum-pocket', 'dark'], ['terminal', 'light'], ['terminal', 'dark']] as const) {
@@ -118,7 +119,8 @@ test('local model: downloads, verifies and speaks from the real release', async 
   test.skip(!process.env.POCKYMOE_VOICE_DOWNLOAD, 'POCKYMOE_VOICE_DOWNLOAD is not set; this fetches 147 MB');
   test.setTimeout(600_000);
   const page = await preferences();
-  await page.locator('#voice-model[data-command="download"]').click();
+  await page.locator('#voice-install').click();
+  await expect(page.locator('#petVoice')).toBeChecked();
   await expect(page.locator('#voice-model-status')).toContainText('Ready', { timeout: 560_000 });
   expect(existsSync(join(profile, 'voice', `${MODEL.name}.tar.bz2.partial`))).toBe(false);
   await page.locator('#voice-preview').click();

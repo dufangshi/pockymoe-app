@@ -179,17 +179,22 @@ export class Windows {
     for (const send of pending || []) send();
   }
   /** Approving, replying or marking read works from the pet or a notification without raising the window. */
-  dispatch(input: CommandInput, focus = !['resolveRequest', 'reply', 'markRead'].includes(input.type)): Promise<HostCommandResult> {
+  dispatch(input: CommandInput, focus = !['resolveRequest', 'reply', 'markRead'].includes(input.type), timeoutMs = 15_000): Promise<HostCommandResult> {
     const w = focus ? this.focusMain() : this.main();
     const command = { ...input, id: randomUUID() } as HostCommand;
     return new Promise(resolve => {
       const id = w.webContents.id;
-      const timer = setTimeout(() => { this.waiters.delete(command.id); resolve({ ok: false, error: t('Pockymoe 页面未响应，请确认已登录并重试') }); }, 15_000);
+      const timer = setTimeout(() => { this.waiters.delete(command.id); resolve({ ok: false, error: t('Pockymoe 页面未响应，请确认已登录并重试') }); }, timeoutMs);
       this.waiters.set(command.id, { sender: id, resolve, timer });
       const send = (): void => { if (!w.isDestroyed() && this.waiters.has(command.id)) w.webContents.send(c.command, command); };
       if (this.ready.has(id)) send();
       else { const queue = this.pending.get(id) || []; queue.push(send); this.pending.set(id, queue.slice(-100)); }
     });
+  }
+  /** Asks the page for data. It never opens or raises a window: without a page there is simply no answer. */
+  query(input: CommandInput, timeoutMs = 15_000): Promise<HostCommandResult> {
+    if (![...this.relay].some(w => !w.isDestroyed())) return Promise.resolve({ ok: false, error: t('Pockymoe 页面未响应，请确认已登录并重试') });
+    return this.dispatch(input, false, timeoutMs);
   }
   commandResult(sender: number, id: unknown, result: unknown): void {
     if (typeof id !== 'string' || !result || typeof result !== 'object' || typeof (result as HostCommandResult).ok !== 'boolean') return;
@@ -197,7 +202,7 @@ export class Windows {
     if (!pending || pending.sender !== sender) return;
     clearTimeout(pending.timer); this.waiters.delete(id);
     const r = result as HostCommandResult;
-    pending.resolve({ ok: r.ok, error: typeof r.error === 'string' ? r.error.slice(0, 500) : undefined, ...(r.code === 'needsThread' ? { code: r.code } : {}) });
+    pending.resolve({ ok: r.ok, error: typeof r.error === 'string' ? r.error.slice(0, 500) : undefined, ...(r.code === 'needsThread' ? { code: r.code } : {}), ...(r.data !== undefined ? { data: r.data } : {}) });
   }
   openDeepLink(url: string): void { const path = deepLinkPath(url); if (path) void this.dispatch({ type: 'navigate', path }); }
   dispose(): void { clearTimeout(this.positionTimer); for (const p of this.waiters.values()) { clearTimeout(p.timer); p.resolve({ ok: false, error: t('应用正在退出') }); } }

@@ -13,6 +13,7 @@ export const ANIMATIONS = {
   'running-left': { row: 2, durations: [120, 120, 120, 120, 120, 120, 120, 220] },
   waving: { row: 3, durations: [140, 140, 140, 280] },
   jumping: { row: 4, durations: [140, 140, 140, 140, 280] },
+  poked: { row: 4, durations: [140, 140, 140, 140, 280] },
   failed: { row: 5, durations: [140, 140, 140, 140, 140, 140, 140, 240] },
   waiting: { row: 6, durations: [150, 150, 150, 150, 150, 260] },
   running: { row: 7, durations: [120, 120, 120, 120, 120, 220] },
@@ -20,14 +21,17 @@ export const ANIMATIONS = {
   sleeping: { row: 0, durations: [6000] },
 } as const;
 
+/** A request is news for this long. After that it stays in the bubble, and must not hide that work is going on. */
+const FRESH_REQUEST_MS = 60_000;
 export function moodFor(items: ActivityItem[], options: {
-  snoozed?: boolean; completion?: 'waving' | 'jumping' | null; reviewing?: boolean;
+  snoozed?: boolean; completion?: 'waving' | 'jumping' | null; reviewing?: boolean; now?: number;
 } = {}): PetMood {
   // Snooze is an explicit global override: do not animate an attention pose during quiet hours.
   if (options.snoozed) return 'sleeping';
-  if (items.some((item) => item.state === 'needsInput')) return 'waiting';
+  const now = options.now ?? Date.now(), requests = items.filter((item) => item.state === 'needsInput');
+  if (requests.some((item) => !(now - Date.parse(item.since) >= FRESH_REQUEST_MS))) return 'waiting';
   if (items.some((item) => item.state === 'running')) return 'running';
-  return 'idle';
+  return requests.length ? 'waiting' : 'idle';
 }
 
 export function frameAt(state: SpriteState, elapsed: number, reducedMotion = false, frameScale = 1, once = false): number {

@@ -49,12 +49,12 @@ export function speechRequest(provider: RemoteProvider, config: RemoteVoice, key
   const body = { response_format: 'wav', ...(speed !== 1 ? { speed } : {}), ...optional('model', config.model), ...optional('voice', config.voice), ...optional('instructions', config.style), ...extra, input: text };
   return { url: `${root}/audio/speech`, init: { method: 'POST', headers: { 'content-type': 'application/json', ...(key ? { authorization: `Bearer ${key}` } : {}) }, body: JSON.stringify(body) } };
 }
-async function send(fetcher: Fetch, url: string, init: RequestInit): Promise<Response> {
+export async function send(fetcher: Fetch, url: string, init: RequestInit, timeoutMs = TIMEOUT_MS): Promise<Response> {
   // A redirect could carry a custom key header to another host.
-  try { return await fetcher(url, { ...init, redirect: 'error', signal: AbortSignal.timeout(TIMEOUT_MS) }); }
+  try { return await fetcher(url, { ...init, redirect: 'error', signal: AbortSignal.timeout(timeoutMs) }); }
   catch (error) { throw new VoiceError((error as Error).name === 'TimeoutError' ? 'timeout' : 'unreachable'); }
 }
-async function failure(response: Response): Promise<VoiceError> {
+export async function readError(response: Response): Promise<VoiceError> {
   let detail = '';
   try {
     const text = await response.text();
@@ -65,7 +65,7 @@ async function failure(response: Response): Promise<VoiceError> {
 }
 export async function synthesizeRemote(fetcher: Fetch, request: SpeechRequest): Promise<Uint8Array> {
   const response = await send(fetcher, request.url, request.init);
-  if (!response.ok) throw await failure(response);
+  if (!response.ok) throw await readError(response);
   if (/json|text\//i.test(response.headers.get('content-type') ?? '')) throw new VoiceError('notAudio');
   if (Number(response.headers.get('content-length') ?? 0) > MAX_AUDIO_BYTES) throw new VoiceError('tooLarge');
   const reader = response.body?.getReader();
@@ -107,6 +107,6 @@ export async function listVoices(fetcher: Fetch, provider: RemoteProvider, confi
   const url = provider === 'elevenlabs' ? `${root}/v2/voices?page_size=100` : `${root}/audio/voices`;
   const headers: Record<string, string> = key ? provider === 'elevenlabs' ? { 'xi-api-key': key } : { authorization: `Bearer ${key}` } : {};
   const response = await send(fetcher, url, { headers });
-  if (!response.ok) throw await failure(response);
+  if (!response.ok) throw await readError(response);
   try { return parseVoices(provider, await response.json()); } catch { throw new VoiceError('notVoices'); }
 }

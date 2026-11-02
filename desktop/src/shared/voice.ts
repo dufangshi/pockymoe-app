@@ -47,3 +47,17 @@ export function speechText(text: string): string {
   const clean = [...text].filter(char => char >= ' ' || char === '\n').join('').replace(/\s+/g, ' ').trim();
   return clean.length > MAX_SPEECH_CHARS ? `${clean.slice(0, MAX_SPEECH_CHARS)}…` : clean;
 }
+
+export type SummaryLanguage = 'auto' | 'zh-CN' | 'en' | 'ja' | 'ko' | 'fr' | 'de' | 'es';
+/** Kokoro speaks only these; other languages need an online voice. */
+export const LOCAL_SUMMARY_LANGUAGES: SummaryLanguage[] = ['auto', 'zh-CN', 'en'];
+export const SUMMARY_LANGUAGES: SummaryLanguage[] = ['auto', 'zh-CN', 'en', 'ja', 'ko', 'fr', 'de', 'es'];
+/** A saved upstream on one of the account's devices; its key stays on that device. */
+export interface SummaryConnection { deviceId: string; deviceName: string; id: string; name: string; protocol: string; model: string }
+export interface SummaryStatus {
+  connections: SummaryConnection[];
+  keySet: boolean;
+  lastError: string | null;
+  /** What the last test produced. */
+  sample: string | null;
+}

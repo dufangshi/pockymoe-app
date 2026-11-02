@@ -7,7 +7,13 @@ import { randomUUID } from 'node:crypto';
 export const MAX_PACK_BYTES = 8 * 1024 * 1024;
 const MAX_MANIFEST_BYTES = 16 * 1024;
 export interface SleepingStrip { path: 'sleeping.webp' | 'sleeping.png'; frames: number; durationsMs: number[] }
-export interface PetManifest { id: string; displayName: string; description: string; spritesheetPath: 'spritesheet.png' | 'spritesheet.webp'; spriteVersionNumber?: number; author?: string; license?: string; sourceUrl?: string; licenseUrl?: string; remoteCodex?: { sleeping?: SleepingStrip; frameScale?: number } }
+export interface PetManifest { id: string; displayName: string; description: string; spritesheetPath: 'spritesheet.png' | 'spritesheet.webp'; spriteVersionNumber?: number; author?: string; license?: string; sourceUrl?: string; licenseUrl?: string; remoteCodex?: { sleeping?: SleepingStrip; frameScale?: number ; clipFormat?: ClipFormat; clips?: Partial<Record<ClipState, PetClip[]>> } }
+/** One animation drawn from a sheet of frames in `clipFormat`, for art too rich for the atlas's 8 frames a row. */
+export interface PetClip { path: string; frames: number }
+export interface ClipFormat { fps: number; columns: number; width: number; height: number }
+export const CLIP_STATES = ['idle', 'running', 'waiting', 'waving', 'jumping', 'poked', 'failed', 'review', 'sleeping'] as const;
+export type ClipState = typeof CLIP_STATES[number];
+export const MAX_CLIPS_BYTES = 160 * 1024 * 1024;
 export interface PetPack { manifest: PetManifest; directory: string; image: Buffer; sleepingImage?: Buffer }
 function fail(message: string): never { throw new Error(`Invalid pet pack: ${message}`); }
 export function parseManifest(data: Buffer): PetManifest {
@@ -31,6 +37,16 @@ export function parseManifest(data: Buffer): PetManifest {
   if (extensions?.frameScale !== undefined) {
     if (typeof extensions.frameScale !== 'number' || !Number.isFinite(extensions.frameScale) || extensions.frameScale < .25 || extensions.frameScale > 8) fail('remoteCodex.frameScale must be between 0.25 and 8');
     remoteCodex.frameScale = extensions.frameScale;
+  }
+  if (extensions?.clips !== undefined || extensions?.clipFormat !== undefined) {
+    const format = extensions.clipFormat as ClipFormat | undefined, clips = extensions.clips as Record<string, PetClip[]> | undefined;
+    const whole = (value: unknown, max: number): boolean => Number.isInteger(value) && (value as number) >= 1 && (value as number) <= max;
+    if (!format || !whole(format.fps, 60) || !whole(format.columns, 32) || !whole(format.width, 512) || !whole(format.height, 512)) fail('invalid remoteCodex.clipFormat');
+    if (!clips || typeof clips !== 'object') fail('invalid remoteCodex.clips');
+    for (const [state, list] of Object.entries(clips))
+      if (!CLIP_STATES.includes(state as ClipState) || !Array.isArray(list) || !list.length || list.length > 16 || list.some(clip => !/^clips\/[a-z0-9_-]{1,40}\.webp$/.test(clip?.path) || !whole(clip.frames, 512))) fail('invalid remoteCodex.clips');
+    remoteCodex.clipFormat = { fps: format.fps, columns: format.columns, width: format.width, height: format.height };
+    remoteCodex.clips = Object.fromEntries(Object.entries(clips).map(([state, list]) => [state, list.map(clip => ({ path: clip.path, frames: clip.frames }))]));
   }
   const metadata: Pick<PetManifest, 'author' | 'license' | 'sourceUrl' | 'licenseUrl'> = {};
   for (const key of ['author', 'license', 'sourceUrl', 'licenseUrl'] as const) {
@@ -86,7 +102,34 @@ export async function loadPetPack(directory: string): Promise<PetPack> {
   const sleepingImage = manifest.remoteCodex?.sleeping ? await safeRead(join(directory, manifest.remoteCodex.sleeping.path), MAX_PACK_BYTES) : undefined;
   if (sleepingImage) validateSleeping(sleepingImage, manifest);
   if (image.length + (sleepingImage?.length ?? 0) > MAX_PACK_BYTES) fail('combined spritesheets exceed 8 MB');
+  await checkClips(directory, manifest);
   return { manifest, image, directory, sleepingImage };
+}
+const clipPaths = (manifest: PetManifest): string[] => [...new Set(Object.values(manifest.remoteCodex?.clips ?? {}).flat().map(clip => clip.path))];
+/** Only the headers: decoding every sheet at startup would be slow, and the renderer falls back to the atlas if one fails. */
+async function checkClips(directory: string, manifest: PetManifest): Promise<void> {
+  const format = manifest.remoteCodex?.clipFormat;
+  if (!format) return;
+  let total = 0;
+  for (const path of clipPaths(manifest)) {
+    const stat = await lstat(join(directory, path));
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.size > MAX_PACK_BYTES) fail(`${path} must be a regular file of at most 8 MB`);
+    total += stat.size;
+    const handle = await open(join(directory, path), constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+    try {
+      const { buffer, bytesRead } = await handle.read(Buffer.alloc(64), 0, 64, 0);
+      const size = imageDimensions(buffer.subarray(0, bytesRead));
+      if (size.format !== 'webp' || size.width % format.width || size.height % format.height || size.width > format.columns * format.width) fail(`${path} does not match clipFormat`);
+    } finally { await handle.close(); }
+  }
+  if (total > MAX_CLIPS_BYTES) fail('clips exceed 160 MB');
+  const counts = Object.values(manifest.remoteCodex?.clips ?? {}).flat();
+  if (counts.some(clip => clip.frames < 1)) fail('invalid clip frame count');
+}
+/** A clip named by the manifest, read when it is about to play. */
+export async function readClip(pack: PetPack, path: string): Promise<Buffer | null> {
+  if (!clipPaths(pack.manifest).includes(path)) return null;
+  return safeRead(join(pack.directory, path), MAX_PACK_BYTES).catch(() => null);
 }
 function crc32(bytes: Buffer): number {
   let crc = 0xffffffff;
@@ -150,6 +193,7 @@ export async function importPetPack(source: string, userPetsDirectory: string, d
     if (manifests.length !== 1) fail('zip must contain exactly one pet.json');
     const root = manifests[0].slice(0, -'pet.json'.length);
     manifest = parseManifest(files.get(manifests[0])!);
+    if (manifest.remoteCodex?.clips) fail('a pack with clips must be imported as a folder');
     const atlas = files.get(root + manifest.spritesheetPath);
     sleepingImage = manifest.remoteCodex?.sleeping ? files.get(root + manifest.remoteCodex.sleeping.path) : undefined;
     if (!atlas || files.size !== (manifest.remoteCodex?.sleeping ? 3 : 2) || manifest.remoteCodex?.sleeping && !sleepingImage) fail('zip must contain only pet.json and its declared spritesheets');
@@ -167,6 +211,10 @@ export async function importPetPack(source: string, userPetsDirectory: string, d
     await writeFile(join(staging, 'pet.json'), JSON.stringify(manifest, null, 2));
     await writeFile(join(staging, manifest.spritesheetPath), image);
     if (sleepingImage && manifest.remoteCodex?.sleeping) await writeFile(join(staging, manifest.remoteCodex.sleeping.path), sleepingImage);
+    if (manifest.remoteCodex?.clips) {
+      await mkdir(join(staging, 'clips'));
+      for (const path of clipPaths(manifest)) await writeFile(join(staging, path), await safeRead(join(source, path), MAX_PACK_BYTES));
+    }
     // Existing packs are immutable: an import may never replace a bundled/custom pack silently.
     try { await lstat(destination); fail(`pet id ${manifest.id} is already installed`); }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }

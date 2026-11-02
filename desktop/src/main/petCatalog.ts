@@ -2,6 +2,13 @@ import { lstatSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import type { LocalState } from '../shared/local';
 
+/** What a pack says about itself. A license link is required to show a license name. */
+function credit(manifest: Record<string, unknown>): Pick<LocalState['petPacks'][number], 'author' | 'source' | 'license' | 'licenseUrl'> {
+  const text = (value: unknown): string | undefined => typeof value === 'string' && value.length <= 300 ? value : undefined;
+  const link = (value: unknown): string | undefined => text(value)?.startsWith('https://') ? value as string : undefined;
+  const author = text(manifest.author), source = link(manifest.sourceUrl), license = text(manifest.license), licenseUrl = link(manifest.licenseUrl);
+  return { ...(author ? { author } : {}), ...(source ? { source } : {}), ...(license && licenseUrl ? { license, licenseUrl } : {}) };
+}
 /** Catalog assets are served only by the local windows' default session. The Web
  * uses a separate partition and never receives a path or an asset handler. */
 export class PetCatalog {
@@ -25,7 +32,7 @@ export class PetCatalog {
           const name = typeof manifest.displayName === 'string' ? manifest.displayName.slice(0, 100) : id;
           this.assets.set(id, { path: image, type: image.endsWith('.png') ? 'image/png' : 'image/webp' });
           this.entries.push({ id, name, thumbnail: `pockymoe-pet://atlas/${encodeURIComponent(id)}`, rows: manifest.spriteVersionNumber === 2 ? 11 : 9,
-            ...(['moe', 'frost'].includes(id) && directory === this.directories[0] ? { author: 'Pockymoe' } : {}) });
+            ...(['moe', 'frost'].includes(id) && directory === this.directories[0] ? { author: 'Pockymoe' } : credit(manifest)) });
         } catch { /* Incomplete/custom packs must not break Preferences. */ }
       }
     }

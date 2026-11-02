@@ -28,7 +28,7 @@ export class LocalModel {
   progress = 0;
   error: string | null = null;
   private abort: AbortController | null = null;
-  constructor(private dir: string, private fetcher: Fetch, private changed: () => void, private source: ModelSource = MODEL) {
+  constructor(private dir: string, private fetcher: Fetch, private changed: () => void, private source: ModelSource = MODEL, private stallMs = 30_000) {
     this.state = this.installed() ? 'ready' : 'absent';
   }
   get path(): string { return join(this.dir, this.source.name); }
@@ -48,11 +48,16 @@ export class LocalModel {
         if (response.status !== 206) from = 0;
         let received = from, shown = 0;
         const body = Readable.fromWeb(response.body as never);
+        // A connection that hangs must fail so it can be retried; the partial file is kept and resumed.
+        const stall = new AbortController();
+        let timer = setTimeout(() => stall.abort(), this.stallMs);
         body.on('data', (chunk: Buffer) => {
+          clearTimeout(timer); timer = setTimeout(() => stall.abort(), this.stallMs);
           received += chunk.length; this.progress = received / this.source.bytes;
           if (this.progress - shown >= .01) { shown = this.progress; this.changed(); }
         });
-        await pipeline(body, createWriteStream(this.archive, { flags: from ? 'a' : 'w' }), { signal: abort.signal });
+        try { await pipeline(body, createWriteStream(this.archive, { flags: from ? 'a' : 'w' }), { signal: AbortSignal.any([abort.signal, stall.signal]) }); }
+        finally { clearTimeout(timer); }
       }
       if (await sha256(this.archive) !== this.source.sha256) { rmSync(this.archive, { force: true }); throw new Error('checksum'); }
       this.progress = 1; this.set('extracting');
