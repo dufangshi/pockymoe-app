@@ -2,7 +2,7 @@ import { app } from 'electron';
 import { execFile, spawn } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
 import { promisify } from 'node:util';
-import { access, cp, mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { SignedUpdate } from './updateCore';
@@ -39,7 +39,9 @@ export async function installVerified(file: string, entry: SignedUpdate): Promis
     const { stdout } = await exec('/usr/libexec/PlistBuddy', ['-c', 'Print :CFBundleShortVersionString', join(source, 'Contents/Info.plist')]);
     if (stdout.trim() !== entry.version) throw new Error('Bundle version differs from signed version');
     await rm(sibling, { force: true, recursive: true });
-    await cp(source, sibling, { recursive: true, preserveTimestamps: true, verbatimSymlinks: true });
+    // Electron's patched fs.cp opens/caches app.asar on the mounted volume,
+    // preventing detach. ditto preserves the signed bundle without that cache.
+    await exec('/usr/bin/ditto', [source, sibling]);
     await exec('/usr/bin/codesign', ['--verify', '--deep', '--strict', '-R', requirement, sibling]);
     await exec('/usr/bin/hdiutil', ['detach', mount]); mounted = false;
     const job = join(work, 'job.json');
