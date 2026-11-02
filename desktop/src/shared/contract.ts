@@ -27,6 +27,7 @@ export interface HostCapabilities {
     multiWindow: boolean;
     nativeSave: boolean;
     badge: boolean;
+    updates: boolean;
   };
 }
 
@@ -181,7 +182,15 @@ export interface Appearance {
 }
 
 /** Exposed as window.pockymoeHost to the configured webOrigin's top frame only. */
+export interface UpdateState {
+  status: 'idle' | 'downloading' | 'ready' | 'installing' | 'error';
+  version?: string;
+  error?: string;
+  releaseUrl?: string;
+}
+
 export interface PockymoeHost {
+  updates?: { state(): Promise<UpdateState>; onChange(listener: (state: UpdateState) => void): () => void; install(): void };
   capabilities(): Promise<HostCapabilities>;
   activity: { sync(snapshot: ActivitySnapshot): void };
   onCommand(listener: (command: HostCommand) => void): () => void;

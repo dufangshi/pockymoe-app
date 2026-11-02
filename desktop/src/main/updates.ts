@@ -1,48 +1,44 @@
+import { app, dialog, net, powerMonitor, shell, type MessageBoxOptions, type MessageBoxReturnValue } from 'electron';
+import { join } from 'node:path';
+import { UpdateService } from './updateCore';
+import { installVerified, ManualInstall } from './updateInstall';
 import { t } from '../shared/i18n';
-import { app, dialog, shell, type MessageBoxOptions, type MessageBoxReturnValue } from 'electron';
-import updater from 'electron-updater';
-import { isNoDesktopRelease } from './updateErrors';
-const { autoUpdater } = updater;
-export { autoUpdater };
+export { isNewerVersion, parseVersion } from './updateCore';
 export type ShowMessage = (options: MessageBoxOptions) => Promise<MessageBoxReturnValue>;
 const nativeMessage: ShowMessage = options => dialog.showMessageBox(options);
-const RELEASES_URL = 'https://github.com/dufangshi/pockymoe-app/releases/latest';
-// Mac builds are ad-hoc signed, and Squirrel.Mac refuses an update without a stable signing
-// identity, so an in-place update would fail silently. Send people to the download instead.
-export const installsInPlace = (platform: NodeJS.Platform = process.platform): boolean => platform !== 'darwin';
-let canCheck = (): boolean => true;
-let configured = false;
-export function configureUpdates(showMessage: ShowMessage = nativeMessage, allowed = (): boolean => true): void {
-  canCheck = allowed;
-  if (configured) return;
-  configured = true;
-  autoUpdater.setFeedURL({ provider: 'github', owner: 'dufangshi', repo: 'pockymoe-app' });
-  autoUpdater.autoDownload = false;
-  autoUpdater.autoInstallOnAppQuit = true;
-  autoUpdater.on('error', () => { /* Offline checks must not interrupt work. */ });
-  autoUpdater.on('update-available', async info => {
-    const inPlace = installsInPlace();
-    const answer = await showMessage({ type: 'info', title: t('Pockymoe 有更新'), message: t('版本 {version} 已可下载', { version: info.version }), buttons: [t(inPlace ? '下载更新' : '前往下载'), t('稍后')], cancelId: 1 });
-    if (answer.response !== 0) return;
-    if (inPlace) void autoUpdater.downloadUpdate().catch(() => undefined);
-    else void shell.openExternal(RELEASES_URL);
+declare const __UPDATER_TEST_BUILD__: boolean;
+declare const __UPDATER_FEED__: string;
+declare const __UPDATER_PUBLIC_KEY__: string;
+let service: UpdateService | undefined;
+let stop: (() => void) | undefined;
+export function createUpdates(allowed: () => boolean): UpdateService {
+  if (service) return service;
+  service = new UpdateService({ version: app.getVersion(), platform: `${process.platform}-${process.arch}`, directory: join(app.getPath('userData'), 'updates'),
+    publicKey: __UPDATER_PUBLIC_KEY__, feed: __UPDATER_FEED__, testBuild: __UPDATER_TEST_BUILD__, failureMessage: () => t('安装更新失败，请重试或前往下载。'), allowed: () => app.isPackaged && allowed(),
+    fetch: (url, init) => net.fetch(url, init), openExternal: url => shell.openExternal(url),
+    install: async (file, entry) => {
+      try { await installVerified(file, entry); }
+      catch (error) { if (error instanceof ManualInstall) await service!.openDownload(); else throw error; }
+    }
   });
-  autoUpdater.on('update-downloaded', async () => {
-    const answer = await showMessage({ type: 'info', title: t('更新已就绪'), message: t('退出时会自动安装更新。'), buttons: [t('现在重启'), t('稍后')], cancelId: 1 });
-    if (answer.response === 0) autoUpdater.quitAndInstall();
-  });
-  if (app.isPackaged && canCheck()) void autoUpdater.checkForUpdates().catch(() => undefined);
+  return service;
+}
+export function configureUpdates(allowed = (): boolean => true): void {
+  const updates = createUpdates(allowed);
+  if (stop) return;
+  const check = (): void => { void updates.check(); };
+  check();
+  const interval = setInterval(check, 6 * 3600_000); interval.unref();
+  powerMonitor.on('resume', check);
+  stop = () => { clearInterval(interval); powerMonitor.removeListener('resume', check); updates.dispose(); };
+  app.once('before-quit', () => stop?.());
 }
 export async function checkUpdate(showMessage: ShowMessage = nativeMessage): Promise<void> {
-  if (!canCheck()) return;
   if (!app.isPackaged) { await showMessage({ title: 'Pockymoe', message: t('开发版本不检查更新'), detail: t('安装打包版本后可从 GitHub Releases 获取更新。'), buttons: [t('好')] }); return; }
-  const tell = (message: string, detail: string): Promise<unknown> => showMessage({ title: 'Pockymoe', message, detail, buttons: [t('好')] });
-  try {
-    const result = await autoUpdater.checkForUpdates();
-    // When there is one, the update-available handler asks.
-    if (!result?.isUpdateAvailable) await tell(t('已是最新版本'), t('当前版本 {version}', { version: app.getVersion() }));
-  } catch (error) {
-    if (isNoDesktopRelease(error instanceof Error ? error.message : String(error))) await tell(t('已是最新版本'), t('当前版本 {version}。还没有更新的桌面版发布。', { version: app.getVersion() }));
-    else await tell(t('暂时无法检查更新'), t('请检查网络后重试。'));
-  }
+  const result = await service?.check();
+  if (!result) return;
+  if (result === 'manual') {
+    const answer = await showMessage({ title: t('Pockymoe 有更新'), message: t('版本 {version} 已可下载', { version: service!.state().version || '' }), buttons: [t('前往下载'), t('稍后')], cancelId: 1 });
+    if (answer.response === 0) await service!.openDownload();
+  } else await showMessage({ title: 'Pockymoe', message: t(result === 'failed' ? '暂时无法检查更新' : result === 'latest' ? '已是最新版本' : result === 'ready' ? '更新已就绪' : '正在下载'), buttons: [t('好')] });
 }

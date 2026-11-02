@@ -1,0 +1,48 @@
+name: Desktop signed update roundtrip
+on:
+  pull_request:
+    paths:
+      - 'desktop/**'
+      - 'scripts/release-client.sh'
+      - 'scripts/release_client.py'
+      - '.github/workflows/desktop-update.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows-update:
+    name: Windows x64 real NSIS A-to-B update
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: desktop
+        shell: pwsh
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      POCKYMOE_UPDATE_EVIDENCE: ${{ github.workspace }}/desktop/evidence/update-roundtrip
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: desktop/pnpm-lock.yaml
+      - name: Install frozen dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Validate fixture signature serialization
+        run: node test/update-roundtrip.mjs --self-test
+      - name: Install A, download verified B, silently update and assert genuine relaunch with preserved data
+        run: node test/update-roundtrip.mjs
+      - name: Check temporary source injection was restored
+        if: always()
+        run: git diff --exit-code -- src/main/index.ts package.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-x64-signed-update-roundtrip
+          path: desktop/evidence/update-roundtrip/
+          if-no-files-found: warn

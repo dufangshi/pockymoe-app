@@ -1,0 +1,22 @@
+import { createRequire } from 'node:module';
+import { readFileSync } from 'node:fs';
+import { expect, it } from 'vitest';
+const require = createRequire(import.meta.url);
+const builder = createRequire(require.resolve('electron-builder'));
+const dependencies = createRequire(builder.resolve('app-builder-lib'));
+const yaml = dependencies('js-yaml') as { load(text: string): Record<string, unknown> };
+it('keeps the public release to Apple silicon DMG and Windows x64 NSIS without updater sidecars', () => {
+  const config = yaml.load(readFileSync('electron-builder.yml', 'utf8'));
+  expect((config.mac as Record<string, unknown>).target).toEqual([{ target: 'dmg', arch: ['arm64'] }]);
+  expect((config.win as Record<string, unknown>).target).toEqual([{ target: 'nsis', arch: ['x64'] }]);
+  expect(config).not.toHaveProperty('linux'); expect(config).not.toHaveProperty('publish');
+  expect(config.dmg).toEqual({ writeUpdateInfo: false });
+  expect(config.nsis).toMatchObject({ differentialPackage: false });
+  expect(config.artifactName).toBe('${productName}-${version}-${os}-${arch}.${ext}');
+  const pkg = JSON.parse(readFileSync('package.json', 'utf8'));
+  expect(pkg.scripts['dist:mac']).toBe('pnpm build && electron-builder --mac dmg --arm64 --publish never');
+  expect(pkg.scripts['dist:win']).toBe('pnpm build && electron-builder --win nsis --x64 --publish never');
+  for (const section of ['dependencies', 'devDependencies', 'optionalDependencies']) expect(pkg[section]).not.toHaveProperty('electron-updater');
+  expect(readFileSync('pnpm-lock.yaml', 'utf8')).not.toContain('electron-updater');
+  expect(Object.keys(pkg.optionalDependencies)).toEqual(['sherpa-onnx-darwin-arm64', 'sherpa-onnx-win-x64']);
+});

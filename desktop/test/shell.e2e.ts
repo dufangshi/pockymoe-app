@@ -19,7 +19,7 @@ import { windowAt } from './windowReady';
 import { auditSurface } from './surfaceAudit';
 import { item, snapshot } from './fixtures';
 
-type Runtime = { messages: LocalMessages; lastMessageResponse?: number; showMessageBox: ShowMessage; lastDialog?: Electron.MessageBoxOptions; lastSave?: Electron.SaveDialogOptions; updater: { checkForUpdates(): Promise<{ isUpdateAvailable: boolean }> }; appearance: AppearanceStore; hub: ActivityHub; settings: SettingsStore; windows: Windows; tray: DesktopTray; notifications: Notifications };
+type Runtime = { messages: LocalMessages; lastMessageResponse?: number; showMessageBox: ShowMessage; lastDialog?: Electron.MessageBoxOptions; lastSave?: Electron.SaveDialogOptions; appearance: AppearanceStore; hub: ActivityHub; settings: SettingsStore; windows: Windows; tray: DesktopTray; notifications: Notifications };
 declare global { var __pockymoeDesktopTest: Runtime }
 declare global { interface Window { pockymoeHost?: PockymoeHost; commands: unknown[] } }
 const evidence = join(process.env.POCKYMOE_DESKTOP_EVIDENCE || join(tmpdir(), 'pockymoe-shell-evidence'), 'compat');
@@ -318,8 +318,8 @@ for (const pack of packs) for (const theme of ['light', 'dark'] as const) test(`
     dialog.showMessageBox = (async (...args: unknown[]) => { globalThis.__pockymoeDesktopTest.lastDialog = args.at(-1) as Electron.MessageBoxOptions; return { response: 0, checkboxChecked: false }; }) as typeof dialog.showMessageBox;
     dialog.showSaveDialog = (async (...args: unknown[]) => { globalThis.__pockymoeDesktopTest.lastSave = args.at(-1) as Electron.SaveDialogOptions; return { canceled: true, filePath: '' }; }) as typeof dialog.showSaveDialog;
   });
-  const packaged = await app.evaluate(({ app }) => {
-    if (app.isPackaged) globalThis.__pockymoeDesktopTest.updater.checkForUpdates = async () => ({ isUpdateAvailable: false });
+  const packaged = await app.evaluate(({ app, net }) => {
+    if (app.isPackaged) net.fetch = async () => new Response(JSON.stringify({tag_name: `v${app.getVersion()}`, prerelease: false, draft: false}), { status: 200 });
     return app.isPackaged;
   });
   const timings: { locale: string; milliseconds: number }[] = [];

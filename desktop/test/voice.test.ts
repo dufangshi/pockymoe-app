@@ -13,7 +13,6 @@ import { cleanSummary, concreteLanguage, summaryPrompt } from '../src/main/voice
 import { encodeWav } from '../src/main/voice/wav';
 import { deliveryPolicy } from '../src/main/delivery';
 import { isMuted, type MuteRule } from '../src/shared/mutes';
-import { isNoDesktopRelease } from '../src/main/updateErrors';
 import { LOCAL_SPEAKERS, MAX_SPEECH_CHARS, speechText, type RemoteVoice } from '../src/shared/voice';
 
 const config = (patch: Partial<RemoteVoice> = {}): RemoteVoice => ({ url: 'http://127.0.0.1:8091/v1', model: 'BreezeBlue/Breeze-TTS-2', voice: '', style: '', extra: '', ...patch });
@@ -254,13 +253,6 @@ describe('one-click model install', () => {
     const model = new LocalModel(dir, async () => new Response(stream), () => undefined, source, 30);
     await model.download();
     expect(model.state).toBe('absent'); expect(model.error).toBe('download');
-  });
-});
-describe('checking for updates', () => {
-  it('treats a repository with no desktop release as nothing to update to', () => {
-    expect(isNoDesktopRelease('Cannot find latest-mac.yml in the latest release artifacts (https://github.com/x/y/releases/download/v0.1.4/latest-mac.yml): HttpError: 404')).toBe(true);
-    expect(isNoDesktopRelease('No published versions on GitHub')).toBe(true);
-    expect(isNoDesktopRelease('net::ERR_INTERNET_DISCONNECTED')).toBe(false);
   });
 });
 describe('silencing finished work', () => {

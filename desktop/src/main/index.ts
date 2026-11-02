@@ -19,12 +19,13 @@ import { Notifications, itemPath } from './notifications';
 import { DesktopTray } from './tray';
 import { installMenu } from './menu';
 import { apnsEnabled, registerApns } from './apns';
-import { autoUpdater, checkUpdate, configureUpdates, type ShowMessage } from './updates';
+import { checkUpdate, configureUpdates, createUpdates, type ShowMessage } from './updates';
 import { nativeNotificationId } from './windowsToast';
 import { LocalMessages } from './messages';
 import { PetCatalog } from './petCatalog';
 import { VoiceService } from './voice';
 
+declare const __UPDATER_TEST_BUILD__: boolean;
 app.setName('Pockymoe');
 app.setPath('userData', process.env.POCKYMOE_DESKTOP_USER_DATA || join(app.getPath('appData'), 'Pockymoe'));
 // Only migrate the old JSON settings, never inspect or copy credentials/keys.
@@ -91,12 +92,18 @@ else {
       try { pet = petModule.createPetController({ hub, settings, dispatch: command => manager.dispatch(command as CommandInput), openPreferences, mainFocused: () => manager.mainFocused(), lowerMain: () => manager.lowerMain(), speak: text => voice.speak(text), summarize: event => voice.summarize(event), shouldSpeak: event => notifications.shouldSpeak(event), petDirectories, appearance: appearance.get, onAppearance: appearance.onChange }); }
       catch { /* Shell remains usable if a pet pack cannot load. */ }
     }
+    const updates = createUpdates(() => hasConnection(settings.get()));
     const tray = new DesktopTray(hub, settings, manager);
+    tray.setUpdates(updates.state, () => { void updates.install(); });
+    updates.onChange(state => {
+      tray.update();
+      for (const window of manager.relay) if (!window.isDestroyed()) window.webContents.send(c.updateChange, state);
+    });
     const capabilities = (): HostCapabilities => ({
       surface: 'desktop', bridgeVersion: 2, platform: process.platform as HostCapabilities['platform'], shellVersion: app.getVersion(),
       notifications: apnsEnabled() ? 'local+apns' : 'local',
       windowChrome: { kind: process.platform === 'darwin' ? 'hiddenInset' : 'titleBarOverlay', trafficLightsWidth: process.platform === 'darwin' ? 78 : 138, toolbarHeight: 38, controlsSide: process.platform === 'darwin' ? 'left' : 'right' },
-      features: { pet: pet?.isAvailable() ?? false, quickWindow: true, multiWindow: true, nativeSave: true, badge: true }
+      features: { pet: pet?.isAvailable() ?? false, quickWindow: true, multiWindow: true, nativeSave: true, badge: true, updates: ['darwin', 'win32'].includes(process.platform) }
     });
     const guardRelay = (e: IpcMainEvent | IpcMainInvokeEvent): void => {
       const w = BrowserWindow.fromWebContents(e.sender);
@@ -114,6 +121,8 @@ else {
     const listen = (channel: string, fn: (e: IpcMainEvent, ...args: unknown[]) => void): void => { ipcMain.on(channel, (e, ...args) => { try { guardRelay(e); fn(e, ...args); } catch { /* Reject malformed or stale renderer messages. */ } }); };
     listen(c.appearance, (_e, value) => appearance.sync(value));
     handle(c.capabilities, () => capabilities());
+    handle(c.updateState, () => updates.state());
+    listen(c.updateInstall, (_event, ...args) => { if (!args.length) void updates.install(); });
     listen(c.sync, (e, value) => {
       const snapshot = validateSnapshot(value);
       focusedThreads.set(e.sender.id, snapshot.focusedThreadKey);
@@ -297,10 +306,10 @@ else {
       }
     }
     for (const url of [...deepLinks, ...process.argv.filter(a => /^(pockymoe|remotecodex):/.test(a))]) openLink(url);
-    if (process.env.POCKYMOE_DESKTOP_E2E !== '1') { configureUpdates(showMessageBox, () => hasConnection(settings.get())); void registerApns(settings, manager); }
+    if (process.env.POCKYMOE_DESKTOP_E2E !== '1') { configureUpdates(() => hasConnection(settings.get())); void registerApns(settings, manager); }
     app.on('activate', () => { if (manager.quitting) return; if (manager.relay.size) manager.focusMain(); else manager.createLocal('relay'); });
     app.on('before-quit', () => { manager.quitting = true; messages.dispose(); manager.dispose(); notifications.dispose(); voice.dispose(); pet?.dispose(); tray.dispose(); hub.dispose(); globalShortcut.unregisterAll(); });
-    if (process.env.POCKYMOE_DESKTOP_E2E === '1') Object.assign(globalThis, { __pockymoeDesktopTest: { hub, settings, appearance, windows: manager, tray, notifications, capabilities, updater: autoUpdater, showMessageBox, messages } });
+    if (process.env.POCKYMOE_DESKTOP_E2E === '1') Object.assign(globalThis, { __pockymoeDesktopTest: { hub, settings, appearance, windows: manager, tray, notifications, capabilities, showMessageBox, messages, ...(__UPDATER_TEST_BUILD__ ? { updates } : {}) } });
   }).catch(error => {
     if (process.env.POCKYMOE_DESKTOP_E2E === '1') console.error(error);
     else dialog.showErrorBox(t('Pockymoe 无法启动'), t('请检查桌面应用的本地配置后重试。'));
