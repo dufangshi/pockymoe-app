@@ -7,7 +7,7 @@ import { randomUUID } from 'node:crypto';
 export const MAX_PACK_BYTES = 8 * 1024 * 1024;
 const MAX_MANIFEST_BYTES = 16 * 1024;
 export interface SleepingStrip { path: 'sleeping.webp' | 'sleeping.png'; frames: number; durationsMs: number[] }
-export interface PetManifest { id: string; displayName: string; description: string; spritesheetPath: 'spritesheet.png' | 'spritesheet.webp'; spriteVersionNumber?: number; author?: string; license?: string; sourceUrl?: string; licenseUrl?: string; remoteCodex?: { sleeping?: SleepingStrip; frameScale?: number ; clipFormat?: ClipFormat; clips?: Partial<Record<ClipState, PetClip[]>> } }
+export interface PetManifest { id: string; displayName: string; description: string; spritesheetPath: 'spritesheet.png' | 'spritesheet.webp'; spriteVersionNumber?: number; author?: string; license?: string; sourceUrl?: string; licenseUrl?: string; remoteCodex?: { sleeping?: SleepingStrip; frameScale?: number ; /** A slender figure needs more height than a chibi to read at the same size. */ sizeScale?: number; clipFormat?: ClipFormat; clips?: Partial<Record<ClipState, PetClip[]>> } }
 /** One animation drawn from a sheet of frames in `clipFormat`, for art too rich for the atlas's 8 frames a row. */
 export interface PetClip { path: string; frames: number }
 export interface ClipFormat { fps: number; columns: number; width: number; height: number }
@@ -35,6 +35,10 @@ export function parseManifest(data: Buffer): PetManifest {
   if (extension) {
     if (!['sleeping.webp', 'sleeping.png'].includes(extension.path) || !Number.isInteger(extension.frames) || extension.frames < 1 || extension.frames > 8 || !Array.isArray(extension.durationsMs) || extension.durationsMs.length !== extension.frames || !extension.durationsMs.every(duration => Number.isFinite(duration) && duration >= 100 && duration <= 5000)) fail('invalid remoteCodex.sleeping strip');
     remoteCodex.sleeping = extension;
+  }
+  if (extensions?.sizeScale !== undefined) {
+    if (typeof extensions.sizeScale !== 'number' || !Number.isFinite(extensions.sizeScale) || extensions.sizeScale < .5 || extensions.sizeScale > 2) fail('remoteCodex.sizeScale must be between 0.5 and 2');
+    remoteCodex.sizeScale = extensions.sizeScale;
   }
   if (extensions?.frameScale !== undefined) {
     if (typeof extensions.frameScale !== 'number' || !Number.isFinite(extensions.frameScale) || extensions.frameScale < .25 || extensions.frameScale > 8) fail('remoteCodex.frameScale must be between 0.25 and 8');
