@@ -32,13 +32,18 @@ for (const surface of ['main', 'map', 'devices'] as const) for (const pack of ['
     await page.getByRole('button', { name: 'Sign in', exact: true }).click();
     await expect(page.locator('.thread-map[data-presentation="page"]')).toBeVisible({ timeout: 30_000 });
     authenticated = true; stage = 'choose theme'; console.log('Real Web stage: choose theme');
+    stage = 'open Web Settings';
     await page.locator('.matter-rail-bottom button:has(svg[data-icon="settings"])').click();
     const settings = page.getByTestId('settingsDialog'); await expect(settings).toBeVisible();
     if (!await settings.locator('input[name="settings-theme"]').count()) await settings.getByRole('button', { name: 'Preferences', exact: true }).click();
+    stage = 'choose color mode';
     await settings.locator(`label:has(input[name="settings-theme"][value="${mode}"])`).click();
     // Theme pack uses the actual Web Settings picker, not injected CSS or host-only sync.
+    stage = 'choose theme pack';
     await settings.locator(`label:has(input[name="settings-theme-preset"][value="${pack}"])`).click();
+    stage = 'close Web Settings';
     await page.keyboard.press('Escape');
+    stage = 'wait for theme application';
     await expect(page.locator('html')).toHaveAttribute('data-theme-preset', pack);
     stage = `open ${surface}`;
     if (surface === 'main') {
@@ -48,6 +53,10 @@ for (const surface of ['main', 'map', 'devices'] as const) for (const pack of ['
       await expect(page).toHaveURL(new RegExp(`/threads/${device.scenarios.events}`));
       stage = 'thread content';
       await expect(page.locator('.thread-map[data-presentation="page"]')).not.toBeVisible();
+      await expect(page.locator('.thread-timeline-surface').first()).toBeVisible();
+      await expect(page.getByText('已完成代码审查与验证。', { exact: false }).first()).toBeVisible({ timeout: 15_000 });
+      const later = page.getByRole('button', { name: 'Later', exact: true });
+      if (await later.isVisible()) await later.click();
     } else {
       await app.evaluate((_electron, type: 'openMap' | 'openDevices') => { void globalThis.__pockymoeDesktopTest.windows.dispatch({ type }); }, surface === 'map' ? 'openMap' : 'openDevices');
       await expect(page.locator(surface === 'map' ? '.thread-map-canvas' : '.pd-page').first()).toBeVisible({ timeout: 20_000 });

@@ -391,3 +391,6 @@ Quit marks the window manager as quitting before other cleanup and ignores later
 activation events, so an activation cannot reopen a background window during
 shutdown. `shutdown.e2e.ts` covers that ordering. Readiness failures report only
 window/runtime state and URL paths, never environment values or Web contents.
+Real conversation captures additionally wait for seeded transcript content (not
+just the route change) and dismiss the first-use tour through its normal button.
+This prevents a loading surface being mistaken for conversation acceptance.
