@@ -13,6 +13,7 @@ import { commandErrorMessage } from './errors';
 import { scrollGeometry } from './scroll';
 import { playSound, playSpeech } from './sounds';
 import { isMuted } from '../shared/mutes';
+import { ClipSequencer } from './clipSequence';
 import type { PetClip } from './packs';
 import type { ActivityItem, HostCommandResult } from '../shared/contract';
 import type { PetAction, PetBridge, PetViewState } from './bridge';
@@ -177,7 +178,7 @@ function renderSprite(): void {
     lastEpoch = state.moodEpoch;
     const old = root.querySelector<HTMLElement>('#sprite-old')!, sprite = root.querySelector<HTMLElement>('#sprite')!;
     old.style.cssText = sprite.style.cssText; old.style.opacity = '1'; sprite.style.opacity = motion.matches ? '1' : '0';
-    animationState = state.mood; animationStart = performance.now(); frame = 0; paintSprite(); playClips();
+    animationState = state.mood; animationStart = performance.now(); frame = 0; paintSprite(); leaveClip();
     requestAnimationFrame(() => { old.style.opacity = '0'; sprite.style.opacity = '1'; });
   }
   const image = state.mood === 'sleeping' && state.sleeping ? state.sleeping.imageUrl : state.imageUrl;
@@ -190,9 +191,10 @@ function renderSprite(): void {
 }
 // A pack's clips replace the atlas for the states they cover; any other state, or a clip that
 // fails to decode, draws from the atlas. Sheets are decoded when needed and few are kept.
-const CLIP_CACHE = 6, ONE_SHOT = ['failed', 'waving', 'jumping', 'poked', 'landing'];
-const clipCache = new Map<string, Promise<ImageBitmap | null>>(), clipCursor = new Map<string, number>();
-let clipPlayer: { clip: PetClip; bitmap: ImageBitmap; start: number; drawn: number } | null = null, clipToken = 0, clipPack = '';
+const CLIP_CACHE = 6, ONE_SHOT = ['failed', 'waving', 'jumping', 'poked', 'landing'], LEAVE_MS = 600;
+const clipCache = new Map<string, Promise<ImageBitmap | null>>();
+let clipSequence: ClipSequencer | null = null;
+let clipPlayer: { clip: PetClip; bitmap: ImageBitmap; start: number; drawn: number; leaving?: { from: number; to: number; start: number; ms: number } } | null = null, clipToken = 0, clipPack = '';
 function loadClip(path: string): Promise<ImageBitmap | null> {
   let loading = clipCache.get(path);
   if (!loading) {
@@ -203,18 +205,30 @@ function loadClip(path: string): Promise<ImageBitmap | null> {
   return loading;
 }
 function playClips(): void {
-  const list = state?.clips?.states[animationState], token = ++clipToken;
-  if (!list?.length) { clipPlayer = null; root.querySelector('#character')?.classList.remove('clips'); return; }
-  const index = motion.matches ? 0 : clipCursor.get(animationState) ?? 0, clip = list[index % list.length]!;
-  clipCursor.set(animationState, index + 1);
+  const token = ++clipToken;
+  clipSequence ??= state?.clips ? new ClipSequencer(state.clips.states) : null;
+  const clip = !clipSequence ? null : motion.matches ? clipSequence.still(animationState) : clipSequence.next(animationState, Date.now());
+  if (!clip) { clipPlayer = null; root.querySelector('#character')?.classList.remove('clips'); return; }
   // Keep showing the current frame until the next clip is ready, so nothing ever blanks.
   void loadClip(clip.path).then(bitmap => {
     if (token !== clipToken) return;
     if (!bitmap) { clipPlayer = null; root.querySelector('#character')?.classList.remove('clips'); paintSprite(); return; }
     clipPlayer = { clip, bitmap, start: performance.now(), drawn: -1 };
     root.querySelector('#character')?.classList.add('clips');
-    const next = list[(index + 1) % list.length]!; if (next !== clip) void loadClip(next.path);
+    const next = clipSequence?.upcoming(animationState); if (next && next !== clip) void loadClip(next.path);
   });
+}
+// Every clip starts and ends on the state's resting pose, so a change of state hurries the current
+// clip to the nearer end instead of cutting away from the middle of a movement. An intro has to
+// reach its end, because what follows starts there, and an outro simply finishes.
+function leaveClip(): void {
+  const format = state?.clips?.format;
+  if (!clipPlayer || !format || motion.matches || !state?.clips?.states[animationState]) { playClips(); return; }
+  const { clip, drawn } = clipPlayer;
+  if (clip.role === 'outro' || clipPlayer.leaving) return;
+  const last = clip.frames - 1, to = clip.role === 'intro' || last - drawn <= drawn ? last : 0, distance = Math.abs(to - drawn);
+  if (drawn < 0 || distance <= 1) { playClips(); return; }
+  clipPlayer.leaving = { from: drawn, to, start: performance.now(), ms: Math.min(LEAVE_MS, distance / (format.fps * 3) * 1000) };
 }
 let clipContext: CanvasRenderingContext2D | null = null;
 function drawClip(index: number): void {
@@ -230,11 +244,18 @@ function drawClip(index: number): void {
 function stepClip(now: number): void {
   if (!clipPlayer || !state?.clips) return;
   const format = state.clips.format, { clip } = clipPlayer;
+  const { leaving } = clipPlayer;
+  if (leaving) {
+    const amount = Math.min(1, (now - leaving.start) / leaving.ms), index = Math.round(leaving.from + (leaving.to - leaving.from) * amount);
+    if (index !== clipPlayer.drawn) { clipPlayer.drawn = index; drawClip(index); updateHit(); }
+    if (amount >= 1) { const player = clipPlayer; clipPlayer = { clip: player.clip, bitmap: player.bitmap, drawn: player.drawn, start: Infinity }; playClips(); }
+    return;
+  }
   let index = motion.matches ? 0 : Math.floor((now - clipPlayer.start) / 1000 * format.fps);
   if (index >= clip.frames) {
     index = clip.frames - 1;
     // Clips start and end on the same pose, so the next one follows without a jump.
-    if (!ONE_SHOT.includes(animationState)) { const player = clipPlayer; clipPlayer = { ...player, start: Infinity, drawn: player.drawn }; playClips(); }
+    if (clip.role || !ONE_SHOT.includes(animationState)) { const player = clipPlayer; clipPlayer = { ...player, start: Infinity, drawn: player.drawn }; playClips(); }
   }
   if (index !== clipPlayer.drawn && index >= 0) { clipPlayer.drawn = index; drawClip(index); updateHit(); }
 }
@@ -315,7 +336,7 @@ bridge.onState(next => {
   if (next.surface === 'sprite') {
     // Another pack's sheets share nothing with this one's.
     const packKey = `${next.packName}#${next.clips?.epoch ?? 0}`;
-    if (packKey !== clipPack) { clipPack = packKey; for (const entry of clipCache.values()) void entry.then(bitmap => bitmap?.close()); clipCache.clear(); clipCursor.clear(); clipPlayer = null; clipToken++; lastEpoch = -1; }
+    if (packKey !== clipPack) { clipPack = packKey; for (const entry of clipCache.values()) void entry.then(bitmap => bitmap?.close()); clipCache.clear(); clipSequence = null; clipPlayer = null; clipToken++; lastEpoch = -1; }
     renderSprite(); updateHit(); return;
   }
   if (old?.detailOpen && !next.detailOpen) root.querySelector<HTMLButtonElement>('.error-mark[aria-expanded="true"]')?.click();
