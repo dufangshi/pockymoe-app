@@ -34,26 +34,24 @@ the current route. Background/foreground keeps the same WebView and route.
 
 ## Why the app-bound list is still needed
 
-The HPKE/AEAD exchange itself runs in the page, not in a Service Worker. The Web
-already has page-level encrypted fetch, WebSocket and blob-download paths.
-However, the current Web forces `ensureRelayWorker()` before encrypted API and
-WebSocket setup, and a worker also handles direct protected-resource URLs used
-by the DOM (thread image assets, workspace raw resources and embedded content).
+The current Web uses Service Workers for encrypted resource routing. iOS enables
+that path for app-bound Web domains, so the local phone build keeps
+`limitsNavigationsToAppBoundDomains` and the worker-based routing. A general
+page-only routing mode is outside this local-build scope.
 
-Removing the worker requirement from API/socket setup alone would leave direct
-resource loads without decryption. A complete no-worker Web needs alternate
-asynchronous resource/blob loading, URL lifetime and embedded-resource handling,
-plus media/preview/download regression coverage. That is a separate Web change,
-not a safe native flag change. The current client therefore uses app-bound mode
-with an explicit private build allowlist. No production address is committed.
+This iOS app is built locally for the owner's own phone; no public iOS release
+or distribution identity is assumed. Keep the actual service address out of Git
+and all public artifacts. A local build may contain the required host allowlist.
 
-Create the ignored file `ios/Local.xcconfig` locally:
+Create the ignored file `ios/Local.xcconfig` locally. The following is only an
+example; replace it with your private Web host on your Mac:
 
 ```xcconfig
-POCKYMOE_APP_BOUND_HOSTS = web.your-domain.test
+POCKYMOE_APP_BOUND_HOSTS = app.example.com
 ```
 
-Use actual hostnames without protocols, ports, paths or wildcards, separated by
+The example.com placeholder is intentionally rejected until replaced. Use actual
+hostnames without protocols, ports, paths or wildcards, separated by
 commas. The Release pre-build script **fails** if this file/setting is missing,
 empty, invalid or contains the example placeholder. At most ten hosts are allowed.
 The script generates the build's Info.plist in DERIVED_FILE_DIR; tracked templates
@@ -177,9 +175,14 @@ Only use a dedicated simulator UUID. XCTest remains a separate acceptance layer:
 scripted DOM actions cannot prove real edge-swipe tracking, keyboard behavior under
 touches, notification taps, provider OAuth completion, hardware haptics or APNs.
 
-## Signing prerequisites
+## Local phone signing prerequisites
 
-An installable IPA needs matching app and Widget provisioning profiles. The main
+A local phone build still needs valid development signing and matching app and
+Widget provisioning profiles. This is separate from public distribution or a
+macOS Developer ID. Select the owner's local signing team in Xcode or pass
+DEVELOPMENT_TEAM when building; no account, certificate or profile is created by
+these instructions. Check that the chosen provisioning allows the capabilities
+below (a personal/free team may not provide them). The main
 app profile must allow Push Notifications (`aps-environment`) and registered
 App Group `group.com.remotecodex.app`; the Widget profile needs the same group.
 Local Live Activities use `NSSupportsLiveActivities`, not an additional standard
