@@ -25,3 +25,5 @@ ios/*.xcodeproj/xcuserdata/
 ios/*.xcodeproj/project.xcworkspace/xcuserdata/
 xcuserdata/
 .xcode-version
+
+__pycache__/

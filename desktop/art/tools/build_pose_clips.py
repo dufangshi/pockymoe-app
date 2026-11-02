@@ -13,7 +13,7 @@ PLAN.json holds the manifest fields, "poses" (the name of each pose in sheet ord
 "clips" (name to beats) and "states" (state to clip names). The 8×9 atlas, needed for the
 thumbnail and any state without a clip, is sampled from the clips in "atlas".
 """
-import argparse, importlib.util, json, math, zipfile
+import argparse, importlib.util, json, math, sys, zipfile
 from pathlib import Path
 import numpy as np
 from PIL import Image
@@ -24,6 +24,7 @@ ATLAS_CELL = (192, 208)
 
 
 def load_atlas_tools():
+    sys.dont_write_bytecode = True
     path = Path(__file__).resolve().parent.parent / 'moe' / 'build_atlas.py'
     spec = importlib.util.spec_from_file_location('build_atlas', path)
     module = importlib.util.module_from_spec(spec)
