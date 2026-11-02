@@ -1,6 +1,14 @@
 /** One source for app-owned desktop strings. Thread titles, summaries and names
  * are user content and are intentionally never translated. */
 export const english = {
+  "正在读取服务的模型…": "Reading the service's models…",
+  "服务需要 API Key，填好后会自动读取。": "This service needs an API key. Models load once it is set.",
+  "可以手动填写。": "You can type one instead.",
+  "服务没有列出模型，可以手动填写。": "The service lists no models. You can type one.",
+  "填好地址后自动读取。": "Loads once the address is set.",
+  "重新读取": "Read again",
+  "默认": "Default",
+  "默认 · {model}": "Default · {model}",
   "导入宠物包": "Import a pet pack",
   "导入": "Import",
   "宠物包": "Pet pack",
@@ -9,7 +17,6 @@ export const english = {
   "在设置的“上游”页添加和测试。": "Add and test them on the Upstreams page in Settings.",
   "还没有读到上游，请先在设置的“上游”页添加。": "No upstreams found yet. Add one on the Upstreams page in Settings.",
   "管理上游": "Manage upstreams",
-  "选择模型": "Choose a model",
   "请选择": "Choose…",
   "桌宠变小，占更少屏幕。": "Makes the pet small, so it takes less of the screen.",
   "上游没有返回文字": "The upstream returned no text",
@@ -61,9 +68,6 @@ export const english = {
   "清除": "Clear",
   "模型": "Model",
   "音色": "Voice",
-  "选择音色": "Choose a voice",
-  "获取": "Fetch",
-  "获取中…": "Fetching…",
   "风格描述": "Style",
   "温柔、自然的年轻女声": "A gentle, natural young female voice",
   "部分模型用它决定音色。": "Some models use this to shape the voice.",

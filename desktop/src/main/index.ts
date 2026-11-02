@@ -229,7 +229,7 @@ else {
             break;
           }
           case 'voiceKey': voice.setKey(typeof action.key === 'string' ? action.key : null); break;
-          case 'voiceList': await voice.refreshVoices(); break;
+          case 'voiceDiscover': await voice.discover(); break;
           case 'voicePreview': {
             if (!pet) throw new Error(t('桌宠模块尚未安装。'));
             pet.play(await voice.preview(t('这个任务已经完成了，来看看结果吧。')));

@@ -6,7 +6,7 @@ import { getLocale, t } from '../../shared/i18n';
 import { REMOTE_DEFAULTS, speechText, type RemoteProvider, type RemoteVoice, type SummaryConnection, type SummaryStatus, type VoiceOption, type VoiceStatus } from '../../shared/voice';
 import { VoiceKeys } from './keys';
 import { LocalModel, MODEL } from './model';
-import { listVoices, speechRequest, synthesizeRemote, VoiceError, voiceEndpoint } from './remote';
+import { listModels, listVoices, speechRequest, synthesizeRemote, VoiceError, voiceEndpoint } from './remote';
 import { cleanSummary, concreteLanguage, summaryPrompt, type Summarizer, type TurnContext } from './summary';
 
 const IDLE_UNLOAD_MS = 5 * 60_000, SYNTH_TIMEOUT_MS = 120_000;
@@ -37,6 +37,9 @@ export class VoiceService {
   private nextId = 0;
   private idle: ReturnType<typeof setTimeout> | undefined;
   private voices: VoiceOption[] = [];
+  private models: VoiceOption[] = [];
+  private discovery: VoiceStatus['discovery'] = { state: 'idle', error: null };
+  private discoverToken = 0;
   private lastError: string | null = null;
   private supported = addonAvailable();
   private listeners = new Set<() => void>();
@@ -54,7 +57,8 @@ export class VoiceService {
     wasReady = this.model.state === 'ready';
     let previous = settings.get();
     settings.onChange(next => {
-      if (next.petVoiceProvider !== previous.petVoiceProvider) { this.voices = []; this.lastError = null; }
+      if (next.petVoiceProvider !== previous.petVoiceProvider) this.lastError = null;
+      if (next.petVoiceProvider !== previous.petVoiceProvider || this.remote(next)?.config.url !== this.remote(previous)?.config.url) void this.discover();
       if (next.petSummaryConnection?.id !== previous.petSummaryConnection?.id || next.petSummaryConnection?.deviceId !== previous.petSummaryConnection?.deviceId) void this.refreshModels();
       // Turning voice on is the consent to fetch the model; the setting says how big it is.
       if (next.petVoice && next.petVoiceProvider === 'local' && this.supported && this.model.state === 'absent' && !this.model.error) void this.model.download();
@@ -76,7 +80,7 @@ export class VoiceService {
   }
   status(): VoiceStatus {
     const settings = this.settings.get(), origin = this.origin(settings);
-    return { model: { state: this.supported ? this.model.state : 'unsupported', progress: this.model.progress, error: this.model.error }, keySet: !!origin && this.keys.has(origin), voices: this.voices, lastError: this.lastError };
+    return { model: { state: this.supported ? this.model.state : 'unsupported', progress: this.model.progress, error: this.model.error }, keySet: !!origin && this.keys.has(origin), models: this.models, voices: this.voices, discovery: this.discovery, lastError: this.lastError };
   }
   summaryStatus(): SummaryStatus { return { ...this.summaryState }; }
   async refreshConnections(): Promise<void> {
@@ -142,13 +146,27 @@ export class VoiceService {
     if (!origin) throw new Error(message(new VoiceError('missingUrl')));
     try { if (key?.trim()) this.keys.set(origin, key.trim()); else this.keys.clear(origin); } catch (error) { throw new Error(message(error)); }
     this.changed();
+    void this.discover();
   }
-  async refreshVoices(): Promise<void> {
-    const settings = this.settings.get(), remote = this.remote(settings);
-    if (!remote) return;
-    const origin = this.origin(settings);
-    try { this.voices = await listVoices(fetcher, remote.provider, remote.config, origin ? this.keys.get(origin) : null); this.changed(); }
-    catch (error) { this.voices = []; this.changed(); throw new Error(message(error)); }
+  /** Reads what the service offers. An unanswered list leaves the field open for typing, and says why. */
+  async discover(): Promise<void> {
+    const settings = this.settings.get(), remote = this.remote(settings), token = ++this.discoverToken;
+    if (!remote) { this.models = []; this.voices = []; this.discovery = { state: 'idle', error: null }; this.changed(); return; }
+    if (!remote.config.url.trim()) { this.models = []; this.voices = []; this.discovery = { state: 'idle', error: null }; this.changed(); return; }
+    this.discovery = { state: 'loading', error: null }; this.changed();
+    const origin = this.origin(settings), key = origin ? this.keys.get(origin) : null;
+    const [models, voices] = await Promise.allSettled([listModels(fetcher, remote.provider, remote.config, key), listVoices(fetcher, remote.provider, remote.config, key)]);
+    if (token !== this.discoverToken) return;
+    this.models = models.status === 'fulfilled' ? models.value : [];
+    this.voices = voices.status === 'fulfilled' ? voices.value : [];
+    // A missing voice list is normal: many servers only have models. Only the model list decides failure.
+    this.discovery = models.status === 'rejected' ? { state: 'failed', error: message(models.reason) } : { state: 'done', error: null };
+    this.changed();
+    // Nothing chosen yet, and the service offers something: take the first, which can then be changed.
+    const patch: Partial<RemoteVoice> = {};
+    if (!remote.config.model.trim() && this.models[0]) patch.model = this.models[0].id;
+    if (!remote.config.voice.trim() && remote.provider === 'elevenlabs' && this.voices[0]) patch.voice = this.voices[0].id;
+    if (Object.keys(patch).length) this.settings.set({ petVoiceRemotes: { ...settings.petVoiceRemotes, [remote.provider]: { ...remote.config, ...patch } } });
   }
   /** Events use this: a failed remote service records why, and an installed local model takes over. */
   async speak(text: string): Promise<Uint8Array | null> {

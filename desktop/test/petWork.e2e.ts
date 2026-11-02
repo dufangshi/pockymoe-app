@@ -132,9 +132,9 @@ test('summary: picks a saved upstream and its model, and reads what the model sa
   await preferences.locator('#summary-source').click();
   await preferences.getByRole('option', { name: 'Main · MacBook' }).click();
   await expect(preferences.locator('#summary-model')).toBeVisible();
-  await preferences.locator('#summary-model-list').click();
+  await preferences.locator('button#summary-model').click();
   await preferences.getByRole('option', { name: 'Large model' }).click();
-  await expect(preferences.locator('#summary-model')).toHaveValue('large');
+  await expect(preferences.locator('button#summary-model')).toContainText('Large model');
   await preferences.locator('#summary-source').scrollIntoViewIfNeeded();
   await preferences.screenshot({ path: join(evidence, 'summary-settings.png'), animations: 'disabled' });
   await page.waitForTimeout(2700); // The sample from turning voice on is rate limited with alerts.

@@ -97,6 +97,27 @@ export function parseVoices(provider: RemoteProvider, body: unknown): VoiceOptio
   const uploaded = Array.isArray(value?.uploaded_voices) ? value.uploaded_voices.flatMap(voice => typeof voice?.name === 'string' ? [{ id: voice.name, label: voice.name }] : []) : [];
   return [...named, ...uploaded].slice(0, 500);
 }
+/** A gateway lists every model it has. Speech models are the ones to offer, if it names any as such. */
+export function parseModels(provider: RemoteProvider, body: unknown): VoiceOption[] {
+  if (provider === 'elevenlabs') {
+    const rows = Array.isArray(body) ? body as { model_id?: unknown; name?: unknown; can_do_text_to_speech?: unknown }[] : [];
+    return rows.filter(row => typeof row?.model_id === 'string' && row.can_do_text_to_speech !== false).map(row => ({ id: row.model_id as string, label: typeof row.name === 'string' ? row.name : row.model_id as string }));
+  }
+  const rows = (body as { data?: { id?: unknown }[] } | null)?.data;
+  const ids = (Array.isArray(rows) ? rows : []).flatMap(row => typeof row?.id === 'string' ? [row.id] : []);
+  const speech = ids.filter(id => /tts|speech|voice|audio/i.test(id));
+  return (speech.length ? speech : ids).slice(0, 500).map(id => ({ id, label: id }));
+}
+export async function listModels(fetcher: Fetch, provider: RemoteProvider, config: RemoteVoice, key: string | null): Promise<VoiceOption[]> {
+  const root = voiceEndpoint(config.url);
+  if (!root) throw new VoiceError('missingUrl');
+  if (key && new URL(root).protocol !== 'https:' && !isPrivateHost(new URL(root).hostname)) throw new VoiceError('insecureKey');
+  const url = provider === 'elevenlabs' ? `${root}/v1/models` : `${root}/models`;
+  const headers: Record<string, string> = key ? provider === 'elevenlabs' ? { 'xi-api-key': key } : { authorization: `Bearer ${key}` } : {};
+  const response = await send(fetcher, url, { headers });
+  if (!response.ok) throw await readError(response);
+  try { return parseModels(provider, await response.json()); } catch { throw new VoiceError('notVoices'); }
+}
 /** OpenAI has no listing endpoint, so its built-in names are known here; the field stays free text. */
 const OPENAI_VOICES = ['alloy', 'ash', 'ballad', 'cedar', 'coral', 'echo', 'fable', 'marin', 'nova', 'onyx', 'sage', 'shimmer', 'verse'];
 export async function listVoices(fetcher: Fetch, provider: RemoteProvider, config: RemoteVoice, key: string | null): Promise<VoiceOption[]> {

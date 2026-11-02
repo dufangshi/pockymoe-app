@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { defaults, pageSettings, pageSettingsPatch, SettingsStore } from '../src/main/store';
 import { VoiceKeys } from '../src/main/voice/keys';
 import { LocalModel } from '../src/main/voice/model';
-import { isPrivateHost, listVoices, MAX_AUDIO_BYTES, parseVoices, speechRequest, synthesizeRemote, voiceEndpoint } from '../src/main/voice/remote';
+import { isPrivateHost, listModels, listVoices, MAX_AUDIO_BYTES, parseModels, parseVoices, speechRequest, synthesizeRemote, voiceEndpoint } from '../src/main/voice/remote';
 import { cleanSummary, concreteLanguage, summaryPrompt } from '../src/main/voice/summary';
 import { encodeWav } from '../src/main/voice/wav';
 import { LOCAL_SPEAKERS, MAX_SPEECH_CHARS, speechText, type RemoteVoice } from '../src/shared/voice';
@@ -81,6 +81,25 @@ describe('remote synthesis', () => {
     let asked = '';
     await listVoices(async url => { asked = url; return new Response('{"voices":[]}'); }, 'compatible', config(), null);
     expect(asked).toBe('http://127.0.0.1:8091/v1/audio/voices');
+  });
+});
+describe('model discovery', () => {
+  it('offers speech models from a gateway that lists everything', () => {
+    expect(parseModels('compatible', { data: [{ id: 'gpt-5' }, { id: 'BreezeBlue/Breeze-TTS-2' }, { id: 'gpt-4o-mini-tts' }] }).map(row => row.id)).toEqual(['BreezeBlue/Breeze-TTS-2', 'gpt-4o-mini-tts']);
+    expect(parseModels('compatible', { data: [{ id: 'some-model' }] }).map(row => row.id)).toEqual(['some-model']);
+    expect(parseModels('compatible', null)).toEqual([]);
+  });
+  it('reads the ElevenLabs model list and keeps only speech models', () => {
+    expect(parseModels('elevenlabs', [{ model_id: 'a', name: 'A', can_do_text_to_speech: true }, { model_id: 'b', name: 'B', can_do_text_to_speech: false }])).toEqual([{ id: 'a', label: 'A' }]);
+  });
+  it('asks each service at its own path with its own key header', async () => {
+    const seen: { url: string; headers: unknown }[] = [];
+    const fetcher = async (url: string, init: RequestInit): Promise<Response> => { seen.push({ url, headers: init.headers }); expect(init.redirect).toBe('error'); return new Response(url.includes('elevenlabs') ? '[]' : '{"data":[]}'); };
+    await listModels(fetcher, 'compatible', config(), 'sk');
+    await listModels(fetcher, 'elevenlabs', config({ url: 'https://api.elevenlabs.io' }), 'xi');
+    expect(seen).toEqual([{ url: 'http://127.0.0.1:8091/v1/models', headers: { authorization: 'Bearer sk' } }, { url: 'https://api.elevenlabs.io/v1/models', headers: { 'xi-api-key': 'xi' } }]);
+    await expect(listModels(fetcher, 'compatible', config({ url: 'http://public.example.com/v1' }), 'sk')).rejects.toThrow('insecureKey');
+    await expect(listModels(async () => new Response('{"error":{"message":"Missing or invalid API token"}}', { status: 401 }), 'compatible', config(), null)).rejects.toThrow('HTTP 401');
   });
 });
 describe('API keys', () => {

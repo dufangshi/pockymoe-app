@@ -22,8 +22,9 @@ test.beforeAll(async () => {
     req.on('end', () => {
       if (req.url === '/') { res.setHeader('content-type', 'text/html'); res.end('<!doctype html><title>Fixture</title>'); return; }
       seen.push({ method: req.method ?? '', url: req.url ?? '', auth: req.headers.authorization ?? null, body });
+      if (req.url === '/v1/models') { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ data: [{ id: 'gpt-5' }, { id: 'BreezeBlue/Breeze-TTS-2' }, { id: 'broken-tts' }] })); return; }
       if (req.url === '/v1/audio/voices') { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ voices: ['S0', 'S1'], uploaded_voices: [] })); return; }
-      if (req.url === '/v1/audio/speech' && !body.includes('"model":"broken"')) { res.setHeader('content-type', 'audio/wav'); res.end(wav()); return; }
+      if (req.url === '/v1/audio/speech' && !body.includes('"model":"broken-tts"')) { res.setHeader('content-type', 'audio/wav'); res.end(wav()); return; }
       res.statusCode = 400; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ error: { message: 'model not loaded' } }));
     });
   });
@@ -42,7 +43,11 @@ test.beforeEach(async () => {
   const packaged = process.env.POCKYMOE_DESKTOP_APP;
   app = await electron.launch({ ...(packaged ? { executablePath: packaged, args: [] } : { args: [resolve('.')] }), env });
 });
-test.afterEach(async () => { await app?.close(); rmSync(profile, { recursive: true, force: true }); });
+test.afterEach(async () => {
+  // Electron ignores a quit that arrives before it is ready, which a test skipped at once would send.
+  await expect.poll(() => app.evaluate(() => '__pockymoeDesktopTest' in globalThis), { timeout: 20_000 }).toBe(true);
+  await app.close(); rmSync(profile, { recursive: true, force: true });
+});
 async function preferences(): Promise<Page> {
   await expect.poll(() => app.evaluate(() => '__pockymoeDesktopTest' in globalThis)).toBe(true);
   await app.evaluate(() => (globalThis as unknown as { __pockymoeDesktopTest: { windows: { createLocal(view: string): void } } }).__pockymoeDesktopTest.windows.createLocal('preferences'));
@@ -61,15 +66,17 @@ test('remote service: fetches voices, previews, plays, and shows a server error'
   await choose(page, 'petVoiceProvider', 'OpenAI');
   await expect(page.locator('#voice-url')).toHaveValue('https://api.openai.com/v1');
   await choose(page, 'petVoiceProvider', 'OpenAI-compatible service');
-  await page.locator('#voice-list').waitFor();
+  await expect(page.locator('#voice-discovery')).toContainText('Loads once the address is set');
   await fill(page, 'voice-url', `${origin}/v1/`);
   await expect(page.locator('#voice-url')).toHaveValue(`${origin}/v1`);
-  await fill(page, 'voice-model-name', 'BreezeBlue/Breeze-TTS-2');
+  // Everything comes from the service: the first speech model is chosen, the chat model is not offered.
+  await expect(page.locator('button#voice-model-name')).toContainText('BreezeBlue/Breeze-TTS-2');
+  await page.locator('button#voice-model-name').click();
+  await expect(page.getByRole('option', { name: 'gpt-5' })).toHaveCount(0);
+  await page.keyboard.press('Escape');
   await fill(page, 'voice-style', 'warm voice');
-  await page.locator('#voice-list').click();
-  await page.locator('#voice-name-list').click();
-  await page.getByRole('option', { name: 'S1' }).click();
-  await expect(page.locator('#voice-name')).toHaveValue('S1');
+  await choose(page, 'voice-name', 'S1');
+  await expect(page.locator('button#voice-name')).toContainText('S1');
   await expect(page.locator('.voice-note')).toContainText('sent to this service');
   await page.screenshot({ path: join(evidence, 'voice-remote.png'), animations: 'disabled' });
   await page.locator('#voice-preview').click();
@@ -77,7 +84,7 @@ test('remote service: fetches voices, previews, plays, and shows a server error'
   const speech = seen.find(request => request.url === '/v1/audio/speech')!;
   expect(JSON.parse(speech.body)).toMatchObject({ model: 'BreezeBlue/Breeze-TTS-2', voice: 'S1', instructions: 'warm voice', response_format: 'wav' });
   expect(speech.auth).toBeNull();
-  await fill(page, 'voice-model-name', 'broken');
+  await choose(page, 'voice-model-name', 'broken-tts');
   await page.locator('#voice-preview').click();
   await expect(page.locator('#voice-error')).toContainText('HTTP 400 · model not loaded');
 });
