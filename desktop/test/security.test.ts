@@ -3,18 +3,18 @@ import { deepLinkPath, externalUrl, isSignInUrl, isWebFrame, relayOrigin, thread
 import { validateSettings } from '../src/main/store';
 describe('origin and navigation guard', () => {
   it('recognizes only sign-in steps as belonging in the sign-in window', () => {
-    const relay = 'https://relay.example.com';
+    const relay = 'https://app.example.com';
     for (const url of [`${relay}/relay/auth/oauth/google/start?x=1`, `${relay}/relay/auth/oauth/github/start`, 'https://accounts.google.com/o/oauth2/v2/auth?client_id=x', 'https://github.com/login/oauth/authorize?client_id=x']) expect(isSignInUrl(url, relay)).toBe(true);
-    for (const url of [`${relay}/relay/account`, `https://relay.example.com.attacker.test/relay/auth/oauth/google/start`, 'https://github.com/dufangshi/pockymoe', 'http://accounts.google.com/', 'https://accounts.google.com.attacker.test/', 'not a url']) expect(isSignInUrl(url, relay)).toBe(false);
+    for (const url of [`${relay}/relay/account`, `https://app.example.com.attacker.test/relay/auth/oauth/google/start`, 'https://github.com/dufangshi/pockymoe', 'http://accounts.google.com/', 'https://accounts.google.com.attacker.test/', 'not a url']) expect(isSignInUrl(url, relay)).toBe(false);
   });
   it('allows exact origins only in the top frame', () => {
-    const origin = 'https://relay.example.com';
+    const origin = 'https://app.example.com';
     expect(isWebFrame(`${origin}/devices`, origin, true)).toBe(true);
-    for (const url of ['https://relay.example.com.attacker.test', 'http://relay.example.com', 'https://relay.example.com:444', 'file:///tmp/test', 'not a url']) expect(isWebFrame(url, origin, true)).toBe(false);
+    for (const url of ['https://app.example.com.attacker.test', 'http://app.example.com', 'https://app.example.com:444', 'file:///tmp/test', 'not a url']) expect(isWebFrame(url, origin, true)).toBe(false);
     expect(isWebFrame(origin, origin, false)).toBe(false);
   });
   it('accepts HTTPS or loopback HTTP origins without credentials, paths or queries', () => {
-    expect(relayOrigin('https://relay.example.com/')).toBe('https://relay.example.com');
+    expect(relayOrigin('https://app.example.com/')).toBe('https://app.example.com');
     expect(relayOrigin('http://127.0.0.1:43210')).toBe('http://127.0.0.1:43210');
     expect(relayOrigin('http://localhost:43210')).toBe('http://localhost:43210');
     expect(relayOrigin('http://[::1]:43210')).toBe('http://[::1]:43210');

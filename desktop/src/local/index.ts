@@ -2,6 +2,7 @@ import { shortcutLabel } from '../shared/platform';
 import { t, getLocale, setLocale, localizeMessage } from '../shared/i18n';
 // Approved local-UI exception: docs/ui-principles.md (Electron utility windows).
 import type { ActivityItem, DesktopSettings } from '../shared/contract';
+import { mountInitialState } from './initialState';
 import { localBridge, type LocalAction, type LocalState } from '../shared/local';
 import { mountQuick } from '../quick/view';
 import './style.css';
@@ -51,17 +52,18 @@ export async function action(value: LocalAction): Promise<boolean> {
 }
 const toggle = (id: keyof DesktopSettings, title: string, description: string, checked: boolean, disabled = false): string => `<div class="setting-row"><div><label for="${id}">${title}</label>${description ? `<p>${description}</p>` : ''}</div><input class="switch" type="checkbox" id="${id}" ${checked ? 'checked' : ''} ${disabled ? 'disabled' : ''}/></div>`;
 function renderRelay(): void {
-  const savedFields = new Map(['origin', 'web-origin', 'relay-origin'].map(id => [id, root.querySelector<HTMLInputElement>(`#${id}`)?.value]));
+  const savedFields = new Map(['origin', 'relay-origin'].map(id => [id, root.querySelector<HTMLInputElement>(`#${id}`)?.value]));
   const wasAdvanced = root.querySelector<HTMLDetailsElement>('#advanced')?.open || false;
   const image = root.querySelector('.app-icon');
   root.className = 'relay-page';
   root.innerHTML = `<div class="drag-zone"></div><div class="relay-content" data-scroll>
     <header class="connection-heading"><img class="app-icon" src="${appIcon}" alt=""/><h1>${t('连接 Pockymoe')}</h1></header>
     <form id="relay-form" novalidate><label for="origin">${t('Pockymoe 地址')}</label>
-      <div class="origin-field">${icon('link')}<input id="origin" type="url" required spellcheck="false" autocomplete="url" value="${escapeHtml(state.settings.webOrigin)}" placeholder="https://app.example.com"/></div>
-      <p class="hint">${t('填写网页或 Relay 地址，自动发现连接。')}</p>
-      <details id="advanced"><summary>${t('高级')}</summary><div class="advanced-fields"><label for="web-origin">${t('网页地址')}</label><input id="web-origin" type="url" spellcheck="false" value="${escapeHtml(state.settings.webOrigin)}"/><label for="relay-origin">${t('Relay 地址')}</label><input id="relay-origin" type="url" spellcheck="false" value="${escapeHtml(state.settings.relayOrigin)}"/><p class="hint">${t('分别指定网页与 API 地址；同源部署可填写相同地址。')}</p></div></details>
-    </form></div><div class="connection-action"><button class="primary connect" type="submit" form="relay-form">${t('连接')} <span aria-hidden="true">→</span></button><p id="relay-error" class="inline-error" role="alert"></p></div>`;
+      <div class="origin-field">${icon('link')}<input id="origin" type="url" required spellcheck="false" autocomplete="url" value="${escapeHtml(state.settings.webOrigin || state.settings.relayOrigin)}" placeholder="https://app.example.com"/></div>
+      <p id="relay-error" class="inline-error" role="alert"></p>
+      <p class="hint">${t('填写网页或 Relay 地址，自动发现连接。')}${!state.settings.webOrigin ? ` ${t('此版本不再提供默认地址。请填写你的 Pockymoe 地址以继续。')}` : ''}</p>
+      <details id="advanced"><summary>${t('高级')}</summary><div class="advanced-fields"><label for="relay-origin">${t('Relay 地址')}</label><input id="relay-origin" type="url" spellcheck="false" value="${escapeHtml(state.settings.relayOrigin)}"/><p class="hint">${t('分别指定网页与 API 地址；同源部署可填写相同地址。')}</p></div></details>
+    </form></div><div class="connection-action"><button class="primary connect" type="submit" form="relay-form">${t('连接')} <span aria-hidden="true">→</span></button></div>`;
   if (image) root.querySelector('.app-icon')!.replaceWith(image);
   for (const [id, value] of savedFields) if (value !== undefined) root.querySelector<HTMLInputElement>(`#${id}`)!.value = value;
   root.querySelector<HTMLDetailsElement>('#advanced')!.open = wasAdvanced;
@@ -80,13 +82,18 @@ function renderRelay(): void {
     renderRelay();
     try {
       const result = await localBridge().action({ type: 'connect', origin, ...(advanced ? {
-        webOrigin: document.querySelector<HTMLInputElement>('#web-origin')!.value.trim(),
         relayOrigin: document.querySelector<HTMLInputElement>('#relay-origin')!.value.trim()
       } : {}) });
       if (!result.ok) connectionError = result.error || t('连接失败，请重试');
     } catch { connectionError = t('连接暂时不可用，请重试'); }
     finally { connecting = false; renderRelay(); }
   };
+}
+function renderOffline(): void {
+  root.className = 'relay-page offline-page';
+  root.innerHTML = `<div class="drag-zone"></div><div class="relay-content"><header class="connection-heading"><img class="app-icon" src="${appIcon}" alt=""/><h1>${t('暂时无法连接')}</h1></header><p>${t('请检查网络后重试。')}</p></div><div class="connection-action"><button class="primary connect" id="retry">${t('重试')}</button><button class="connect" id="change-address">${t('更改地址')}</button></div>`;
+  root.querySelector<HTMLButtonElement>('#retry')!.onclick = () => { void action({ type: 'retryConnection' }); };
+  root.querySelector<HTMLButtonElement>('#change-address')!.onclick = () => { void action({ type: 'changeConnection' }); };
 }
 function renderPreferences(): void {
   for (const cleanup of selectCleanups) cleanup(); selectCleanups = [];
@@ -157,7 +164,9 @@ function renderWhenClosed(): void {
 }
 async function save(patch: Partial<DesktopSettings>): Promise<void> { if (await action({ type: 'settings', patch })) toast(t('已保存')); else { state = await localBridge().getState(); renderPreferences(); } }
 async function init(): Promise<void> {
-  state = await localBridge().getState();
+  await mountInitialState(localBridge(), initial => {
+  state = initial;
+  connectionError = state.connectionError || '';
   document.documentElement.dataset.glassFallback = String(!!state.glassFallback);
   document.documentElement.dataset.view = view;
   setLocale(state.locale);
@@ -168,7 +177,7 @@ async function init(): Promise<void> {
   const marks = document.createElement('style'); marks.textContent = statusMarkStyles; document.head.append(marks);
   localBridge().onState(next => { setLocale(next.locale); applyAppearance(next.appearance); renderMessage(next.message, messageResponse); });
   if (view === 'quick') { mountQuick(root, state); return; }
-  if (view === 'preferences') renderPreferences(); else if (view === 'about') renderAbout(); else renderRelay();
+  if (view === 'preferences') renderPreferences(); else if (view === 'about') renderAbout(); else if (view === 'offline') renderOffline(); else renderRelay();
   localBridge().onState(next => {
     // A repeated request must still reveal its section after the user changed tabs.
     const localeChanged = next.locale !== state.locale;
@@ -183,7 +192,9 @@ async function init(): Promise<void> {
     if (view === 'preferences' && changed) renderWhenClosed();
     if (view === 'relay' && localeChanged) renderRelay();
     if (view === 'about' && changed) renderAbout();
+    if (view === 'offline' && localeChanged) renderOffline();
     if (localeChanged && lastToast && document.querySelector('#toast.visible')) toast(localizeMessage(lastToast.message), lastToast.error);
+  });
   });
 }
 void init();

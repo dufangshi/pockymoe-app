@@ -11,7 +11,7 @@ v2 取代 v1。v1 是在一个落后上游 800 个提交的旧基线上写的。
   - appId `com.pockymoe.desktop`；
   - 页面桥 `window.pockymoeHost`。
   旧名只保留在 `docs/rename-pockymoe.md` 规定的地方。
-- Web UI 与 Relay 地址由用户配置，没有默认地址。连接页使用 `https://app.example.com` 作为占位符；Relay 可独立配置。
+- Web UI 可部署在 GitHub Pages（示例：`https://app.example.com`），Relay 可单独提供 API。客户端不提供默认地址，首次连接由用户填写。
   桌面主窗口加载 **Web 源**；APNs 注册走 **Relay 源**。
 - 以上游 `docs/ui-principles.md` 为准，它对每一处 UI 改动都有约束。其中与本文关系最大的几条：
   - 一类操作只有一种做法；
@@ -248,3 +248,13 @@ v1 的 §5（ActivityHub、投递策略、托盘、Dock、桌宠交互）和 §6
   - 切换范围；
   - 过滤。
 - 达到 ChatGPT/Codex 桌面版、Linear、Raycast 的完成度：对齐、留白、动效节奏、悬停、按下和焦点状态都要做到位。
+
+## 连接与离线
+
+首次连接只输入一个 Pockymoe 地址。客户端不带凭据探测并跟随安全重定向：
+输入 Relay 而跳到 Web 时保留输入的 Relay；同源自托管使用同一个源。
+高级设置只提供单独 Relay 的覆盖值。无法访问或无法识别 Pockymoe 时，
+保留连接页和输入，在字段旁显示一行解释，不进入离线页。
+已连接后的离线页始终提供主操作「重试」和次操作「更改地址」；后者返回
+带当前地址的连接页。升级时旧的单 Relay 设置只探测一次，成功保存源对，
+失败则返回带解释的连接页；已有 Web/Relay 源对不改写。

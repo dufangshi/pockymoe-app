@@ -19,8 +19,9 @@ POCKYMOE_DESKTOP_RELAY_ORIGIN=http://127.0.0.1:18900 pnpm dev
 ```
 
 The ports above are examples; this package never starts or restarts a Supervisor.
-There is no default service or Relay address. `POCKYMOE_DESKTOP_USER_DATA` selects an isolated
-app profile. Setting Web origin bypasses first run. HTTPS is required except on
+There is no default Web or Relay address. `https://app.example.com` is an
+example only. `POCKYMOE_DESKTOP_USER_DATA` selects an isolated app profile.
+Setting both Web and Relay origins bypasses setup. HTTPS is required except on
 loopback (`localhost`, `127.0.0.1`, `[::1]`).
 
 ## Install and use
@@ -32,9 +33,9 @@ QA command below are **not notarized** and are for local developer testing;
 normal distribution requires a Developer ID signature and notarization. Windows
 builds without an Authenticode certificate are unsigned.
 
-On first launch, enter your Pockymoe service address (`https://app.example.com`
-is an example placeholder). Use **Advanced** to enter Web and Relay separately, or
-use the same origin for both when the Relay also serves the UI. Sign in with your
+On first launch, enter your Pockymoe address, for example
+`https://app.example.com`. The redirect probe discovers Web and Relay from that single field;
+**Advanced** offers an optional Relay override. Sign in with your
 existing account; this client does not install or replace a device Supervisor.
 
 Use **Pockymoe → Preferences…** (Cmd/Ctrl+,) or the tray's Preferences entry to
@@ -49,9 +50,9 @@ the pet continue receiving changes. Cmd/Ctrl+Q or Quit Pockymoe exits.
 ## Connection discovery
 
 First run asks for **Pockymoe 地址**, accepting a Web origin or Relay origin.
-Discovery reads the existing upstream deployment metadata:
+Discovery first probes the entered address and follows validated redirects without credentials:
 
-- GitHub Pages `STATIC_HOSTING.txt` has `Relay API origin: <origin>`, emitted by
+- For separate static hosting, GitHub Pages `STATIC_HOSTING.txt` has `Relay API origin: <origin>`, emitted by
   `apps/supervisor-web/staticHosting.ts` from `VITE_POCKYMOE_RELAY_ORIGIN`.
 - If the text asset is unavailable, the generated HTML meta CSP's `connect-src`
   supplies candidate Relay origins. Candidates must answer `/healthz` with
@@ -62,15 +63,22 @@ Discovery reads the existing upstream deployment metadata:
 
 Discovery omits credentials, bounds downloads to 2 MB, times out individual
 requests, validates every redirect and never executes returned HTML/scripts.
-Custom hosts without that metadata can use **高级** to specify both origins
-explicitly. Preferences displays the current pair and opens the same form for
+The response must identify Pockymoe. **高级** overrides the Relay while the
+main field supplies the Web address (or a Relay redirecting to it). Invalid or
+unreachable addresses remain on setup with one inline explanation, without
+saving the pair or opening an offline window. An outage after connection opens
+the local offline page with **Retry** and **Change address**; Change address
+returns to setup with the current address filled in. Preferences displays the current pair and opens the same form for
 changes. No new backend endpoint is required.
 
 The app is `Pockymoe` (`com.pockymoe.desktop`); `pockymoe://` is the primary
 protocol and `remotecodex://` is accepted for compatibility. Existing JSON
 settings under the old `Remote Codex` user-data directory are copied once if no
-Pockymoe settings exist. A v1 relay-only configuration maps its stored address to both origins; stored
-addresses are not replaced by a default. Credentials/keys are
+Pockymoe settings exist. A v1 relay-only profile is probed once on upgrade; success persists the discovered
+pair. Failure persists an empty Web origin and returns to setup with the saved
+Relay filled in and an explanation, so it is not silently guessed or re-probed
+on every launch. An existing explicit Web/Relay pair is preserved. Profiles without
+a saved address open setup; explicitly saved origins are preserved. Credentials/keys are
 never inspected or copied by this migration. The session partition name remains
 `persist:remote-codex` to avoid changing its persisted identity.
 
@@ -444,3 +452,51 @@ so an owner cannot reenter destruction of its child on Windows.
 Tray disposal removes pending window-ready callbacks and subscriptions; later
 window readiness or theme/activity changes cannot update a destroyed native tray.
 The shutdown regression delivers that late event after disposal before quitting.
+
+### Address setup and public-source guard
+
+There is no default Web or Relay address. A fresh profile, or an older
+`settings.json` without an address, opens the existing connection page with an
+empty input and `https://app.example.com` as its placeholder. The page explains
+that a default address is no longer provided. Saving a connection completes
+setup; later launches keep the stored origins (including previously explicit
+production origins). A legacy relay-only profile goes through the credential-free redirect probe once;
+an existing origin pair is preserved. Settings remain in Electron's user-data `settings.json`; no credentials
+are migrated or inspected.
+
+Until a connection is configured, Web/sign-in windows redirect to local setup,
+automatic/manual update checks are deferred, and voice downloads/actions are
+blocked. Setup itself loads bundled assets and contacts the entered address only
+when Connect is pressed.
+
+`python ../scripts/check-production-address.py` scans all tracked files using a
+hash of the forbidden address fragment, reporting paths only. The Windows CI
+also extracts `app.asar` with `scripts/extract-asar.cjs` and the builder's locked asar library and scans the
+contents, unpacked native files and renderer/main output. Mobile sources are
+included in the source guard and must be cleaned by their respective owners.
+
+### Built-in pet
+
+MOE (`moe`) is the only bundled pet and the default. Other pets are user imports.
+Old built-in selections `frost` and `gpt-dragon` fall back to `moe`. Imported ids
+are retained, including an imported `frost` on later launches; only `moe` is
+reserved against import. The package hook verifies that `resources/pets` contains
+exactly `moe`. The procedural placeholder lives only in test fixtures.
+
+### Electron lifecycle regressions
+
+Local renderers subscribe before requesting their initial state, buffer broadcasts
+while IPC is in flight, and select the newest revision before mounting. This
+prevents an empty quick list from losing a newer activity snapshot during startup.
+E2E window readiness follows actual renderer/navigation events and then waits for
+DOMContentLoaded; it does not treat a five-second cold-load delay as a missing
+window. Activity fixtures acknowledge fire-and-forget updates with a same-frame
+IPC round trip before acting in another window. Hover stability checks pin the
+pointer input and await the renderer/native size acknowledgement before measuring,
+so host pointer movement and unfinished initial layout cannot change the premise.
+
+Windows tray updates stop as soon as the window manager enters quitting, before
+native tray disposal. Image/menu preparation can reenter native ready/quit events,
+so updates recheck liveness before touching the tray. The shutdown regression
+retires the native tray during image preparation and delivers a late window-ready
+callback before disposal; the app must still exit cleanly.

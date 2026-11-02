@@ -1,3 +1,4 @@
+import { hasConnection } from './store';
 import { t, getLocale, setLocale } from '../shared/i18n';
 import { app, BrowserWindow, dialog, globalShortcut, ipcMain, nativeTheme, Notification, session, shell, type IpcMainEvent, type IpcMainInvokeEvent } from 'electron';
 import { localFileMatches } from './platform';
@@ -10,7 +11,7 @@ import type { LocalAction, LocalState } from '../shared/local';
 import { channels as c } from '../shared/channels';
 import { ActivityHub, alertId, validateSnapshot } from './activity';
 import { pageSettings, pageSettingsPatch, SettingsStore, validateSettings } from './store';
-import { externalUrl, isWebFrame, relayOrigin, threadPath } from './security';
+import { externalUrl, isWebFrame, threadPath } from './security';
 import { AppearanceStore } from './appearance';
 import { discoverOrigins } from './discovery';
 import { Windows, type CommandInput } from './windows';
@@ -57,6 +58,11 @@ else {
       ...(process.env.POCKYMOE_DESKTOP_WEB_ORIGIN ? { webOrigin: process.env.POCKYMOE_DESKTOP_WEB_ORIGIN } : {}),
       ...(process.env.POCKYMOE_DESKTOP_RELAY_ORIGIN ? { relayOrigin: process.env.POCKYMOE_DESKTOP_RELAY_ORIGIN } : {})
     });
+    let connectionError = '';
+    if (settings.legacyRelay) {
+      try { settings.set(await discoverOrigins(settings.legacyRelay)); }
+      catch { settings.set({ webOrigin: '' }); connectionError = t('无法连接已保存的地址，请检查后重试。'); }
+    }
     const hub = new ActivityHub(join(dataDir, 'delivered-alerts.json'));
     const manager = new Windows(settings, dataDir); windows = manager;
     const appearance = new AppearanceStore();
@@ -162,8 +168,9 @@ else {
     }
     const messages = new LocalMessages(() => broadcast());
     const showMessageBox: ShowMessage = options => process.platform === 'win32' ? messages.show(options, manager.createLocal('preferences')) : dialog.showMessageBox(options);
-    const localState = (window?: BrowserWindow): LocalState => ({ message: window ? messages.view(window.id) : null, platform: process.platform, glassFallback: process.platform === 'win32' && windowsGlassMaterial(release(), process.env.POCKYMOE_WINDOWS_GLASS === 'solid') === 'solid', locale: getLocale(), preferencesRequestId, preferencesSection, settings: settings.get(), appearance: appearance.get(), snapshot: hub.snapshot(), petAvailable: pet?.isAvailable() ?? false, petPacks: petCatalog.list(), version: app.getVersion(), voice: voice.status(), summary: voice.summaryStatus() });
-    const broadcast = (): void => { for (const w of manager.local.keys()) if (!w.isDestroyed()) w.webContents.send(c.localState, localState(w)); };
+    let stateRevision = 0;
+    const localState = (window?: BrowserWindow): LocalState => ({ revision: stateRevision, connectionError, message: window ? messages.view(window.id) : null, platform: process.platform, glassFallback: process.platform === 'win32' && windowsGlassMaterial(release(), process.env.POCKYMOE_WINDOWS_GLASS === 'solid') === 'solid', locale: getLocale(), preferencesRequestId, preferencesSection, settings: settings.get(), appearance: appearance.get(), snapshot: hub.snapshot(), petAvailable: pet?.isAvailable() ?? false, petPacks: petCatalog.list(), version: app.getVersion(), voice: voice.status(), summary: voice.summaryStatus() });
+    const broadcast = (): void => { stateRevision++; for (const w of manager.local.keys()) if (!w.isDestroyed()) w.webContents.send(c.localState, localState(w)); };
     voice.onChange(broadcast);
     let nativeLocale = getLocale();
     appearance.onChange(next => {
@@ -178,19 +185,20 @@ else {
         const w = guardLocal(e);
         if (!value || typeof value !== 'object') throw new Error(t('操作无效'));
         const action = value as LocalAction;
+        if (!hasConnection(settings.get()) && (action.type.startsWith('voice') || ['summaryConnections', 'summaryModels', 'summaryTest', 'muteTargets', 'external'].includes(action.type))) throw new Error(t('请输入有效的 Pockymoe 地址'));
         switch (action.type) {
           case 'settings': applySettings(action.patch); break;
           case 'connect': {
-            const pair = action.webOrigin !== undefined || action.relayOrigin !== undefined
-              ? { webOrigin: relayOrigin(action.webOrigin), relayOrigin: relayOrigin(action.relayOrigin) }
-              : await discoverOrigins(action.origin);
+            const pair = await discoverOrigins(action.webOrigin || action.origin, fetch, action.relayOrigin || undefined);
+            connectionError = '';
             const changed = pair.webOrigin !== settings.get().webOrigin || pair.relayOrigin !== settings.get().relayOrigin;
             applySettings(pair);
-            if (!changed) manager.focusMain();
+            if (!changed) manager.retryConnection();
             if (process.env.POCKYMOE_DESKTOP_E2E !== '1') void registerApns(settings, manager);
             w.close(); break;
           }
-          case 'changeConnection': manager.createLocal('relay'); break;
+          case 'changeConnection': connectionError = ''; manager.createLocal('relay'); if (manager.local.get(w) === 'offline') w.close(); break;
+          case 'retryConnection': w.close(); manager.retryConnection(); break;
           case 'hide': w.hide(); break;
           case 'quickSize': manager.fitQuick(w, action.height); break;
           case 'connectionSize': {
@@ -227,7 +235,7 @@ else {
             const safe = externalUrl(action.url); if (!safe) throw new Error(t('操作无效'));
             await shell.openExternal(safe); break;
           }
-          case 'checkUpdate': await checkUpdate(showMessageBox); break;
+          case 'checkUpdate': if (hasConnection(settings.get())) await checkUpdate(showMessageBox); break;
           case 'messageResponse':
             if (!messages.respond(w.id, action.id, action.response)) throw new Error(t('操作无效'));
             break;
@@ -280,7 +288,7 @@ else {
     hub.onSnapshot(broadcast);
     globalShortcut.register(settings.get().quickWindowShortcut, () => manager.toggleQuick());
     installMenu(manager, settings);
-    if (settings.firstRun) manager.createLocal('relay'); else manager.createMain();
+    if (!hasConnection(settings.get())) manager.createLocal('relay'); else manager.createMain();
     if (process.env.POCKYMOE_DESKTOP_E2E !== '1') {
       for (const protocol of ['pockymoe', 'remotecodex']) {
         if (app.isPackaged) app.setAsDefaultProtocolClient(protocol);
@@ -288,7 +296,7 @@ else {
       }
     }
     for (const url of [...deepLinks, ...process.argv.filter(a => /^(pockymoe|remotecodex):/.test(a))]) openLink(url);
-    if (process.env.POCKYMOE_DESKTOP_E2E !== '1') { configureUpdates(showMessageBox); void registerApns(settings, manager); }
+    if (process.env.POCKYMOE_DESKTOP_E2E !== '1') { configureUpdates(showMessageBox, () => hasConnection(settings.get())); void registerApns(settings, manager); }
     app.on('activate', () => { if (manager.quitting) return; if (manager.relay.size) manager.focusMain(); else manager.createLocal('relay'); });
     app.on('before-quit', () => { manager.quitting = true; messages.dispose(); manager.dispose(); notifications.dispose(); voice.dispose(); pet?.dispose(); tray.dispose(); hub.dispose(); globalShortcut.unregisterAll(); });
     if (process.env.POCKYMOE_DESKTOP_E2E === '1') Object.assign(globalThis, { __pockymoeDesktopTest: { hub, settings, appearance, windows: manager, tray, notifications, capabilities, updater: autoUpdater, showMessageBox, messages } });

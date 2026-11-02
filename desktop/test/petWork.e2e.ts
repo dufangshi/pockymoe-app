@@ -73,8 +73,10 @@ const baseline = (): Promise<void> => page.evaluate(async value => { window.pock
 const finish = async (): Promise<void> => { await baseline(); await sync([item()]); await sync([item({ state: 'completed', unread: true })]); };
 const movePetUnderPointer = (): Promise<void> => app.evaluate(({ BrowserWindow, screen }) => {
   const sprite = BrowserWindow.getAllWindows().find(window => window.webContents.getURL().includes('pet/index.html') && !window.getParentWindow())!;
-  const point = screen.getCursorScreenPoint(), bounds = sprite.getBounds();
-  sprite.setBounds({ ...bounds, x: point.x - Math.round(bounds.width / 2), y: point.y - Math.round(bounds.height / 2) });
+  const bounds = sprite.getBounds();
+  // Pin the input, not the native window: another test or the owner moving the
+  // real pointer must not change the hover condition during this regression.
+  screen.getCursorScreenPoint = () => ({ x: bounds.x + Math.round(bounds.width / 2), y: bounds.y + Math.round(bounds.height / 2) });
 });
 const glassBounds = (): Promise<{ y: number; visible: boolean; height: number }> => app.evaluate(({ BrowserWindow }) => {
   const glass = BrowserWindow.getAllWindows().find(window => window.webContents.getURL().includes('pet/index.html') && !!window.getParentWindow())!;
@@ -86,11 +88,20 @@ test('a bubble stays solid and is not redrawn while the pointer is on it', async
   const glass = await pet('glass');
   await expect(glass.locator('.bubble')).toBeVisible();
   await movePetUnderPointer();
-  await glass.waitForTimeout(600);
+  await expect(glass.locator('.controls')).toBeVisible();
+  await glass.evaluate(() => document.fonts.ready);
+  // Await the measurement IPC itself. Windows rounds logical window bounds to
+  // physical pixels (and enforces native minimums), so outer bounds are not a
+  // valid acknowledgement of an exact CSS height at fractional display scales.
+  const measured = await glass.evaluate(async () => {
+    const root = document.querySelector('#app')!.getBoundingClientRect();
+    return (window as unknown as { rcDesktop: { pet: { action(value: unknown): Promise<{ ok: boolean }> } } }).rcDesktop.pet.action({ type: 'surfaceMeasure', width: Math.ceil(root.width), height: Math.ceil(root.height) });
+  });
+  expect(measured.ok).toBe(true);
   await glass.evaluate(() => { const w = window as unknown as { rewrites: number }; w.rewrites = 0; new MutationObserver(records => { w.rewrites += records.length; }).observe(document.querySelector('#app')!, { childList: true, subtree: true }); });
   const heights: number[] = [];
   for (let i = 0; i < 20; i++) { heights.push((await glassBounds()).y); await glass.waitForTimeout(100); }
-  // This reads the real pointer, which may move once. The bug redrew ten times a second.
+  // Constant hover after the measured size is acknowledged must not redraw or drift.
   expect(await glass.evaluate(() => (window as unknown as { rewrites: number }).rewrites)).toBeLessThan(8);
   expect(new Set(heights).size).toBeLessThanOrEqual(2);
   // Past the old six-second fade.
@@ -136,10 +147,14 @@ const openPreferences = async (): Promise<Page> => {
   await preferences.locator('[data-section="pet"]').click();
   // Discovery starts when this section mounts. Open its pickers only after their
   // data arrives; an open picker deliberately defers replacing its options.
-  await expect.poll(() => preferences.evaluate(async () => {
-    const state = await (window as unknown as { pockymoeDesktop: { getState(): Promise<import('../src/shared/local').LocalState> } }).pockymoeDesktop.getState();
-    return !!state.summary.muteTargets && (!state.settings.petVoiceSummary || state.summary.connections.length > 0);
-  })).toBe(true);
+  await preferences.evaluate(() => new Promise<void>(resolve => {
+    const bridge = (window as unknown as { pockymoeDesktop: import('../src/shared/local').LocalBridge }).pockymoeDesktop;
+    const ready = (state: import('../src/shared/local').LocalState): boolean => !!state.summary.muteTargets && (!state.settings.petVoiceSummary || state.summary.connections.length > 0);
+    // Await the data broadcasts produced by the UI's actual requests. A separate
+    // five-second polling deadline can expire before the query's own IPC deadline.
+    const stop = bridge.onState(state => { if (ready(state)) { stop(); resolve(); } });
+    void bridge.getState().then(state => { if (ready(state)) { stop(); resolve(); } });
+  }));
   return preferences;
 };
 test('summary: picks a saved upstream and its model, and reads what the model said', async () => {
@@ -293,8 +308,14 @@ test('docked: an alert brings the head out, and it tucks back when the alert is 
 test('closing the panel leaves the main window where it was', async () => {
   const sprite = await pet('sprite');
   const act = (value: unknown): Promise<unknown> => sprite.evaluate(input => (window as unknown as { rcDesktop: { pet: { action(value: unknown): Promise<unknown> } } }).rcDesktop.pet.action(input), value);
-  const focused = (): Promise<boolean> => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().some(window => !window.webContents.getURL().includes('pet/index.html') && window.isFocused()));
-  await app.evaluate(({ BrowserWindow }) => { for (const window of BrowserWindow.getAllWindows()) if (window.isFocused()) window.blur(); });
+  const focused = (): Promise<boolean> => app.evaluate(() => globalThis.__pockymoeDesktopTest.windows.mainFocused());
+  // Windows may immediately refocus the only eligible visible window after blur.
+  // Give native focus a real destination while keeping the main window visible.
+  const keeper = await app.evaluate(async ({ BrowserWindow }) => {
+    const window = new BrowserWindow({ width: 300, height: 200, show: false, title: 'Focus fixture' });
+    await window.loadURL('about:blank'); window.show(); window.focus(); return window.id;
+  });
+  await expect.poll(() => app.evaluate(({ BrowserWindow }, id) => BrowserWindow.fromId(id)?.isFocused(), keeper)).toBe(true);
   await expect.poll(focused).toBe(false);
   await act({ type: 'toggleTray' });
   // What a real click can do on macOS: the app comes forward with its main window.
@@ -345,10 +366,17 @@ for (const surface of ['glass', 'sprite'] as const) test(`native close on ${surf
 });
 
 for (const surface of ['glass', 'sprite'] as const) test(`destroying ${surface} retires both pet windows`, async () => {
-  await app.evaluate(({ BrowserWindow }, surface) => {
-    BrowserWindow.getAllWindows().find(window => window.webContents.getURL().includes('pet/index.html') && !!window.getParentWindow() === (surface === 'glass'))!.destroy();
+  const ids = await app.evaluate(({ BrowserWindow }, surface) => {
+    const pets = BrowserWindow.getAllWindows().filter(window => window.webContents.getURL().includes('pet/index.html'));
+    const ids = pets.map(window => window.id);
+    pets.find(window => !!window.getParentWindow() === (surface === 'glass'))!.destroy();
+    return ids;
   }, surface);
-  await expect.poll(() => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().filter(window => window.webContents.getURL().includes('pet/index.html')).length)).toBe(0);
+  // A dying window can remain in getAllWindows with null webContents. Track the
+  // native IDs captured before destruction instead of dereferencing retired URLs.
+  await expect.poll(() => app.evaluate(({ BrowserWindow }, ids) => ids.every(id => {
+    const window = BrowserWindow.fromId(id); return !window || window.isDestroyed();
+  }), ids)).toBe(true);
   await page.evaluate(() => window.pockymoeHost!.window.openPreferences('pet'));
   await expect.poll(() => app.windows().some(page => page.url().includes('view=preferences'))).toBe(true);
   const prefs = app.windows().find(page => page.url().includes('view=preferences'))!;

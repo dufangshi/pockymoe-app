@@ -32,7 +32,7 @@ export class PetCatalog {
           const name = typeof manifest.displayName === 'string' ? manifest.displayName.slice(0, 100) : id;
           this.assets.set(id, { path: image, type: image.endsWith('.png') ? 'image/png' : 'image/webp' });
           this.entries.push({ id, name, thumbnail: `pockymoe-pet://atlas/${encodeURIComponent(id)}`, rows: manifest.spriteVersionNumber === 2 ? 11 : 9,
-            ...(['moe', 'frost'].includes(id) && directory === this.directories[0] ? { author: 'Pockymoe' } : credit(manifest)) });
+            ...(id === 'moe' && directory === this.directories[0] ? { author: 'Pockymoe' } : credit(manifest)) });
         } catch { /* Incomplete/custom packs must not break Preferences. */ }
       }
     }
