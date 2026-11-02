@@ -111,7 +111,7 @@ function renderPreferences(): void {
       ${pack?.thumbnail ? `<div class="pet-credit"><span class="pet-thumbnail"><img src="${escapeHtml(pack.thumbnail)}" style="height:${(pack.rows || 9) * 100}%" alt="${escapeHtml(pack.name)}"/></span><span><strong>${escapeHtml(pack.name)}</strong><small>${escapeHtml(pack.author || '')}${pack.license ? ` · <button class="text-link" data-external="${escapeHtml(pack.licenseUrl!)}">${escapeHtml(pack.license)}</button>` : ''}${pack.source ? ` · <button class="text-link" data-external="${escapeHtml(pack.source)}">${t('来源')}</button>` : ''}</small></span></div>` : ''}
       <div class="setting-row"><label for="petSize">${t('大小')}</label>${picker('petSize', t('宠物大小'))}</div>
       ${toggle('petEdgeHide', t('贴边自动隐藏'), t('靠近屏幕边缘时收起，指针靠近时探出。'), s.petEdgeHide)}
-      ${toggle('petMini', t('Mini 模式'), t('只显示控制条和活动托盘。'), s.petMini)}
+      ${toggle('petMini', t('Mini 模式'), t('桌宠变小，占更少屏幕。'), s.petMini)}
       ${toggle('petSound', t('提示音'), t('点击桌宠和收到提醒时播放，打开时试听。'), s.petSound)}
       </section><h2>${t('语音')}</h2><section class="settings-group voice-group">${voiceSection(state, picker)}</section>`;
   } else content.innerHTML = `<h2>${t('全局快捷键')}</h2><section class="settings-group"><label for="quickWindowShortcut">${t('唤起快捷窗口')}</label><div class="shortcut-field"><input id="quickWindowShortcut" value="${escapeHtml(s.quickWindowShortcut)}" spellcheck="false" aria-label="${t('快捷窗口快捷键')}"/><button id="save-shortcut">${t('保存')}</button></div></section>

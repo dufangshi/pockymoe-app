@@ -19,6 +19,9 @@ export const ANIMATIONS = {
   running: { row: 7, durations: [120, 120, 120, 120, 120, 220] },
   review: { row: 8, durations: [150, 150, 150, 150, 150, 280] },
   sleeping: { row: 0, durations: [6000] },
+  // Only packs with clips for these use them; without clips the pet keeps its current state.
+  dragging: { row: 0, durations: [280, 110, 110, 140, 140, 320] },
+  landing: { row: 0, durations: [280, 110, 110, 140, 140, 320] },
 } as const;
 
 /** A request is news for this long. After that it stays in the bubble, and must not hide that work is going on. */

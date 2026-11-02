@@ -191,6 +191,9 @@ export class Windows {
       else { const queue = this.pending.get(id) || []; queue.push(send); this.pending.set(id, queue.slice(-100)); }
     });
   }
+  mainFocused(): boolean { return [...this.relay].some(w => !w.isDestroyed() && w.isFocused()); }
+  /** Puts back a main window that macOS raised on its own; blur() also sends it behind other apps. */
+  lowerMain(): void { for (const w of this.relay) if (!w.isDestroyed() && w.isFocused()) w.blur(); }
   /** Asks the page for data. It never opens or raises a window: without a page there is simply no answer. */
   query(input: CommandInput, timeoutMs = 15_000): Promise<HostCommandResult> {
     if (![...this.relay].some(w => !w.isDestroyed())) return Promise.resolve({ ok: false, error: t('Pockymoe 页面未响应，请确认已登录并重试') });

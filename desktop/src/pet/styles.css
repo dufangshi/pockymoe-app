@@ -117,3 +117,5 @@ hr { border:0;border-top:1px solid var(--theme-border);margin:4px; }
 .request-more { height:22px;min-width:24px;padding:0 3px;color:var(--theme-muted);font-size:10px; }
 .bubble-request-line { display:flex;align-items:center;padding-right:7px; }.bubble-request-line .request-summary { flex:1;min-width:0; }
 .bubble-request-line .request-more { align-self:flex-start; }
+/* An alert pops her head out with a little overshoot; the way back in stays plain. */
+#character.peeking { transition:transform 460ms cubic-bezier(.34,1.8,.64,1); }

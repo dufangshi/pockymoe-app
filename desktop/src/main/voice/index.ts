@@ -1,5 +1,5 @@
 import { app, net, safeStorage, utilityProcess, type UtilityProcess } from 'electron';
-import { existsSync } from 'node:fs';
+import { existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import type { ActivityEvent, DesktopSettings, HostCommand, HostCommandResult, SettingsStoreLike } from '../../shared/contract';
 import { getLocale, t } from '../../shared/i18n';
@@ -7,12 +7,12 @@ import { REMOTE_DEFAULTS, speechText, type RemoteProvider, type RemoteVoice, typ
 import { VoiceKeys } from './keys';
 import { LocalModel, MODEL } from './model';
 import { listVoices, speechRequest, synthesizeRemote, VoiceError, voiceEndpoint } from './remote';
-import { chatEndpoint, chatSummarizer, cleanSummary, concreteLanguage, summaryPrompt, type Summarizer, type TurnContext } from './summary';
+import { cleanSummary, concreteLanguage, summaryPrompt, type Summarizer, type TurnContext } from './summary';
 
 const IDLE_UNLOAD_MS = 5 * 60_000, SYNTH_TIMEOUT_MS = 120_000;
 const COMPLETE_TIMEOUT_MS = 45_000;
 /** The page reaches the account's devices; none of this may open or raise a window. */
-type PageCommand = Extract<HostCommand, { type: 'turnText' | 'listConnections' | 'completeWithConnection' }>;
+type PageCommand = Extract<HostCommand, { type: 'turnText' | 'listConnections' | 'completeWithConnection' | 'connectionModels' }>;
 export type PageQuery = (command: PageCommand extends infer C ? C extends { id: string } ? Omit<C, 'id'> : never : never, timeoutMs?: number) => Promise<HostCommandResult>;
 const fetcher = (url: string, init: RequestInit): Promise<Response> => net.fetch(url, init as never);
 /** The addon ships per platform; where none exists (or it fails to load) remote services still work. */
@@ -25,7 +25,7 @@ function message(error: unknown): string {
   const known: Record<string, string> = {
     invalidUrl: t('服务地址无效'), missingUrl: t('请先填写服务地址'), missingVoice: t('请先选择音色'), invalidExtra: t('额外参数必须是 JSON 对象'),
     insecureKey: t('公网地址要用 HTTPS 才能发送 API Key'), timeout: t('语音服务超时'), unreachable: t('无法连接语音服务'), notAudio: t('服务返回的不是音频'),
-    missingModel: t('请先填写模型'), notSummary: t('上游没有返回文字'), tooLarge: t('音频太大'), notVoices: t('服务没有提供音色列表，请手动填写'), keychainUnavailable: t('系统钥匙串不可用，无法保存 API Key'), modelAbsent: t('本地模型还没有下载'),
+    missingUpstream: t('请先选择上游'), notSummary: t('上游没有返回文字'), tooLarge: t('音频太大'), notVoices: t('服务没有提供音色列表，请手动填写'), keychainUnavailable: t('系统钥匙串不可用，无法保存 API Key'), modelAbsent: t('本地模型还没有下载'),
   };
   return known[code] ?? (code || t('操作失败'));
 }
@@ -40,12 +40,12 @@ export class VoiceService {
   private lastError: string | null = null;
   private supported = addonAvailable();
   private listeners = new Set<() => void>();
-  private summaryKeys: VoiceKeys;
-  private summaryState: SummaryStatus = { connections: [], keySet: false, lastError: null, sample: null };
+  private summaryState: SummaryStatus = { connections: [], models: [], lastError: null, sample: null };
   constructor(dataDir: string, private settings: SettingsStoreLike, private ready: () => void, private query: PageQuery) {
     let wasReady = false;
     this.keys = new VoiceKeys(join(dataDir, 'voice-keys.json'), safeStorage);
-    this.summaryKeys = new VoiceKeys(join(dataDir, 'summary-keys.json'), safeStorage);
+    // Keys saved by the old custom address have no use now, so they should not linger.
+    rmSync(join(dataDir, 'summary-keys.json'), { force: true });
     this.model = new LocalModel(join(dataDir, 'voice'), fetcher, () => {
       const nowReady = this.model.state === 'ready';
       if (nowReady && !wasReady && settings.get().petVoice && settings.get().petVoiceProvider === 'local') this.ready();
@@ -55,6 +55,7 @@ export class VoiceService {
     let previous = settings.get();
     settings.onChange(next => {
       if (next.petVoiceProvider !== previous.petVoiceProvider) { this.voices = []; this.lastError = null; }
+      if (next.petSummaryConnection?.id !== previous.petSummaryConnection?.id || next.petSummaryConnection?.deviceId !== previous.petSummaryConnection?.deviceId) void this.refreshModels();
       // Turning voice on is the consent to fetch the model; the setting says how big it is.
       if (next.petVoice && next.petVoiceProvider === 'local' && this.supported && this.model.state === 'absent' && !this.model.error) void this.model.download();
       previous = next; this.changed();
@@ -77,27 +78,25 @@ export class VoiceService {
     const settings = this.settings.get(), origin = this.origin(settings);
     return { model: { state: this.supported ? this.model.state : 'unsupported', progress: this.model.progress, error: this.model.error }, keySet: !!origin && this.keys.has(origin), voices: this.voices, lastError: this.lastError };
   }
-  summaryStatus(): SummaryStatus {
-    const origin = this.summaryOrigin();
-    return { ...this.summaryState, keySet: !!origin && this.summaryKeys.has(origin) };
-  }
-  private summaryOrigin(): string | null {
-    try { const root = chatEndpoint(this.settings.get().petSummaryCustom.url); return root ? new URL(root).origin : null; } catch { return null; }
-  }
-  setSummaryKey(key: string | null): void {
-    const origin = this.summaryOrigin();
-    if (!origin) throw new Error(message(new VoiceError('missingUrl')));
-    try { if (key?.trim()) this.summaryKeys.set(origin, key.trim()); else this.summaryKeys.clear(origin); } catch (error) { throw new Error(message(error)); }
-    this.changed();
-  }
+  summaryStatus(): SummaryStatus { return { ...this.summaryState }; }
   async refreshConnections(): Promise<void> {
     const result = await this.query({ type: 'listConnections' });
     if (result.ok && Array.isArray(result.data)) this.summaryState = { ...this.summaryState, connections: result.data as SummaryConnection[] };
     this.changed();
+    await this.refreshModels();
+  }
+  /** The same probe Settings uses. A failure leaves the list empty; the field still takes a typed name. */
+  async refreshModels(): Promise<void> {
+    const connection = this.settings.get().petSummaryConnection;
+    if (!connection) { if (this.summaryState.models.length) this.setSummaryState({ models: [] }); return; }
+    const result = await this.query({ type: 'connectionModels', deviceId: connection.deviceId, connectionId: connection.id }, COMPLETE_TIMEOUT_MS);
+    const rows = result.ok && Array.isArray(result.data) ? result.data as { id: string; name: string }[] : [];
+    this.setSummaryState({ models: rows.map(row => ({ id: row.id, label: row.name })) });
   }
   private summarizer(): Summarizer {
     const settings = this.settings.get(), connection = settings.petSummaryConnection;
-    if (connection) return {
+    if (!connection) throw new VoiceError('missingUpstream');
+    return {
       complete: async prompt => {
         const result = await this.query({ type: 'completeWithConnection', deviceId: connection.deviceId, connectionId: connection.id, model: connection.model, system: prompt.system, user: prompt.user }, COMPLETE_TIMEOUT_MS);
         const text = (result.data as { text?: unknown } | undefined)?.text;
@@ -105,8 +104,6 @@ export class VoiceService {
         return text;
       },
     };
-    const origin = this.summaryOrigin();
-    return chatSummarizer(fetcher, settings.petSummaryCustom, origin ? this.summaryKeys.get(origin) : null);
   }
   private async complete(turn: TurnContext): Promise<string> {
     const language = concreteLanguage(this.settings.get().petSummaryLanguage, getLocale());

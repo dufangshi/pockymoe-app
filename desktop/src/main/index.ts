@@ -66,7 +66,7 @@ else {
     const petModules = import.meta.glob('../pet/controller.ts', { eager: true }) as Record<string, { createPetController(deps: PetControllerDeps): PetController }>;
     const petModule = Object.values(petModules)[0];
     if (petModule) {
-      try { pet = petModule.createPetController({ hub, settings, dispatch: command => manager.dispatch(command as CommandInput), openPreferences, speak: text => voice.speak(text), summarize: event => voice.summarize(event), shouldSpeak: event => notifications.shouldSpeak(event), petDirectories, appearance: appearance.get, onAppearance: appearance.onChange }); }
+      try { pet = petModule.createPetController({ hub, settings, dispatch: command => manager.dispatch(command as CommandInput), openPreferences, mainFocused: () => manager.mainFocused(), lowerMain: () => manager.lowerMain(), speak: text => voice.speak(text), summarize: event => voice.summarize(event), shouldSpeak: event => notifications.shouldSpeak(event), petDirectories, appearance: appearance.get, onAppearance: appearance.onChange }); }
       catch { /* Shell remains usable if a pet pack cannot load. */ }
     }
     const tray = new DesktopTray(hub, settings, manager);
@@ -204,7 +204,7 @@ else {
             // Pet module owns pack validation/import and its native file dialog.
             const importer = petModule as typeof petModule & { importPetPack?: (deps: { petDirectories: string[]; settings: SettingsStore; parent: BrowserWindow }) => Promise<void> };
             if (!importer?.importPetPack) throw new Error(t('当前桌宠模块不支持导入'));
-            await importer.importPetPack({ petDirectories, settings, parent: w }); petCatalog.refresh(); broadcast(); break;
+            await importer.importPetPack({ petDirectories, settings, parent: w }); petCatalog.refresh(); await pet?.reloadPacks(); broadcast(); break;
           }
           case 'external': {
             const safe = externalUrl(action.url); if (!safe) throw new Error(t('操作无效'));
@@ -217,7 +217,11 @@ else {
             else if (action.command === 'remove') { voice.stopWorker(); voice.model.remove(); }
             break;
           case 'voiceInstall': voice.install(); break;
-          case 'summaryKey': voice.setSummaryKey(typeof action.key === 'string' ? action.key : null); break;
+          case 'openUpstreams': {
+            const result = await manager.dispatch({ type: 'openUpstreams' });
+            if (!result.ok) return result;
+            break;
+          }
           case 'summaryConnections': await voice.refreshConnections(); break;
           case 'summaryTest': {
             if (!pet) throw new Error(t('桌宠模块尚未安装。'));

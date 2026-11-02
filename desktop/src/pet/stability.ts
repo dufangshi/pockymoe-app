@@ -4,10 +4,10 @@ import { moodFor } from './animation';
 export class StableMood {
   private sustained: PetMood = 'idle';
   private entered: number;
-  private reaction: { mood: 'failed' | 'waving' | 'jumping' | 'poked'; until: number } | null = null;
+  private reaction: { mood: 'failed' | 'waving' | 'jumping' | 'poked' | 'landing'; until: number } | null = null;
   constructor(now: number) { this.entered = now; }
   reset(now: number): void { this.sustained = 'idle'; this.entered = now; this.reaction = null; }
-  react(mood: 'failed' | 'waving' | 'jumping' | 'poked', now: number, duration = 2000): void {
+  react(mood: 'failed' | 'waving' | 'jumping' | 'poked' | 'landing', now: number, duration = 2000): void {
     this.reaction = { mood, until: now + duration };
   }
   onEvent(type: ActivityEventType, now: number, delivered: boolean, completion: 'waving' | 'jumping' = 'waving', duration = 2000): void {

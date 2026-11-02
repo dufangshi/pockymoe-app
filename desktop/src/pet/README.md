@@ -93,3 +93,8 @@ real-app capture uses native focus, actual page Settings, a real five-child fixt
 conversation and only foreground fixture-window screenshots. Both cover three
 themes × light/dark × 1440/900 × en/zh-CN. Fixture preparation/cleanup uses public
 HTTP and records only owned disposable thread ids outside the repository.
+
+A pet travels as one zip, imported from Preferences. Its root holds `pet.json`, the atlas it
+names and, optionally, `sleeping.webp` and `clips/*.webp`, and nothing else. Importing a pack
+with an id already imported replaces it; built-in ids are refused. `art/tools/build_clip_pack.py`
+writes such a zip from alpha WebM videos.

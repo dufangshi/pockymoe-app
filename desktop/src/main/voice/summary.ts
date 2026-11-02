@@ -1,12 +1,10 @@
 import { MAX_SPEECH_CHARS, type SummaryLanguage } from '../../shared/voice';
-import { isPrivateHost, readError, send, VoiceError, voiceEndpoint } from './remote';
 
 /** What a summarizer gets: only this turn's request and final answer, never tools or history. */
 export interface TurnContext { title: string; request: string; answer: string; failed: boolean }
 export interface SummaryPrompt { system: string; user: string }
 /** New upstream kinds only need to implement this. */
 export interface Summarizer { complete(prompt: SummaryPrompt): Promise<string> }
-type Fetch = (url: string, init: RequestInit) => Promise<Response>;
 
 const LANGUAGE_NAMES: Record<Exclude<SummaryLanguage, 'auto'>, string> = { 'zh-CN': 'Simplified Chinese', en: 'English', ja: 'Japanese', ko: 'Korean', fr: 'French', de: 'German', es: 'Spanish' };
 const LIMITS: Record<Exclude<SummaryLanguage, 'auto'>, string> = { 'zh-CN': '50 Chinese characters', ja: '60 Japanese characters', ko: '60 Korean characters', en: '25 words', fr: '25 words', de: '25 words', es: '25 words' };
@@ -43,33 +41,4 @@ export function cleanSummary(text: string): string {
   // Cut at a sentence end if there is one: half a sentence sounds broken.
   const head = plain.slice(0, MAX_SPEECH_CHARS), end = Math.max(...['。', '！', '？', '. ', '! ', '? '].map(mark => head.lastIndexOf(mark)));
   return end >= MAX_SPEECH_CHARS / 3 ? head.slice(0, end + 1).trim() : `${head.trim()}…`;
-}
-export function chatEndpoint(value: unknown): string { return voiceEndpoint(value).replace(/\/chat\/completions$/, ''); }
-const TIMEOUT_MS = 30_000;
-/** OpenAI chat format, which nearly every provider and self-hosted server speaks. */
-export function chatSummarizer(fetcher: Fetch, config: { url: string; model: string }, key: string | null): Summarizer {
-  return {
-    async complete(prompt) {
-      const root = chatEndpoint(config.url);
-      if (!root) throw new VoiceError('missingUrl');
-      if (!config.model.trim()) throw new VoiceError('missingModel');
-      if (key && new URL(root).protocol !== 'https:' && !isPrivateHost(new URL(root).hostname)) throw new VoiceError('insecureKey');
-      const headers: Record<string, string> = { 'content-type': 'application/json', ...(key ? { authorization: `Bearer ${key}` } : {}) };
-      const messages = [{ role: 'system', content: prompt.system }, { role: 'user', content: prompt.user }];
-      const call = (limit: boolean): Promise<Response> => send(fetcher, `${root}/chat/completions`, { method: 'POST', headers, body: JSON.stringify({ model: config.model.trim(), messages, ...(limit ? { max_tokens: 1024 } : {}) }) }, TIMEOUT_MS);
-      let response = await call(true);
-      // Some models refuse max_tokens by name. The reply is capped afterwards anyway.
-      if (response.status === 400) {
-        const failure = await readError(response);
-        if (!/max_tokens|max_completion_tokens/i.test(failure.message)) throw failure;
-        response = await call(false);
-      }
-      if (!response.ok) throw await readError(response);
-      let body: { choices?: { message?: { content?: unknown } }[] };
-      try { body = await response.json() as typeof body; } catch { throw new VoiceError('notSummary'); }
-      const content = body.choices?.[0]?.message?.content;
-      if (typeof content !== 'string' || !content.trim()) throw new VoiceError('notSummary');
-      return content;
-    },
-  };
 }

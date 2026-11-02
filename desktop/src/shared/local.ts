@@ -21,7 +21,7 @@ export type LocalAction =
   | { type: 'voiceList' }
   | { type: 'voicePreview' }
   | { type: 'voiceInstall' }
-  | { type: 'summaryKey'; key: string | null }
+  | { type: 'openUpstreams' }
   | { type: 'summaryConnections' }
   | { type: 'summaryTest' };
 export interface LocalBridge {

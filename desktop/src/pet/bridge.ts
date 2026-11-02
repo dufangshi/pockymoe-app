@@ -22,7 +22,7 @@ export interface PetViewState {
   moodEpoch: number;
   /** Clicking the pet: the running threads above the controls. */
   pinned: boolean;
-  clips: { format: ClipFormat; states: Partial<Record<SpriteState, PetClip[]>> } | null;
+  clips: { format: ClipFormat; states: Partial<Record<SpriteState, PetClip[]>>; epoch: number } | null;
   bubble: PetBubble | null;
   settings: Pick<DesktopSettings, 'petSize' | 'petMini' | 'petSound' | 'petVoice' | 'petId'>;
   imageUrl: string;
