@@ -524,6 +524,7 @@ class MainActivity : ComponentActivity() {
                         .put("nativePush", false)
                         .put("haptics", true)
             "activity.sync" -> {
+                HostDiagnostics.activity(args.getJSONObject(0))
                 syncSession()
                 Notifications.sync(this, args.getJSONObject(0))
             }
@@ -591,46 +592,35 @@ class MainActivity : ComponentActivity() {
             }
             "appearance.sync" -> {
                 val a = args.getJSONObject(0)
+                HostDiagnostics.appearance(a)
                 val dark = a.optString("effective") == "dark"
-                // Use the page's resolved color; theme packs remain appearance-only.
+                val appearance = a.toString()
+                prefs.edit().putString("appearance", appearance).apply()
                 val color = a.optString("background")
-                pageBackground = parsePageColor(color) ?: pageBackground
-                if (parsePageColor(color) == null)
+                val parsed = parsePageColor(color)
+                if (parsed != null) applyPageBackground(parsed)
+                else
                     web.evaluateJavascript(
-                        "getComputedStyle(document.documentElement).backgroundColor"
+                        "(() => { const canvas=document.createElement('canvas');canvas.width=canvas.height=1;const ctx=canvas.getContext('2d');ctx.fillStyle=" +
+                            JSONObject.quote(color) +
+                            ".trim() || getComputedStyle(document.documentElement).backgroundColor;ctx.fillRect(0,0,1,1);const p=ctx.getImageData(0,0,1,1).data;return p[3] ? '#' + Array.from(p.slice(0,3),v=>v.toString(16).padStart(2,'0')).join('') : null; })()"
                     ) { raw ->
-                        // The original appearance contract carries no background field.
-                        // Read only the resolved paint color from this trusted document.
-                        parsePageColor(raw.trim('"'))?.let { resolved ->
-                            pageBackground = resolved
-                            prefs.edit().putInt("background", resolved).apply()
-                            root.setBackgroundColor(resolved)
-                            web.setBackgroundColor(resolved)
-                            window.setBackgroundDrawable(
-                                android.graphics.drawable.ColorDrawable(resolved)
-                            )
-                            @Suppress("DEPRECATION")
-                            window.navigationBarColor = resolved
-                        }
+                        // Resolve CSS Color 4 (oklch/color-mix/etc.) in the browser, then
+                        // cache its actual sRGB paint. Never apply an older theme's reply.
+                        if (!isDestroyed && prefs.getString("appearance", "") == appearance)
+                            parsePageColor(raw.trim('"'))?.let(::applyPageBackground)
                     }
-                prefs
-                    .edit()
-                    .putInt("background", pageBackground)
-                    .putString("appearance", a.toString())
-                    .apply()
-                root.setBackgroundColor(pageBackground)
-                web.setBackgroundColor(pageBackground)
-                window.setBackgroundDrawable(
-                    android.graphics.drawable.ColorDrawable(pageBackground)
-                )
                 WindowCompat.getInsetsController(window, root).apply {
                     isAppearanceLightStatusBars = !dark
                     isAppearanceLightNavigationBars = !dark
                 }
                 @Suppress("DEPRECATION")
                 window.navigationBarColor = pageBackground
+                Notifications.appearanceChanged(this)
             }
-            "haptics.play" ->
+            "haptics.play" -> {
+                if (args.getString(0) in setOf("sent", "attention", "warning"))
+                    HostDiagnostics.haptic(args.getString(0))
                 web.performHapticFeedback(
                     when (args.getString(0)) {
                         "sent" -> HapticFeedbackConstants.CONTEXT_CLICK
@@ -641,6 +631,7 @@ class MainActivity : ComponentActivity() {
                         else -> return
                     }
                 )
+            }
             "badge.set" -> Unit // Android launchers have no portable numeric badge API.
             else -> error("Unsupported method")
         }
@@ -683,6 +674,16 @@ class MainActivity : ComponentActivity() {
                     .toString()
             )
         else web.loadUrl(origin + path)
+    }
+
+    private fun applyPageBackground(color: Int) {
+        pageBackground = color
+        prefs.edit().putInt("background", color).apply()
+        root.setBackgroundColor(color)
+        web.setBackgroundColor(color)
+        window.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(color))
+        @Suppress("DEPRECATION")
+        window.navigationBarColor = color
     }
 
     private fun parsePageColor(value: String): Int? =

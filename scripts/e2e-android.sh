@@ -39,6 +39,7 @@ cleanup() {
   if $started; then
     adb -s "$SERIAL" logcat -d -s PockymoeE2E:I '*:S' > "$ARTIFACTS/live-updates.log" 2>/dev/null || true
     adb -s "$SERIAL" shell appops get com.remotecodex.app.debug > "$ARTIFACTS/notification-appops.txt" 2>/dev/null || true
+    adb -s "$SERIAL" pull /sdcard/Android/data/com.remotecodex.app.debug/files/integration-evidence.json "$ARTIFACTS/" >/dev/null 2>&1 || true
     adb -s "$SERIAL" pull /sdcard/Android/data/com.remotecodex.app.debug/files/screenshots "$ARTIFACTS/" >/dev/null 2>&1 || true
     adb -s "$SERIAL" shell run-as com.remotecodex.app.debug rm -f files/e2e-env.json >/dev/null 2>&1 || true
     adb -s "$SERIAL" emu kill >/dev/null 2>&1 || true
@@ -88,6 +89,22 @@ cd "$ROOT/android"
 ./gradlew :app:assembleDebug :app:assembleDebugAndroidTest --max-workers=2
 adb -s "$SERIAL" install -r app/build/outputs/apk/debug/app-debug.apk >/dev/null
 adb -s "$SERIAL" install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk >/dev/null
+record_cold() {
+  local name="$1"
+  adb -s "$SERIAL" shell am force-stop com.remotecodex.app.debug
+  adb -s "$SERIAL" shell screenrecord --bit-rate 8000000 --time-limit 8 "/sdcard/Download/$name.mp4" > "$ARTIFACTS/$name-record.log" 2>&1 &
+  local recorder=$!
+  sleep 0.7
+  adb -s "$SERIAL" shell am start -W -n com.remotecodex.app.debug/com.remotecodex.app.MainActivity > "$ARTIFACTS/$name-launch.log"
+  wait "$recorder"
+  adb -s "$SERIAL" pull "/sdcard/Download/$name.mp4" "$ARTIFACTS/$name.mp4" >/dev/null 2>&1
+  adb -s "$SERIAL" shell am force-stop com.remotecodex.app.debug
+}
+# Factory cold launch covers the light native connection page. The second
+# recording below covers a force-stopped, configured WebView with saved dark paint.
+adb -s "$SERIAL" shell pm clear com.remotecodex.app.debug >/dev/null
+record_cold cold-first-launch
+
 # Grant the test app's user-controlled Live Update access on this disposable device.
 adb -s "$SERIAL" shell appops set com.remotecodex.app.debug POST_PROMOTED_NOTIFICATIONS allow > "$ARTIFACTS/promotion-permission.log" 2>&1 || true
 adb -s "$SERIAL" shell getprop ro.build.version.sdk > "$ARTIFACTS/api-level.txt"
@@ -98,3 +115,4 @@ adb -s "$SERIAL" shell run-as com.remotecodex.app.debug mkdir -p files
 adb -s "$SERIAL" shell "run-as com.remotecodex.app.debug sh -c 'cat > files/e2e-env.json'" < "$ENV_FILE"
 adb -s "$SERIAL" shell am instrument -w -r -e class com.remotecodex.app.ProductParityTest -e envFile /data/user/0/com.remotecodex.app.debug/files/e2e-env.json com.remotecodex.app.debug.test/androidx.test.runner.AndroidJUnitRunner | tee "$ARTIFACTS/instrumentation.log"
 rg -q 'OK \([0-9]+ tests?\)' "$ARTIFACTS/instrumentation.log"
+record_cold cold-web-dark

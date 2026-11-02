@@ -31,6 +31,7 @@ class ProductParityTest {
     val permission = GrantPermissionRule.grant(android.Manifest.permission.POST_NOTIFICATIONS)
     private val context = ApplicationProvider.getApplicationContext<Context>()
     private val device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
+    private val appearanceEvidence = org.json.JSONArray()
     private lateinit var scenario: ActivityScenario<MainActivity>
 
     private fun find(view: View): WebView? {
@@ -129,9 +130,93 @@ class ProductParityTest {
         assertTrue("native tap injected", device.click(x, y))
     }
 
+    private fun assertMobileLayout() {
+        assertEquals(
+            "no desktop frame or rail",
+            "0",
+            js(
+                "document.querySelectorAll('.desktop-window-frame,.desktop-window-titlebar,.desktop-shell,.desktop-rail').length"
+            ),
+        )
+        assertEquals(
+            "no visible desktop navigation rail",
+            "0",
+            js(
+                "Array.from(document.querySelectorAll('.matter-rail')).filter(e=>e.getClientRects().length).length"
+            ),
+        )
+    }
+
+    private fun gestureBack() {
+        device.swipe(
+            1,
+            device.displayHeight / 2,
+            device.displayWidth / 2,
+            device.displayHeight / 2,
+            30,
+        )
+    }
+
+    private fun assertAppearance(pack: String, mode: String) {
+        eventually("page sends resolved background") {
+            HostDiagnostics.appearance?.let {
+                it.pack == pack && it.effective == mode && it.background.isNotBlank()
+            } == true
+        }
+        val color =
+            js(
+                "(() => {const c=document.createElement('canvas');c.width=c.height=1;const x=c.getContext('2d');x.fillStyle=${JSONObject.quote(HostDiagnostics.appearance!!.background)};x.fillRect(0,0,1,1);return Array.from(x.getImageData(0,0,1,1).data).slice(0,3).join(',')})()"
+            )
+        val channels = color.split(',').map(String::toInt)
+        scenario.onActivity { activity ->
+            val controller =
+                androidx.core.view.WindowCompat.getInsetsController(
+                    activity.window,
+                    activity.window.decorView,
+                )
+            assertEquals(
+                "status-bar icon appearance",
+                mode == "light",
+                controller.isAppearanceLightStatusBars,
+            )
+            assertEquals(
+                "navigation icon appearance",
+                mode == "light",
+                controller.isAppearanceLightNavigationBars,
+            )
+        }
+        eventually("native background follows appearance.sync") {
+            var matches = false
+            scenario.onActivity { activity ->
+                val root = activity.findViewById<ViewGroup>(android.R.id.content).getChildAt(0)
+                matches =
+                    (root.background as android.graphics.drawable.ColorDrawable).color ==
+                        android.graphics.Color.rgb(channels[0], channels[1], channels[2])
+            }
+            matches
+        }
+        appearanceEvidence.put(
+            JSONObject()
+                .put("pack", pack)
+                .put("effective", mode)
+                .put("background", HostDiagnostics.appearance!!.background)
+                .put("iconsFollowEffective", true)
+                .put("desktopFrameCount", 0)
+        )
+        assertMobileLayout()
+    }
+
+    private fun notice() =
+        context
+            .getSystemService(NotificationManager::class.java)
+            .activeNotifications
+            .single { it.id == Notifications.WATCH_ID }
+            .notification
+
     @Test
     fun thinShellAndLiveUpdates() {
         val env = E2eEnv.load()
+        HostDiagnostics.reset()
         File(context.getExternalFilesDir(null), "screenshots").listFiles()?.forEach { it.delete() }
         for (name in
             listOf(
@@ -187,6 +272,20 @@ class ProductParityTest {
                 ) == "true"
             }
             assertEquals("Web source URL", env.webUrl, js("location.origin"))
+            assertEquals(
+                "edge-to-edge viewport",
+                "true",
+                js(
+                    "document.querySelector('meta[name=viewport]').content.includes('viewport-fit=cover')"
+                ),
+            )
+            assertEquals(
+                "visual viewport owns keyboard",
+                "true",
+                js(
+                    "document.querySelector('meta[name=viewport]').content.includes('interactive-widget=resizes-visual')"
+                ),
+            )
             // Same-origin child frames still have no host, and their transport cannot invoke native
             // code.
             js(
@@ -232,6 +331,7 @@ class ProductParityTest {
                 tap(
                     "Array.from(document.querySelectorAll('button')).find(b=>b.textContent.trim()==='Later')"
                 )
+            assertMobileLayout()
             shot("devices")
             js(
                 "Array.from(document.querySelectorAll('button')).find(b=>b.textContent.trim()==='Connect').click()"
@@ -296,6 +396,8 @@ class ProductParityTest {
                 tap(
                     "Array.from(document.querySelectorAll('button')).find(b=>b.textContent.trim()==='Later')"
                 )
+            assertMobileLayout()
+            assertTrue("ordinary navigation has no haptics", HostDiagnostics.haptics().isEmpty())
             shot("thread")
             val composer = "document.querySelector('[role=textbox][aria-label=Prompt]')"
             tap(composer)
@@ -323,6 +425,7 @@ class ProductParityTest {
                     "document.body.innerText.includes('android-shell-message') && !document.querySelector('[role=textbox][aria-label=Prompt]').innerText.includes('android-shell-message')"
                 ) == "true"
             }
+            eventually("sent haptic exactly once") { HostDiagnostics.haptics() == listOf("sent") }
             var imeVisible = false
             scenario.onActivity {
                 imeVisible =
@@ -344,31 +447,134 @@ class ProductParityTest {
             eventually("resume preserves document") { js("window.retainedMarker") == "warm" }
             assertEquals(route, js("location.pathname"))
             shot("warm-resume")
-            // Contract-level back tests distinguish handled overlays from exiting the root.
-            val backIndex = js("String(history.state?.idx)")
-            js(
-                "window.testBack=0;window.stopBack=window.pockymoeHost.onCommand(c=>{if(c.type==='back')window.testBack++})"
-            )
-            device.swipe(
-                1,
-                device.displayHeight / 2,
-                device.displayWidth / 2,
-                device.displayHeight / 2,
-                30,
-            )
-            eventually("back delivered to page") { js("window.testBack > 0") == "true" }
-            eventually("back navigation committed") {
-                js("String(history.state?.idx)") != backIndex || js("!window.stopBack") == "true"
+            // Real runtime events must pass through the integration page's activity.sync.
+            val activityBaseline = HostDiagnostics.activityCalls
+            env.fixtureEvent("start", created.id)
+            eventually("real running activity snapshot") {
+                HostDiagnostics.activityCalls > activityBaseline &&
+                    HostDiagnostics.items.any {
+                        it.threadId == created.id &&
+                            it.title == created.title &&
+                            it.state == "running"
+                    }
             }
-            Thread.sleep(300)
-            eventually("back destination ready") {
-                js("document.readyState === 'complete' && !!window.pockymoeHost") == "true"
+            eventually("real title drives Live Update") {
+                notice()
+                    .extras
+                    .getString(Notification.EXTRA_TITLE)
+                    .orEmpty()
+                    .contains(created.title)
+            }
+            shot("real-activity-running")
+            env.fixtureEvent("approval", created.id)
+            eventually("attention haptic exactly once") {
+                HostDiagnostics.haptics() == listOf("sent", "attention")
+            }
+            eventually("real waiting activity snapshot") {
+                HostDiagnostics.items.any {
+                    it.threadId == created.id &&
+                        it.title == created.title &&
+                        it.state == "needsInput"
+                }
+            }
+            eventually("real waiting notification title") {
+                notice()
+                    .extras
+                    .getString(Notification.EXTRA_TITLE)
+                    .orEmpty()
+                    .contains(created.title) &&
+                    notice()
+                        .extras
+                        .getString(Notification.EXTRA_TITLE)
+                        .orEmpty()
+                        .contains("waiting for you")
+            }
+            device.openNotification()
+            shot("real-activity-waiting")
+            device.executeShellCommand("cmd statusbar collapse")
+            env.fixtureEvent("complete", created.id)
+            eventually("approval resolved") {
+                HostDiagnostics.items.none { it.threadId == created.id && it.state == "needsInput" }
+            }
+            assertEquals(listOf("sent", "attention"), HostDiagnostics.haptics())
+
+            // The committed back gesture must dismiss a real phone sheet before history.
+            js("document.querySelector('[aria-label=\"More actions\"]').click()")
+            eventually("phone action sheet opened") {
+                js(
+                    "Array.from(document.querySelectorAll('[role=dialog],[role=menu]')).some(e=>e.getClientRects().length)"
+                ) == "true"
+            }
+            val sheetRoute = js("location.pathname")
+            val sheetIndex = js("String(history.state?.idx)")
+            shot("back-sheet-open")
+            gestureBack()
+            eventually("back closes sheet") {
+                js(
+                    "document.querySelector('.matter-phone-more')?.getAttribute('aria-expanded') === 'false'"
+                ) == "true"
+            }
+            assertEquals("sheet back keeps route", sheetRoute, js("location.pathname"))
+            assertEquals("sheet back keeps history", sheetIndex, js("String(history.state?.idx)"))
+            assertEquals(listOf("sent", "attention"), HostDiagnostics.haptics())
+            shot("back-sheet-closed")
+
+            // Confirm a destructive operation only on a disposable fixture thread.
+            val disposable = env.startThreadAndPrompt()
+            load("/devices/${env.deviceId}/threads/${disposable.id}")
+            eventually("disposable thread ready") {
+                js("!!document.querySelector('[aria-label=\"More actions\"]')") == "true"
             }
             js(
-                "window.stopBack?.();window.pockymoeHost.window.openThread(${JSONObject.quote(route)})"
+                "document.querySelector('.matter-phone-thread,.matter-phone-pin[aria-haspopup=dialog]').click()"
             )
-            eventually("thread restored") {
+            val disposableRow =
+                "Array.from(document.querySelectorAll('.matter-thread-entry')).find(e=>e.innerText.includes(${JSONObject.quote(disposable.title)}))"
+            eventually("disposable row actions") {
+                js("!!($disposableRow)?.querySelector('.recent-thread-actions')") == "true"
+            }
+            js("($disposableRow).querySelector('.recent-thread-actions').click()")
+            eventually("delete action ready") {
+                js("!!document.querySelector('.recent-thread-menu .recent-thread-delete')") ==
+                    "true"
+            }
+            js("document.querySelector('.recent-thread-menu .recent-thread-delete').click()")
+            eventually("real danger confirmation") {
+                js("!!document.querySelector('[role=dialog] .ui-action-danger')") == "true"
+            }
+            assertEquals(
+                "opening danger confirmation has no feedback",
+                listOf("sent", "attention"),
+                HostDiagnostics.haptics(),
+            )
+            tap("document.querySelector('[role=dialog] .ui-action-danger')")
+            eventually("warning haptic exactly once") {
+                HostDiagnostics.haptics() == listOf("sent", "attention", "warning")
+            }
+            load(route)
+            eventually("return to retained thread") {
                 js("!!document.querySelector('[role=textbox][aria-label=Prompt]')") == "true"
+            }
+
+            // A cold document is a route root: after closing sheets, back exits
+            // without destroying its WebView, and reopening retains that document.
+            assertEquals(
+                "cold thread has no prior route",
+                "0",
+                js("String(history.state?.idx ?? 0)"),
+            )
+            js("window.rootBackMarker='retained'")
+            gestureBack()
+            eventually("root back returns to launcher") {
+                !com.remotecodex.app.notify.RemoteCodexForeground.isForeground
+            }
+            context.startActivity(
+                Intent(context, MainActivity::class.java)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            )
+            eventually("root document retained") {
+                com.remotecodex.app.notify.RemoteCodexForeground.isForeground &&
+                    js("window.rootBackMarker") == "retained"
             }
             load("/relay-account")
             eventually("Web account security") {
@@ -423,75 +629,132 @@ class ProductParityTest {
                         "document.documentElement.dataset.themePreset === '$pack' && document.documentElement.dataset.themeEffective === '$mode'"
                     ) == "true"
                 }
+                assertAppearance(pack, mode)
                 Thread.sleep(500)
                 shot("$pack-$mode")
             }
+            assertEquals(
+                "haptics only at send, attention and danger confirmation",
+                listOf("sent", "attention", "warning"),
+                HostDiagnostics.haptics(),
+            )
             // Local notification controls are compiled out of release entry points.
-            for (state in
-                listOf("running", "needsInput", "failed", "interrupted", "completed", "idle")) {
-                scenario.onActivity { Notifications.debugState(it, state) }
-                Thread.sleep(400)
-                val notice =
-                    context
-                        .getSystemService(NotificationManager::class.java)
-                        .activeNotifications
-                        .filter { it.id == Notifications.WATCH_ID }
-                assertEquals("one account notification", 1, notice.size)
-                if (state != "idle") {
-                    assertEquals(
-                        "Live Update API style",
-                        Notification.ProgressStyle::class.java.name,
-                        notice.single().notification.extras.getString("android.template"),
-                    )
-                    if (
-                        android.os.Build.VERSION.SDK_INT_FULL >=
-                            android.os.Build.VERSION_CODES_FULL.BAKLAVA_1
-                    )
-                        assertTrue(
-                            "promotion requested",
-                            notice.single().notification.isRequestPromotedOngoing,
+            for (notificationLocale in listOf("en", "zh-CN")) {
+                js(
+                    "window.navigationProbe=true;localStorage.setItem('remote-codex.locale', '$notificationLocale');location.reload()"
+                )
+                eventually("notification follows page locale") {
+                    HostDiagnostics.appearance?.locale == notificationLocale &&
+                        js("!window.navigationProbe") == "true"
+                }
+
+                for (state in
+                    listOf("running", "needsInput", "failed", "interrupted", "completed", "idle")) {
+                    scenario.onActivity {
+                        Notifications.debugState(it, state, "${env.deviceId}:${created.id}")
+                    }
+                    Thread.sleep(400)
+                    val notice =
+                        context
+                            .getSystemService(NotificationManager::class.java)
+                            .activeNotifications
+                            .filter { it.id == Notifications.WATCH_ID }
+                    assertEquals("one account notification", 1, notice.size)
+                    if (state != "idle") {
+                        assertEquals(
+                            "Live Update API style",
+                            (if (state == "running") Notification.ProgressStyle::class.java
+                                else Notification.BigTextStyle::class.java)
+                                .name,
+                            notice.single().notification.extras.getString("android.template"),
                         )
-                    if (
-                        android.os.Build.VERSION.SDK_INT_FULL >=
-                            android.os.Build.VERSION_CODES_FULL.BAKLAVA_1
-                    ) {
-                        assertTrue(
-                            "system allows promoted notifications",
-                            context
-                                .getSystemService(NotificationManager::class.java)
-                                .canPostPromotedNotifications(),
+                        if (
+                            android.os.Build.VERSION.SDK_INT_FULL >=
+                                android.os.Build.VERSION_CODES_FULL.BAKLAVA_1
+                        )
+                            assertTrue(
+                                "promotion requested",
+                                notice.single().notification.isRequestPromotedOngoing,
+                            )
+                        if (
+                            android.os.Build.VERSION.SDK_INT_FULL >=
+                                android.os.Build.VERSION_CODES_FULL.BAKLAVA_1
+                        ) {
+                            assertTrue(
+                                "system allows promoted notifications",
+                                context
+                                    .getSystemService(NotificationManager::class.java)
+                                    .canPostPromotedNotifications(),
+                            )
+                            assertTrue(
+                                "system marked Live Update promoted",
+                                notice.single().notification.flags and
+                                    Notification.FLAG_PROMOTED_ONGOING != 0,
+                            )
+                        }
+                        android.util.Log.i(
+                            "PockymoeE2E",
+                            "LiveUpdate state=$state allowed=${context.getSystemService(NotificationManager::class.java).canPostPromotedNotifications()} promoted=${notice.single().notification.flags and Notification.FLAG_PROMOTED_ONGOING != 0}",
                         )
                         assertTrue(
-                            "system marked Live Update promoted",
-                            notice.single().notification.flags and
-                                Notification.FLAG_PROMOTED_ONGOING != 0,
+                            "eligible Live Update",
+                            notice.single().notification.hasPromotableCharacteristics(),
                         )
                     }
-                    android.util.Log.i(
-                        "PockymoeE2E",
-                        "LiveUpdate state=$state allowed=${context.getSystemService(NotificationManager::class.java).canPostPromotedNotifications()} promoted=${notice.single().notification.flags and Notification.FLAG_PROMOTED_ONGOING != 0}",
+                    val title =
+                        notice
+                            .single()
+                            .notification
+                            .extras
+                            .getString(Notification.EXTRA_TITLE)
+                            .orEmpty()
+                    val expected = com.remotecodex.app.notify.NotificationCopy(notificationLocale)
+                    assertEquals(
+                        "localized state headline",
+                        expected.headline(state, if (state == "idle") 0 else 1, created.title),
+                        title,
                     )
-                    assertTrue(
-                        "eligible Live Update",
-                        notice.single().notification.hasPromotableCharacteristics(),
+                    val style =
+                        Notification.Builder.recoverBuilder(context, notice.single().notification)
+                            .style
+                    if (state == "running") {
+                        val progress = style as Notification.ProgressStyle
+                        assertTrue("running is indeterminate", progress.isProgressIndeterminate)
+                        assertTrue(
+                            "no measurable segments",
+                            progress.progressSegments.orEmpty().isEmpty(),
+                        )
+                    } else
+                        assertFalse(
+                            "no progress bar outside running",
+                            style is Notification.ProgressStyle,
+                        )
+                    device.pressHome()
+                    Thread.sleep(300)
+                    shot("chip-$notificationLocale-$state")
+                    device.openNotification()
+                    Thread.sleep(500)
+                    shot("live-$notificationLocale-$state")
+                    device.executeShellCommand("cmd statusbar collapse")
+                    context.startActivity(
+                        Intent(context, MainActivity::class.java)
+                            .addFlags(
+                                Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                            )
                     )
-                }
-                device.pressHome()
-                Thread.sleep(300)
-                shot("chip-$state")
-                device.openNotification()
-                Thread.sleep(500)
-                shot("live-$state")
-                device.executeShellCommand("cmd statusbar collapse")
-                context.startActivity(
-                    Intent(context, MainActivity::class.java)
-                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
-                )
-                eventually("return from Live Update inspection") {
-                    com.remotecodex.app.notify.RemoteCodexForeground.isForeground
+                    eventually("return from Live Update inspection") {
+                        com.remotecodex.app.notify.RemoteCodexForeground.isForeground
+                    }
                 }
             }
             scenario.onActivity { Notifications.debugState(it, "clear") }
+            js(
+                "window.navigationProbe=true;localStorage.setItem('remote-codex.locale', 'en');location.reload()"
+            )
+            eventually("English restored") {
+                HostDiagnostics.appearance?.locale == "en" &&
+                    js("!window.navigationProbe") == "true"
+            }
             // Notification target is the cached page title and exact thread, including a cold
             // start.
             scenario.onActivity { activity ->
@@ -548,6 +811,38 @@ class ProductParityTest {
             eventually("network restored") {
                 js("!!document.querySelector('[role=textbox][aria-label=Prompt]')") == "true"
             }
+            js(
+                "window.navigationProbe=true;localStorage.setItem('pockymoe-theme-preset','classic');localStorage.setItem('remote-codex-theme-mode','dark');location.reload()"
+            )
+            eventually("dark cold-launch setup") {
+                HostDiagnostics.appearance?.pack == "classic" &&
+                    HostDiagnostics.appearance?.effective == "dark" &&
+                    js("!window.navigationProbe") == "true"
+            }
+            assertAppearance("classic", "dark")
+            shot("cold-dark-prepared")
+            assertEquals(
+                "only three feedback moments",
+                listOf("sent", "attention", "warning"),
+                HostDiagnostics.haptics(),
+            )
+            File(context.getExternalFilesDir(null), "integration-evidence.json")
+                .writeText(
+                    JSONObject()
+                        .put("surface", "mobile")
+                        .put("desktopChromePresent", false)
+                        .put("sheetBackKeptRouteAndHistory", true)
+                        .put("rootBackRetainedDocument", true)
+                        .put("haptics", org.json.JSONArray(HostDiagnostics.haptics()))
+                        .put("realActivityThreadTitle", created.title)
+                        .put(
+                            "realActivityStates",
+                            org.json.JSONArray(listOf("running", "needsInput")),
+                        )
+                        .put("appearances", appearanceEvidence)
+                        .put("notificationLocales", org.json.JSONArray(listOf("en", "zh-CN")))
+                        .toString(2)
+                )
         }
     }
 }

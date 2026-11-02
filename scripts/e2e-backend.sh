@@ -3,7 +3,7 @@ set -euo pipefail
 umask 077
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-CODEX="${REMOTE_CODEX_ROOT:-$HOME/dev/remoteCodex}"
+CODEX="${REMOTE_CODEX_ROOT:-$HOME/dev/remoteCodex.worktrees/mobile-host}"
 DEFAULT_BIN="$CODEX/target/debug/pockymoe"
 [[ -x "$DEFAULT_BIN" ]] || DEFAULT_BIN="$CODEX/target/debug/remote-codex"
 BIN="${REMOTE_CODEX_BIN:-$DEFAULT_BIN}"
@@ -65,6 +65,15 @@ finally:
 PYPORT
   rm -f "$ENV_FILE"
   DATA="$(mktemp -d "$ROOT/.local/e2e.XXXXXX")"
+  # Pin generated assets before concurrent workers rebuild the shared dist.
+  cp -R "$WEB_DIST" "$DATA/web-dist"
+  WEB_DIST="$DATA/web-dist"
+  python3 - "$WEB_DIST" "$CODEX" "$ROOT/.local/review-web-build.json" <<'PYPIN'
+import hashlib,json,pathlib,subprocess,sys
+web,source,output=map(pathlib.Path,sys.argv[1:])
+commit=subprocess.check_output(['git','-C',str(source),'rev-parse','HEAD'],text=True).strip()
+pathlib.Path(output).write_text(json.dumps({'source':str(source),'commit':commit,'indexSha256':hashlib.sha256((web/'index.html').read_bytes()).hexdigest()},indent=2))
+PYPIN
   # Never inherit a managed thread's production database, relay or credentials.
   for name in ${!REMOTE_CODEX_@} ${!POCKYMOE_@}; do unset "$name"; done
   mkdir -p "$DATA/workspaces/mobile-ws"
@@ -112,7 +121,7 @@ def req(method, path, body=None, token=None):
         try:
             return json.loads(raw)
         except Exception:
-            raise SystemExit(f"{method} {path}: {error.code} {raw}") from error
+            raise SystemExit(f"{method} {path}: HTTP {error.code}") from error
 
 reg = req("POST", "/relay/auth/register", json.loads(pathlib.Path(data_dir, "account.json").read_text()))
 token = reg.get("token") or ""

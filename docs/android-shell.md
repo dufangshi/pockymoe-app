@@ -54,7 +54,10 @@ never exposes it through the host contract, and suppresses foreground events.
 No Google Services or Firebase dependencies are needed.
 
 The service and account activity share notification ID 41. Android 16+ uses the
-SDK's `Notification.ProgressStyle` and `setShortCriticalText`. Explicit
+SDK's indeterminate `Notification.ProgressStyle` for running work and bar-free
+`BigTextStyle` for waiting/failed/interrupted/completed states. Both styles retain
+promotable characteristics; no numeric percentage or determinate terminal bar is
+sent. `setShortCriticalText` supplies the capsule label. Explicit
 `setRequestPromotedOngoing` is guarded by `SDK_INT_FULL >= BAKLAVA_1` (API 36.1);
 the method does not exist on AOSP 36.0. Initial Android 16 keeps the progress
 notification without this promotion request. Android 8–15 uses a normal ongoing notification.
@@ -78,6 +81,13 @@ then removes the promoted state; the unpromoted watcher remains while the
 foreground service receives events. Android's foreground-service time limit,
 force-stop or denied notification permission can prevent delivery.
 
+`NotificationCopy` resolves state wording, singular/plural forms and generic
+bodies from the current page locale at render time (English and Chinese). The
+headline includes the state and a page-supplied title; only missing titles use
+“线程运行中” / “Thread running”. Locale-only appearance updates repaint the
+existing notification. Completed work retains its cached page title even after
+read items leave the active snapshot.
+
 The testable `AccountActivity` class owns grouping, priority, earliest timer,
 account isolation, completion counting and retention, independent of Android.
 
@@ -88,9 +98,10 @@ account isolation, completion counting and retention, independent of Android.
   This is the same justified exception as mobile design §6; the integration owner
   must also record it in the control-plane `docs/ui-principles.md` (read-only to
   this Android worker).
-- Standard `ProgressStyle` controls its own layout. Local metadata is condensed
-  into its content line (at most three conversations, then “其余 N 个”); pre-16
-  notifications use the expanded text style. No custom notification layout or
+- Standard notification templates control layout. Running uses indeterminate
+  `ProgressStyle`; other states use `BigTextStyle` to avoid suggesting measurable
+  progress or a full completed bar. Metadata lists at most three conversations,
+  then “其余 N 个”. No custom notification layout or
   approval buttons are added.
 - A foreground service must retain a notification after the activity's
   15-minute end. Its single notification becomes an ordinary watcher instead of
@@ -105,6 +116,9 @@ account isolation, completion counting and retention, independent of Android.
   would require an additional page contract.
 - Only resolved page appearance is persisted. The Android system's initial
   splash uses the design's fixed light/dark colors before application code runs.
+  This still exposes a light starting window when the OS is light but the cached
+  Web theme is dark; the dark restore does not yet meet the no-flash acceptance
+  criterion. The cached WebView background takes over after that system window.
 
 ## Local verification
 
@@ -119,19 +133,24 @@ export JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home
 export ANDROID_HOME="$HOME/Library/Android/sdk"
 (cd android && ./gradlew :app:assembleDebug :app:testDebugUnitTest)
 E2E_RELAY_PORT=19890 E2E_SUPERVISOR_PORT=19891 E2E_WEB_PORT=19892 \
-  REMOTE_CODEX_RELAY_WEB_DIST_DIR=/path/to/mobile-web/dist \
+  REMOTE_CODEX_ROOT=/Users/mac/dev/remoteCodex.worktrees/mobile-host \
+  REMOTE_CODEX_RELAY_WEB_DIST_DIR=/Users/mac/dev/remoteCodex.worktrees/mobile-host/apps/supervisor-web/dist \
   scripts/e2e-backend.sh serve
 # In another terminal, same worktree:
 scripts/e2e-android.sh
 scripts/e2e-backend.sh stop
 ```
 
-The helper prefers the current `pockymoe` binary over the legacy build and uses
+The helper defaults to the mobile-host integration checkout and prefers its
+current `pockymoe` binary over a legacy build and uses
 Node 22+ plus the control-plane Web dependency `hash-wasm` to generate a disposable
 modern Argon2id/AES-GCM account fixture. Native instrumentation fills the native connection page and signs in through
 the actual Web form, with no injected login token. In split mode, the DEBUG-only
 `e2eWebUrl` intent selects the separate Web source while the connection field
-continues to configure the Relay. The helper clears inherited
+continues to configure the Relay. The helper pins a copy of the supplied generated Web dist in the disposable
+backend directory before starting it, so parallel rebuilds cannot change the
+assets under a running test. `.local/review-web-build.json` records the source
+commit and index digest. The helper clears inherited
 old and new Supervisor environment names and owns
 fresh data on independent ports. `E2E_WEB_PORT` optionally starts a separate
 SPA server; build the Web assets with `VITE_POCKYMOE_RELAY_ORIGIN` pointing at the
@@ -143,9 +162,20 @@ serial for every adb command, and shuts it down on exit. It refuses an existing
 instance at that port, never uses `cardverify_aosp35_root`, and never restarts a
 shared adb server. Fixture credentials travel in a private file, not arguments.
 
-Instrumentation results and screenshots are pulled into `.local/android-e2e/`.
-`ProductParityTest` covers the Web shell and the DEBUG-only notification state
-hook. For manual state inspection in a debug build on your own serial:
+Instrumentation results, native integration observations and screenshots are
+pulled into `.local/android-e2e/`. `ProductParityTest` asserts mobile capabilities,
+absence of desktop chrome, sheet-first back, CSS Color 4 background resolution,
+status-bar icon appearance, and exactly the three allowed haptic moments. Real
+fake-runtime start/approval events drive the page's `activity.sync`, and the
+notification must contain that real thread title. DEBUG state previews reuse its
+page-owned metadata and verify both languages, indeterminate running, bar-free
+other states and system promotion.
+
+The script also force-stops the test app and records two launches using
+`adb shell screenrecord`: a factory light connection page and a configured dark
+WebView restore. Recordings are `cold-first-launch.mp4` and `cold-web-dark.mp4`.
+These recordings must be decoded and visually inspected; passing instrumentation
+alone is not proof of no startup flash. For manual state inspection in a debug build on your own serial:
 
 ```bash
 adb -s emulator-5580 shell am start -n com.remotecodex.app.debug/com.remotecodex.app.MainActivity \

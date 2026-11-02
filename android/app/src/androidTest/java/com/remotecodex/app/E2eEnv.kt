@@ -25,8 +25,15 @@ data class E2eEnv(
         )
     }
 
+    fun fixtureEvent(type: String, threadId: String) {
+        post(
+            "$deviceApi/e2e/events",
+            JSONObject().put("type", type).put("threadId", threadId).toString(),
+        )
+    }
+
     fun startThreadAndPrompt(): CreatedThread {
-        val title = "notify-${UUID.randomUUID().toString().take(6)}"
+        val title = "Android mobile integration ${UUID.randomUUID().toString().take(6)}"
         val thread =
             post(
                 "$deviceApi/threads/start",

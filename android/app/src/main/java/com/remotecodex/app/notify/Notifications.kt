@@ -12,7 +12,7 @@ import android.os.Looper
 import com.remotecodex.app.BuildConfig
 import com.remotecodex.app.MainActivity
 import com.remotecodex.app.data.SessionStore
-import com.remotecodex.app.shellText
+import com.remotecodex.app.shellLocale
 import java.time.Instant
 import org.json.JSONArray
 import org.json.JSONObject
@@ -33,6 +33,7 @@ object Notifications {
     private var genericBody = ""
     private var lastEventKey: String? = null
     private var debugOverride = false
+    private var debugPreview: AccountItem? = null
     private val handler = Handler(Looper.getMainLooper())
     private var expiry: Runnable? = null
 
@@ -53,7 +54,7 @@ object Notifications {
             v.getString("key"),
             v.getString("deviceId"),
             v.getString("threadId"),
-            v.optString("title", "线程运行中"),
+            v.optString("title", ""),
             v.optString("deviceName"),
             v.optString("workspaceLabel"),
             v.getString("state"),
@@ -128,6 +129,7 @@ object Notifications {
         expiry?.let(handler::removeCallbacks)
         expiry = null
         debugOverride = false
+        debugPreview = null
         lastEventKey = null
         loaded = false
         localItems.clear()
@@ -181,7 +183,7 @@ object Notifications {
                     v.getString("deviceId"),
                     v.getString("threadId"),
                     v.optString("rootThreadTitle").takeUnless { it == "null" || it.isBlank() }
-                        ?: v.optString("title", "线程运行中"),
+                        ?: v.optString("title", ""),
                     v.optString("deviceName"),
                     v.optString("workspaceLabel"),
                     v.getString("state"),
@@ -210,6 +212,16 @@ object Notifications {
         }
         metadata.remember(account, names)
         refresh(context)
+    }
+
+    @Synchronized
+    fun appearanceChanged(context: Context) {
+        if (
+            context.getSystemService(NotificationManager::class.java).activeNotifications.any {
+                it.id == WATCH_ID
+            }
+        )
+            refresh(context)
     }
 
     @Synchronized
@@ -256,22 +268,18 @@ object Notifications {
                     }
         }
         val s = summary
-        fun text(zh: String, en: String) = shellText(context, zh, en)
-        val text =
-            when (s.state) {
-                "needsInput" -> text("${s.count} 个线程等待你处理", "${s.count} threads waiting for you")
-                "failed" -> text("${s.count} 个线程失败", "${s.count} threads failed")
-                "interrupted" -> text("${s.count} 个线程已中断", "${s.count} threads interrupted")
-                "running" ->
-                    text(
-                        "${s.items.count { it.state == "running" }} 个线程运行中",
-                        "${s.items.count { it.state == "running" }} threads running",
-                    )
-                "completed" -> text("${s.count} 个线程已完成", "${s.count} threads completed")
-                else -> text("正在接收线程事件", "Receiving thread events")
-            }
+        val copy = NotificationCopy(shellLocale(context))
+        val text = copy.summary(s.state, s.count)
+        val displayedItems =
+            if (s.items.isNotEmpty()) s.items
+            else if (s.state == "completed")
+                activity.lifetime.keys
+                    .mapNotNull { metadata[it] }
+                    .map { it.copy(state = "completed") }
+            else emptyList()
         val first =
-            (s.items.firstOrNull() ?: lastEventKey?.let(localItems::get))?.conversationTarget()
+            (displayedItems.firstOrNull() ?: lastEventKey?.let(localItems::get))
+                ?.conversationTarget()
         val intent =
             Intent(context, MainActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
@@ -288,6 +296,13 @@ object Notifications {
                 intent,
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
+        val rows =
+            displayedItems.take(3).joinToString("\n") {
+                listOf(copy.threadTitle(it.title), it.deviceName, it.workspaceLabel)
+                    .filter(String::isNotBlank)
+                    .joinToString(" · ")
+            } + if (displayedItems.size > 3) "\n" + copy.more(displayedItems.size - 3) else ""
+        val body = if (genericBody.isBlank()) text else copy.genericBody(first?.state ?: s.state)
         val builder =
             Notification.Builder(context, CHANNEL_AGENT)
                 .setSmallIcon(
@@ -300,11 +315,8 @@ object Notifications {
                         else -> com.remotecodex.app.R.drawable.status_running
                     }
                 )
-                .setContentTitle(
-                    first?.title?.ifBlank { text("线程运行中", "Thread running") }?.let(::middleTitle)
-                        ?: "Pockymoe"
-                )
-                .setContentText(genericBody.ifBlank { text })
+                .setContentTitle(middleTitle(copy.headline(s.state, s.count, first?.title), 96))
+                .setContentText(if (rows.isBlank()) body else rows.replace('\n', ' '))
                 .setSubText(text)
                 .setContentIntent(pending)
                 .setOngoing(true)
@@ -312,34 +324,22 @@ object Notifications {
                 .setCategory(Notification.CATEGORY_PROGRESS)
                 .setStyle(
                     Notification.BigTextStyle()
-                        .bigText(
-                            s.items.take(3).joinToString("\n") {
-                                "${it.title} · ${it.deviceName} · ${it.workspaceLabel}"
-                            } +
-                                (if (s.items.size > 3)
-                                    text("\n其余 ${s.items.size - 3} 个", "\n${s.items.size - 3} more")
-                                else "") +
-                                "\n" +
-                                genericBody.ifBlank { text }
-                        )
+                        .bigText(listOf(rows, body).filter(String::isNotBlank).joinToString("\n"))
                 )
         if (s.state == "running") builder.setWhen(s.since).setUsesChronometer(true)
         if (Build.VERSION.SDK_INT >= 36 && s.state != "idle") {
-            // System surfaces cannot animate the Web status ring; elapsed time conveys progress.
-            builder
-                .setStyle(
+            // There is no measurable percentage. Only running uses an indeterminate
+            // framework progress style; other states retain the bar-free BigTextStyle,
+            // which also has promotable characteristics on supported Android versions.
+            if (s.state == "running")
+                builder.setStyle(
                     Notification.ProgressStyle()
                         .setStyledByProgress(false)
-                        .setProgressIndeterminate(s.state == "running")
+                        .setProgressIndeterminate(true)
+                        .setProgressSegments(emptyList())
+                        .setProgressPoints(emptyList())
                 )
-                .setContentText(
-                    s.items.take(3).joinToString(" · ") {
-                        "${it.title} · ${it.deviceName} · ${it.workspaceLabel}"
-                    } +
-                        (if (s.items.size > 3)
-                            text(" · 其余 ${s.items.size - 3} 个", " · ${s.items.size - 3} more")
-                        else "")
-                )
+            builder
                 .setColor(
                     when (s.state) {
                         "needsInput",
@@ -348,13 +348,7 @@ object Notifications {
                         else -> 0xFF78716C.toInt()
                     }
                 )
-                .setShortCriticalText(
-                    if (s.state == "needsInput") s.count.toString()
-                    else if (s.state == "running") text("运行中", "Running")
-                    else if (s.state == "completed") text("已完成", "Done")
-                    else if (s.state == "interrupted") text("已中断", "Stopped")
-                    else text("失败", "Failed")
-                )
+                .setShortCriticalText(copy.critical(s.state, s.count))
             if (Build.VERSION.SDK_INT_FULL >= Build.VERSION_CODES_FULL.BAKLAVA_1)
                 builder.setRequestPromotedOngoing(true)
         }
@@ -382,7 +376,7 @@ object Notifications {
                     key,
                     deviceId,
                     threadId,
-                    shellText(context, "线程运行中", "Thread running"),
+                    "",
                     "",
                     "",
                     state,
@@ -391,7 +385,7 @@ object Notifications {
         refresh(context)
     }
 
-    fun debugState(context: Context, state: String) {
+    fun debugState(context: Context, state: String, threadKey: String? = null) {
         if (!BuildConfig.DEBUG) return
         if (state == "clear") {
             clear(context)
@@ -399,16 +393,19 @@ object Notifications {
         }
         if (state !in setOf("running", "needsInput", "failed", "interrupted", "completed", "idle"))
             return
+        if (!debugOverride) debugPreview = threadKey?.let { metadata[it] }
         debugOverride = true
         val now = System.currentTimeMillis()
+        val preview = debugPreview
         val entry =
-            JSONObject()
-                .put("key", "debug:thread")
-                .put("deviceId", "debug")
-                .put("threadId", "thread")
-                .put("title", shellText(context, "线程运行中", "Thread running"))
-                .put("deviceName", "AOSP")
-                .put("workspaceLabel", "mobile-ws")
+            (preview?.let(::itemJson)
+                    ?: JSONObject()
+                        .put("key", "debug:thread")
+                        .put("deviceId", "debug")
+                        .put("threadId", "thread")
+                        .put("title", "")
+                        .put("deviceName", "AOSP")
+                        .put("workspaceLabel", "mobile-ws"))
                 .put("since", Instant.ofEpochMilli(now - 60_000).toString())
                 .put("state", state)
         if (state == "idle") activity.lifetime = ActivityLifetime("debug")

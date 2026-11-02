@@ -1,5 +1,18 @@
 (() => {
   if (window !== window.top || window.pockymoeHost) return;
+  // The shell owns its viewport: publish safe-area insets and let only the
+  // visual viewport respond to the IME, including pages built for a browser.
+  const viewport = () => {
+    const meta = document.querySelector('meta[name="viewport"]');
+    if (!meta) return false;
+    const value = meta.content.split(',').map(s => s.trim()).filter(s => !/^viewport-fit=|^interactive-widget=/i.test(s));
+    meta.content = [...value, 'viewport-fit=cover', 'interactive-widget=resizes-visual'].join(', ');
+    return true;
+  };
+  if (!viewport()) {
+    const observer = new MutationObserver(() => { if (viewport()) observer.disconnect(); });
+    observer.observe(document, {childList: true, subtree: true});
+  }
   const pending = new Map(), listeners = new Set();
   let serial = 0;
   const call = (method, ...args) => new Promise((resolve, reject) => {
