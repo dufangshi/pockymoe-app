@@ -90,7 +90,14 @@ test('a bubble stays solid and is not redrawn while the pointer is on it', async
   await movePetUnderPointer();
   await expect(glass.locator('.controls')).toBeVisible();
   await glass.evaluate(() => document.fonts.ready);
-  await expect.poll(async () => (await glassBounds()).height === await glass.locator('#app').evaluate(root => Math.ceil(root.getBoundingClientRect().height))).toBe(true);
+  // Await the measurement IPC itself. Windows rounds logical window bounds to
+  // physical pixels (and enforces native minimums), so outer bounds are not a
+  // valid acknowledgement of an exact CSS height at fractional display scales.
+  const measured = await glass.evaluate(async () => {
+    const root = document.querySelector('#app')!.getBoundingClientRect();
+    return (window as unknown as { rcDesktop: { pet: { action(value: unknown): Promise<{ ok: boolean }> } } }).rcDesktop.pet.action({ type: 'surfaceMeasure', width: Math.ceil(root.width), height: Math.ceil(root.height) });
+  });
+  expect(measured.ok).toBe(true);
   await glass.evaluate(() => { const w = window as unknown as { rewrites: number }; w.rewrites = 0; new MutationObserver(records => { w.rewrites += records.length; }).observe(document.querySelector('#app')!, { childList: true, subtree: true }); });
   const heights: number[] = [];
   for (let i = 0; i < 20; i++) { heights.push((await glassBounds()).y); await glass.waitForTimeout(100); }
@@ -140,10 +147,14 @@ const openPreferences = async (): Promise<Page> => {
   await preferences.locator('[data-section="pet"]').click();
   // Discovery starts when this section mounts. Open its pickers only after their
   // data arrives; an open picker deliberately defers replacing its options.
-  await expect.poll(() => preferences.evaluate(async () => {
-    const state = await (window as unknown as { pockymoeDesktop: { getState(): Promise<import('../src/shared/local').LocalState> } }).pockymoeDesktop.getState();
-    return !!state.summary.muteTargets && (!state.settings.petVoiceSummary || state.summary.connections.length > 0);
-  })).toBe(true);
+  await preferences.evaluate(() => new Promise<void>(resolve => {
+    const bridge = (window as unknown as { pockymoeDesktop: import('../src/shared/local').LocalBridge }).pockymoeDesktop;
+    const ready = (state: import('../src/shared/local').LocalState): boolean => !!state.summary.muteTargets && (!state.settings.petVoiceSummary || state.summary.connections.length > 0);
+    // Await the data broadcasts produced by the UI's actual requests. A separate
+    // five-second polling deadline can expire before the query's own IPC deadline.
+    const stop = bridge.onState(state => { if (ready(state)) { stop(); resolve(); } });
+    void bridge.getState().then(state => { if (ready(state)) { stop(); resolve(); } });
+  }));
   return preferences;
 };
 test('summary: picks a saved upstream and its model, and reads what the model said', async () => {
@@ -297,8 +308,14 @@ test('docked: an alert brings the head out, and it tucks back when the alert is 
 test('closing the panel leaves the main window where it was', async () => {
   const sprite = await pet('sprite');
   const act = (value: unknown): Promise<unknown> => sprite.evaluate(input => (window as unknown as { rcDesktop: { pet: { action(value: unknown): Promise<unknown> } } }).rcDesktop.pet.action(input), value);
-  const focused = (): Promise<boolean> => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().some(window => !window.webContents.getURL().includes('pet/index.html') && window.isFocused()));
-  await app.evaluate(({ BrowserWindow }) => { for (const window of BrowserWindow.getAllWindows()) if (window.isFocused()) window.blur(); });
+  const focused = (): Promise<boolean> => app.evaluate(() => globalThis.__pockymoeDesktopTest.windows.mainFocused());
+  // Windows may immediately refocus the only eligible visible window after blur.
+  // Give native focus a real destination while keeping the main window visible.
+  const keeper = await app.evaluate(async ({ BrowserWindow }) => {
+    const window = new BrowserWindow({ width: 300, height: 200, show: false, title: 'Focus fixture' });
+    await window.loadURL('about:blank'); window.show(); window.focus(); return window.id;
+  });
+  await expect.poll(() => app.evaluate(({ BrowserWindow }, id) => BrowserWindow.fromId(id)?.isFocused(), keeper)).toBe(true);
   await expect.poll(focused).toBe(false);
   await act({ type: 'toggleTray' });
   // What a real click can do on macOS: the app comes forward with its main window.
@@ -349,10 +366,17 @@ for (const surface of ['glass', 'sprite'] as const) test(`native close on ${surf
 });
 
 for (const surface of ['glass', 'sprite'] as const) test(`destroying ${surface} retires both pet windows`, async () => {
-  await app.evaluate(({ BrowserWindow }, surface) => {
-    BrowserWindow.getAllWindows().find(window => window.webContents.getURL().includes('pet/index.html') && !!window.getParentWindow() === (surface === 'glass'))!.destroy();
+  const ids = await app.evaluate(({ BrowserWindow }, surface) => {
+    const pets = BrowserWindow.getAllWindows().filter(window => window.webContents.getURL().includes('pet/index.html'));
+    const ids = pets.map(window => window.id);
+    pets.find(window => !!window.getParentWindow() === (surface === 'glass'))!.destroy();
+    return ids;
   }, surface);
-  await expect.poll(() => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().filter(window => window.webContents.getURL().includes('pet/index.html')).length)).toBe(0);
+  // A dying window can remain in getAllWindows with null webContents. Track the
+  // native IDs captured before destruction instead of dereferencing retired URLs.
+  await expect.poll(() => app.evaluate(({ BrowserWindow }, ids) => ids.every(id => {
+    const window = BrowserWindow.fromId(id); return !window || window.isDestroyed();
+  }), ids)).toBe(true);
   await page.evaluate(() => window.pockymoeHost!.window.openPreferences('pet'));
   await expect.poll(() => app.windows().some(page => page.url().includes('view=preferences'))).toBe(true);
   const prefs = app.windows().find(page => page.url().includes('view=preferences'))!;

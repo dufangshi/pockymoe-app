@@ -8,7 +8,7 @@ import type { LocalBridge } from '../src/shared/local';
 
 for (const profile of ['fresh', 'legacy', 'saved', 'relay-only', 'relay-failed'] as const) test(`startup network and setup: ${profile}`, async () => {
   const dir = mkdtempSync(join(tmpdir(), 'pockymoe-startup-'));
-  const server = createServer((req, res) => res.end(req.url === '/healthz' ? '{"status":"ok"}' : profile === 'relay-failed' ? '<html>Unrelated site</html>' : '<html><title>Pockymoe</title><h1>Saved address</h1></html>'));
+  const server = createServer((req, res) => { res.setHeader('Connection', 'close'); res.end(req.url === '/healthz' ? '{"status":"ok"}' : profile === 'relay-failed' ? '<html>Unrelated site</html>' : '<html><title>Pockymoe</title><h1>Saved address</h1></html>'); });
   await new Promise<void>(done => server.listen(0, '127.0.0.1', done));
   const address = server.address();
   if (!address || typeof address === 'string') throw new Error('Missing fixture port');
@@ -41,9 +41,17 @@ for (const profile of ['fresh', 'legacy', 'saved', 'relay-only', 'relay-failed']
   for (const key of ['PATH', 'HOME', 'TMPDIR', 'USER', 'LOGNAME', 'DISPLAY', 'SystemRoot', 'WINDIR', 'TEMP', 'TMP', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'ComSpec', 'PATHEXT']) if (process.env[key]) env[key] = process.env[key]!;
   let app: ElectronApplication | undefined;
   try {
-    app = await electron.launch({ args: [bootstrap], env });
+    console.log(`startup:${profile}:launch`);
+    app = await test.step('launch isolated startup profile', () => electron.launch({ args: [bootstrap], env }));
+    console.log(`startup:${profile}:launched`);
     const configured = profile === 'saved' || profile === 'relay-only';
-    const readyPage = await windowAt(app, configured ? origin : 'view=relay');
+    const readyPage = await test.step('wait for profile navigation', () => configured
+      ? Promise.race([
+        windowAt(app!, origin),
+        windowAt(app!, 'view=relay').then(async page => { throw new Error(`Saved profile unexpectedly returned to setup: ${await page.locator('#relay-error').textContent()}`); })
+      ])
+      : windowAt(app!, 'view=relay'));
+    console.log(`startup:${profile}:navigated`);
     if (!configured) {
       const page = readyPage;
       await expect(page.locator('#origin')).toHaveValue(profile === 'relay-failed' ? origin : '');
@@ -69,8 +77,11 @@ for (const profile of ['fresh', 'legacy', 'saved', 'relay-only', 'relay-failed']
       expect(app.windows().some(w => w.url().includes('view=relay'))).toBe(false);
     }
   } finally {
-    await app?.close();
-    await new Promise<void>(done => server.close(() => done()));
+    console.log(`startup:${profile}:close-app`);
+    await test.step('close isolated startup app', async () => { await app?.close(); });
+    console.log(`startup:${profile}:close-server`);
+    await test.step('close isolated startup server', () => new Promise<void>(done => { server.close(() => done()); server.closeAllConnections(); }));
     rmSync(dir, { recursive: true, force: true });
+    console.log(`startup:${profile}:done`);
   }
 });

@@ -4,7 +4,7 @@
 <dict>
     <key>NSCameraUsageDescription</key><string>Take a photo to attach to your prompt.</string>
     <key>NSPhotoLibraryUsageDescription</key><string>Select images to attach to your prompt.</string>
-    <key>WKAppBoundDomains</key><array><string>remote.lnz-study.com</string><string>localhost</string><string>127.0.0.1</string></array>
+    <key>WKAppBoundDomains</key><array><string>app.example.com</string><string>localhost</string><string>127.0.0.1</string></array>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleExecutable</key>
