@@ -213,6 +213,74 @@ class ProductParityTest {
             .single { it.id == Notifications.WATCH_ID }
             .notification
 
+    private fun startupScenario(): E2eEnv {
+        val env = E2eEnv.load()
+        scenario =
+            ActivityScenario.launch(
+                Intent(context, MainActivity::class.java).apply {
+                    putExtra(MainActivity.EXTRA_RELAY_URL, env.appRelayUrl)
+                    putExtra(MainActivity.EXTRA_WEB_URL, env.webUrl)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+            )
+        eventually("startup page host") { js("!!window.pockymoeHost") == "true" }
+        return env
+    }
+
+    @Test
+    fun prepareColdStart() {
+        val mode = InstrumentationRegistry.getArguments().getString("paint")!!
+        assertTrue(mode in listOf("light", "dark"))
+        startupScenario()
+        scenario.use {
+            js(
+                "window.navigationProbe=true;localStorage.setItem('pockymoe-theme-preset','classic');localStorage.setItem('remote-codex-theme-mode','$mode');location.reload()"
+            )
+            eventually("cold start appearance ready") {
+                HostDiagnostics.appearance?.pack == "classic" &&
+                    HostDiagnostics.appearance?.effective == mode &&
+                    js("!window.navigationProbe") == "true"
+            }
+            assertAppearance("classic", mode)
+            eventually("prepared page painted") {
+                var visible = false
+                scenario.onActivity { visible = find(it.window.decorView)?.alpha == 1f }
+                visible
+            }
+            shot("cold-$mode-prepared")
+        }
+    }
+
+    @Test
+    fun systemThemeChangesKeepTheSameWebView() {
+        startupScenario()
+        scenario.use {
+            js(
+                "window.navigationProbe=true;localStorage.setItem('pockymoe-theme-preset','classic');localStorage.setItem('remote-codex-theme-mode','system');location.reload()"
+            )
+            eventually("page follows system") {
+                js(
+                    "!window.navigationProbe && document.documentElement.dataset.themeMode === 'system'"
+                ) == "true"
+            }
+            js("window.systemThemeMarker='same-document'")
+            for (mode in listOf("dark", "light")) {
+                device.executeShellCommand(
+                    "cmd uimode night ${if (mode == "dark") "yes" else "no"}"
+                )
+                eventually("Web media follows OS $mode") {
+                    HostDiagnostics.appearance?.effective == mode
+                }
+                assertAppearance("classic", mode)
+                assertEquals(
+                    "theme change retained document",
+                    "same-document",
+                    js("window.systemThemeMarker"),
+                )
+            }
+        }
+    }
+
     @Test
     fun thinShellAndLiveUpdates() {
         val env = E2eEnv.load()
@@ -259,6 +327,11 @@ class ProductParityTest {
                 )
                 .click()
             eventually("host available") { js("!!window.pockymoeHost") == "true" }
+            eventually("first Web frame visible") {
+                var visible = false
+                scenario.onActivity { visible = find(it.window.decorView)?.alpha == 1f }
+                visible
+            }
             js("window.pockymoeHost.capabilities().then(c=>window.testCaps=c)")
             eventually("mobile capabilities") {
                 js(

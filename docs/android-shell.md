@@ -38,9 +38,22 @@ its retained proof. Provider cookies and native service credentials are never
 sent to the page. OAuth requires the matching Web and Relay mobile-auth changes;
 this shell alone cannot make an old Relay support that protocol.
 
-The page supplies resolved appearance/background. The root retains that color
-while a new WebView paints and fades in for 120 ms after a visual-state callback.
-The system splash is logo-free, using the specified light/dark launch colors.
+The last opaque page background is selected before `super.onCreate` and applied
+to the activity window, root and WebView. With no saved background, the system
+night setting selects `#17171A` or `#FAFAF8`. The WebView remains at alpha zero
+until its document has committed, the page has supplied appearance paint and a
+visual-state callback confirms that appearance revision. Only then does it fade
+in over 120 ms. Stale navigation/appearance callbacks cannot reveal a newer page.
+
+On Android 12+, `SplashScreen.setSplashScreenTheme` persists one of the stable
+`Theme.RemoteCodex.StartupDark` / `StartupLight` resource names as the page paints.
+Android can therefore select the correct logo-free system starting window before
+the next app process exists. No app-wide night override is set: Web system-theme
+media queries continue to follow the OS. A first-ever launch retains the manifest's
+system-qualified splash. The exit listener removes the splash over the already
+painted root, rather than fading a light system view over a dark cache. Pre-31
+launch previews are disabled so the cached native window provides the first app
+surface instead of an unconfigurable light preview.
 `WindowInsets` passes IME occlusion to modern WebView’s visual viewport without native panning; system bars are transparent.
 AndroidX's predictive-back dispatcher sends the `back` host command. The Web owns
 overlay/route handling; an unhandled or unresponsive page returns to the launcher.
@@ -103,9 +116,8 @@ account isolation, completion counting and retention, independent of Android.
   this Android worker).
 - Standard notification templates control layout. Running uses indeterminate
   `ProgressStyle`; other states use `BigTextStyle` to avoid suggesting measurable
-  progress or a full completed bar. Metadata lists at most three conversations,
-  then “其余 N 个”. No custom notification layout or
-  approval buttons are added.
+  progress or a full completed bar. Title, device/workspace and state each have
+  their own line. No custom notification layout or approval buttons are added.
 - A foreground service must retain a notification after the activity's
   15-minute end. Its single notification becomes an ordinary watcher instead of
   leaving a promoted completed activity indefinitely.
@@ -117,11 +129,10 @@ account isolation, completion counting and retention, independent of Android.
 - The agreed back command carries only a committed back action. AndroidX
   delivers predictive gestures; a Web route preview following gesture progress
   would require an additional page contract.
-- Only resolved page appearance is persisted. The Android system's initial
-  splash uses the design's fixed light/dark colors before application code runs.
-  This still exposes a light starting window when the OS is light but the cached
-  Web theme is dark; the dark restore does not yet meet the no-flash acceptance
-  criterion. The cached WebView background takes over after that system window.
+- Only resolved page paint and the platform's selected splash resource are
+  persisted. The splash uses the fixed design colors; the native window and
+  hidden WebView use the exact last page color until first paint. Splash-only
+  persistence does not change application or system night mode.
 
 ## Local verification
 
@@ -175,11 +186,15 @@ notification must contain that real thread title. DEBUG state previews reuse its
 page-owned metadata and verify both languages, indeterminate running, bar-free
 other states and system promotion.
 
-The script also force-stops the test app and records two launches using
-`adb shell screenrecord`: a factory light connection page and a configured dark
-WebView restore. Recordings are `cold-first-launch.mp4` and `cold-web-dark.mp4`.
-These recordings must be decoded and visually inspected; passing instrumentation
-alone is not proof of no startup flash. For manual state inspection in a debug build on your own serial:
+The script force-stops the test app and uses `adb shell screenrecord` for four
+launches: first-ever system dark (`cold-first-dark.mp4`), first-ever system light
+(`cold-first-launch.mp4`), cached dark with a light system (`cold-web-dark.mp4`),
+and cached light (`cold-web-light.mp4`). Fresh installs reset OS-persisted splash
+preferences between the two first-ever cases. The system-follow test verifies
+that OS theme changes keep the same WebView/document. Per-recording `*-layers.log`
+files contain DEBUG paint colors, alpha and monotonic timing, never URLs or
+session contents. Recordings must still be decoded and visually inspected;
+passing instrumentation alone is not proof of no startup flash. For manual state inspection in a debug build on your own serial:
 
 ```bash
 adb -s emulator-5580 shell am start -n com.remotecodex.app.debug/com.remotecodex.app.MainActivity \

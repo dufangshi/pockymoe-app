@@ -14,6 +14,7 @@ ENV_FILE="$ROOT/.local/e2e-env.json"
 ARTIFACTS="$ROOT/.local/android-e2e"
 mkdir -p "$ARTIFACTS" "$ANDROID_AVD_HOME" "$ANDROID_USER_HOME"
 rm -rf "$ARTIFACTS/screenshots"
+rm -f "$ARTIFACTS/instrumentation.log" "$ARTIFACTS/system-theme-test.log" "$ARTIFACTS/light-prepare-test.log" "$ARTIFACTS/cold-first-dark.mp4" "$ARTIFACTS/cold-first-launch.mp4" "$ARTIFACTS/cold-web-dark.mp4" "$ARTIFACTS/cold-web-light.mp4"
 [[ -f "$ENV_FILE" ]] || { echo 'Start scripts/e2e-backend.sh on isolated ports first.' >&2; exit 1; }
 RELAY_PORT="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["relayPort"])' "$ENV_FILE")"
 [[ "$RELAY_PORT" != 45679 ]] || exit 1
@@ -37,6 +38,7 @@ fi
 started=false
 cleanup() {
   if $started; then
+    adb -s "$SERIAL" logcat -d -s PockymoeStartup:I '*:S' > "$ARTIFACTS/startup-layers.log" 2>/dev/null || true
     adb -s "$SERIAL" logcat -d -s PockymoeE2E:I '*:S' > "$ARTIFACTS/live-updates.log" 2>/dev/null || true
     adb -s "$SERIAL" shell appops get com.remotecodex.app.debug > "$ARTIFACTS/notification-appops.txt" 2>/dev/null || true
     adb -s "$SERIAL" pull /sdcard/Android/data/com.remotecodex.app.debug/files/integration-evidence.json "$ARTIFACTS/" >/dev/null 2>&1 || true
@@ -91,22 +93,32 @@ WEB_PORT="$(python3 -c 'import json,sys,urllib.parse; d=json.load(open(sys.argv[
 if [[ "$WEB_PORT" != "$RELAY_PORT" ]]; then adb -s "$SERIAL" reverse "tcp:$WEB_PORT" "tcp:$WEB_PORT"; fi
 cd "$ROOT/android"
 ./gradlew :app:assembleDebug :app:assembleDebugAndroidTest --max-workers=2
-adb -s "$SERIAL" install -r app/build/outputs/apk/debug/app-debug.apk >/dev/null
-adb -s "$SERIAL" install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk >/dev/null
+# The isolated SDK home has its own debug key. These are fresh-install tests,
+# so remove only this task's test app rather than inheriting a different key/data.
+adb -s "$SERIAL" uninstall com.remotecodex.app.debug >/dev/null 2>&1 || true
+adb -s "$SERIAL" install app/build/outputs/apk/debug/app-debug.apk >/dev/null
+adb -s "$SERIAL" uninstall com.remotecodex.app.debug.test >/dev/null 2>&1 || true
+adb -s "$SERIAL" install app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk >/dev/null
 record_cold() {
   local name="$1"
   adb -s "$SERIAL" shell am force-stop com.remotecodex.app.debug
+  adb -s "$SERIAL" logcat -c
   adb -s "$SERIAL" shell screenrecord --bit-rate 8000000 --time-limit 8 "/sdcard/Download/$name.mp4" > "$ARTIFACTS/$name-record.log" 2>&1 &
   local recorder=$!
   sleep 0.7
   adb -s "$SERIAL" shell am start -W -n com.remotecodex.app.debug/com.remotecodex.app.MainActivity > "$ARTIFACTS/$name-launch.log"
   wait "$recorder"
   adb -s "$SERIAL" pull "/sdcard/Download/$name.mp4" "$ARTIFACTS/$name.mp4" >/dev/null 2>&1
+  adb -s "$SERIAL" logcat -d -s PockymoeStartup:I '*:S' > "$ARTIFACTS/$name-layers.log"
   adb -s "$SERIAL" shell am force-stop com.remotecodex.app.debug
 }
-# Factory cold launch covers the light native connection page. The second
-# recording below covers a force-stopped, configured WebView with saved dark paint.
-adb -s "$SERIAL" shell pm clear com.remotecodex.app.debug >/dev/null
+# First-ever launches have no remembered paint and must match the OS theme.
+adb -s "$SERIAL" shell cmd uimode night yes
+record_cold cold-first-dark
+if dismiss_boot_anr; then record_cold cold-first-dark; fi
+adb -s "$SERIAL" uninstall com.remotecodex.app.debug >/dev/null 2>&1 || true
+adb -s "$SERIAL" install app/build/outputs/apk/debug/app-debug.apk >/dev/null
+adb -s "$SERIAL" shell cmd uimode night no
 record_cold cold-first-launch
 if dismiss_boot_anr; then record_cold cold-first-launch; fi
 
@@ -118,7 +130,17 @@ adb -s "$SERIAL" shell appops get com.remotecodex.app.debug > "$ARTIFACTS/notifi
 # Fixture credentials travel as a local file, never command-line values or console output.
 adb -s "$SERIAL" shell run-as com.remotecodex.app.debug mkdir -p files
 adb -s "$SERIAL" shell "run-as com.remotecodex.app.debug sh -c 'cat > files/e2e-env.json'" < "$ENV_FILE"
-adb -s "$SERIAL" shell am instrument -w -r -e class com.remotecodex.app.ProductParityTest -e envFile /data/user/0/com.remotecodex.app.debug/files/e2e-env.json com.remotecodex.app.debug.test/androidx.test.runner.AndroidJUnitRunner | tee "$ARTIFACTS/instrumentation.log"
+adb -s "$SERIAL" shell am instrument -w -r -e class 'com.remotecodex.app.ProductParityTest#thinShellAndLiveUpdates' -e envFile /data/user/0/com.remotecodex.app.debug/files/e2e-env.json com.remotecodex.app.debug.test/androidx.test.runner.AndroidJUnitRunner | tee "$ARTIFACTS/instrumentation.log"
 rg -q 'OK \([0-9]+ tests?\)' "$ARTIFACTS/instrumentation.log"
+adb -s "$SERIAL" shell settings put global animator_duration_scale 1
 record_cold cold-web-dark
 if dismiss_boot_anr; then record_cold cold-web-dark; fi
+
+# Exercise system-follow without locking Web media to the persisted launch mode.
+adb -s "$SERIAL" shell am instrument -w -r -e class 'com.remotecodex.app.ProductParityTest#systemThemeChangesKeepTheSameWebView' -e envFile /data/user/0/com.remotecodex.app.debug/files/e2e-env.json com.remotecodex.app.debug.test/androidx.test.runner.AndroidJUnitRunner | tee "$ARTIFACTS/system-theme-test.log"
+rg -q 'OK \([0-9]+ tests?\)' "$ARTIFACTS/system-theme-test.log"
+# Prepare and record a real configured light page as well as the dark page.
+adb -s "$SERIAL" shell am instrument -w -r -e class 'com.remotecodex.app.ProductParityTest#prepareColdStart' -e paint light -e envFile /data/user/0/com.remotecodex.app.debug/files/e2e-env.json com.remotecodex.app.debug.test/androidx.test.runner.AndroidJUnitRunner | tee "$ARTIFACTS/light-prepare-test.log"
+rg -q 'OK \([0-9]+ tests?\)' "$ARTIFACTS/light-prepare-test.log"
+record_cold cold-web-light
+if dismiss_boot_anr; then record_cold cold-web-light; fi

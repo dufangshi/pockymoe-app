@@ -52,6 +52,7 @@ class MainActivity : ComponentActivity() {
     private var origin = ""
     private var debugWebOrigin: String? = null
     private var pageBackground = Color.TRANSPARENT
+    private lateinit var firstPaint: FirstPaintState
     private var fileCallback: ValueCallback<Array<Uri>>? = null
     private val permission =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) {}
@@ -80,6 +81,9 @@ class MainActivity : ComponentActivity() {
         }
 
     override fun onCreate(state: Bundle?) {
+        pageBackground = StartupTheme.background(this)
+        firstPaint = FirstPaintState(pageBackground)
+        window.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(pageBackground))
         super.onCreate(state)
         enableEdgeToEdge()
         store = SessionStore(this)
@@ -92,22 +96,25 @@ class MainActivity : ComponentActivity() {
             }
             intent.getStringExtra(EXTRA_TOKEN)?.let { store.token = it }
         }
-        val systemDark =
-            resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK ==
-                Configuration.UI_MODE_NIGHT_YES
-        val dark =
-            runCatching {
-                    JSONObject(prefs.getString("appearance", "{}")!!)
-                        .optString("effective")
-                        .takeIf { it.isNotBlank() }
-                        ?.let { it == "dark" }
-                }
-                .getOrNull() ?: systemDark
-        pageBackground =
-            prefs.getInt("background", Color.parseColor(if (dark) "#17171A" else "#FAFAF8"))
+        val dark = StartupPaint.isDark(pageBackground)
         root = FrameLayout(this).apply { setBackgroundColor(pageBackground) }
         window.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(pageBackground))
         setContentView(root)
+        StartupTrace.event("activityRootConfigured", pageBackground)
+        if (Build.VERSION.SDK_INT >= 31)
+            splashScreen.setOnExitAnimationListener { splash ->
+                StartupTrace.event(
+                    "systemSplashExit",
+                    StartupTrace.color(splash),
+                    if (::web.isInitialized) web.alpha else null,
+                )
+                StartupTrace.event(
+                    "rootAtSplashExit",
+                    StartupTrace.color(root),
+                    if (::web.isInitialized) web.alpha else null,
+                )
+                splash.remove()
+            }
         WindowCompat.getInsetsController(window, root).apply {
             isAppearanceLightStatusBars = !dark
             isAppearanceLightNavigationBars = !dark
@@ -355,6 +362,11 @@ class MainActivity : ComponentActivity() {
                         ) {
                             reply = null
                             failed = false
+                            firstPaint.begin()
+                            view.animate().cancel()
+                            view.alpha = 0f
+                            view.setBackgroundColor(pageBackground)
+                            StartupTrace.event("webNavigationHidden", pageBackground, view.alpha)
                         }
 
                         override fun shouldOverrideUrlLoading(
@@ -389,18 +401,12 @@ class MainActivity : ComponentActivity() {
                         }
 
                         override fun onPageCommitVisible(view: WebView, url: String) {
-                            if (!failed)
+                            StartupTrace.event("webDocumentCommitted", pageBackground, view.alpha)
+                            if (!failed) {
                                 root.findViewWithTag<View>("offline")?.let(root::removeView)
-                            if (!failed)
-                                view.postVisualStateCallback(
-                                    0,
-                                    object : WebView.VisualStateCallback() {
-                                        override fun onComplete(requestId: Long) {
-                                            if (!failed && !isDestroyed)
-                                                view.animate().alpha(1f).setDuration(120).start()
-                                        }
-                                    },
-                                )
+                                firstPaint.documentCommitted()
+                                revealPaintedPage(view)
+                            }
                         }
 
                         override fun onPageFinished(view: WebView, url: String) {
@@ -595,6 +601,7 @@ class MainActivity : ComponentActivity() {
                 HostDiagnostics.appearance(a)
                 val dark = a.optString("effective") == "dark"
                 val appearance = a.toString()
+                val document = firstPaint.generation
                 prefs.edit().putString("appearance", appearance).apply()
                 val color = a.optString("background")
                 val parsed = parsePageColor(color)
@@ -607,8 +614,12 @@ class MainActivity : ComponentActivity() {
                     ) { raw ->
                         // Resolve CSS Color 4 (oklch/color-mix/etc.) in the browser, then
                         // cache its actual sRGB paint. Never apply an older theme's reply.
-                        if (!isDestroyed && prefs.getString("appearance", "") == appearance)
-                            parsePageColor(raw.trim('"'))?.let(::applyPageBackground)
+                        if (
+                            !isDestroyed &&
+                                document == firstPaint.generation &&
+                                prefs.getString("appearance", "") == appearance
+                        )
+                            applyPageBackground(parsePageColor(raw.trim('"')) ?: pageBackground)
                     }
                 WindowCompat.getInsetsController(window, root).apply {
                     isAppearanceLightStatusBars = !dark
@@ -677,13 +688,85 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun applyPageBackground(color: Int) {
+        if (firstPaint.appearance(color)) paintBackground(color, persist = true)
+        else {
+            StartupTrace.event("pageAppearanceQueued", color, web.alpha)
+            revealPaintedPage(web)
+        }
+    }
+
+    private fun paintBackground(color: Int, persist: Boolean) {
         pageBackground = color
-        prefs.edit().putInt("background", color).apply()
+        if (persist) prefs.edit().putInt("background", color).apply()
         root.setBackgroundColor(color)
-        web.setBackgroundColor(color)
+        if (::web.isInitialized) web.setBackgroundColor(color)
         window.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(color))
         @Suppress("DEPRECATION")
         window.navigationBarColor = color
+        if (persist) {
+            StartupTheme.remember(this)
+        }
+    }
+
+    private fun revealPaintedPage(view: WebView) {
+        if (failed || !firstPaint.canReveal) return
+        val document = firstPaint.generation
+        val appearance = firstPaint.revision
+        view.postVisualStateCallback(
+            document,
+            object : WebView.VisualStateCallback() {
+                override fun onComplete(requestId: Long) {
+                    if (failed || isDestroyed || !firstPaint.confirm(requestId, appearance)) return
+                    paintBackground(firstPaint.color, persist = true)
+                    StartupTrace.event("webVisualStateReady", pageBackground, view.alpha)
+                    view
+                        .animate()
+                        .alpha(1f)
+                        .setDuration(120)
+                        .withEndAction {
+                            StartupTrace.event("webVisible", pageBackground, view.alpha)
+                        }
+                        .start()
+                }
+            },
+        )
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        if (Build.VERSION.SDK_INT >= 29) theme.rebase()
+        else theme.applyStyle(R.style.Theme_RemoteCodex, true)
+        super.onConfigurationChanged(newConfig)
+        // System theme changes must not recreate the retained WebView.
+        // A first-run local page, with no saved paint, continues to follow the OS.
+        if (::root.isInitialized && !prefs.contains("background")) {
+            val color = StartupTheme.background(this)
+            firstPaint.fallback(color)
+            paintBackground(color, persist = false)
+            val dark = StartupPaint.isDark(color)
+            val foreground = Color.parseColor(if (dark) "#E9E9E7" else "#17171A")
+            fun recolor(view: View) {
+                if (view is TextView) view.setTextColor(foreground)
+                if (view is Button || view is EditText)
+                    (view.background as? GradientDrawable)?.setStroke(
+                        resources.displayMetrics.density.toInt(),
+                        foreground,
+                    )
+                if (view is android.view.ViewGroup)
+                    for (i in 0 until view.childCount) recolor(view.getChildAt(i))
+            }
+            root.findViewWithTag<View>("connect")?.let {
+                it.setBackgroundColor(color)
+                recolor(it)
+            }
+            root.findViewWithTag<View>("offline")?.let {
+                it.setBackgroundColor(color)
+                recolor(it)
+            }
+            WindowCompat.getInsetsController(window, root).apply {
+                isAppearanceLightStatusBars = !dark
+                isAppearanceLightNavigationBars = !dark
+            }
+        }
     }
 
     private fun parsePageColor(value: String): Int? =
@@ -764,6 +847,7 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         RemoteCodexForeground.isForeground = true
+        StartupTheme.remember(this)
     }
 
     override fun onResume() {
@@ -782,6 +866,7 @@ class MainActivity : ComponentActivity() {
     override fun onStop() {
         if (authReply != null) authStopped = true
         RemoteCodexForeground.isForeground = false
+        StartupTheme.remember(this)
         if (::web.isInitialized) CookieManager.getInstance().flush()
         super.onStop()
     }

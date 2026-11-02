@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <style name="Theme.RemoteCodex" parent="Base.Theme.RemoteCodex">
+        <item name="android:windowDisablePreview">false</item>
         <item name="android:windowSplashScreenBackground">#17171A</item>
         <item name="android:windowSplashScreenAnimatedIcon">@android:color/transparent</item>
     </style>
