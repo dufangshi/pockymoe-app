@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { defaults, SettingsStore } from '../src/main/store';
@@ -51,4 +51,27 @@ it('requires setup for fresh and legacy addressless profiles, preserving saved o
     expect(restarted.firstRun).toBe(false);
     expect(restarted.get()).toMatchObject({ webOrigin: 'https://app.example.com', relayOrigin: 'https://relay.example.com' });
   } finally { rmSync(dir, { recursive: true }); }
+});
+
+it('retires former built-in pets but preserves user imports across restarts', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'pockymoe-pet-migration-'));
+  try {
+    const path = join(dir, 'settings.json');
+    expect(new SettingsStore(path).get().petId).toBe('moe');
+    for (const petId of ['frost', 'gpt-dragon']) {
+      writeFileSync(path, JSON.stringify({ petId }));
+      expect(new SettingsStore(path).get().petId).toBe('moe');
+    }
+    writeFileSync(path, JSON.stringify({ petId: 'unknown-user-pack' }));
+    const custom = new SettingsStore(path);
+    custom.set({ petVisible: false });
+    expect(new SettingsStore(path).get().petId).toBe('unknown-user-pack');
+    // Reusing a retired id in a new import must survive a restart.
+    for (const petId of ['frost', 'gpt-dragon']) {
+      mkdirSync(join(dir, 'pets', petId), { recursive: true });
+      writeFileSync(join(dir, 'pets', petId, 'pet.json'), JSON.stringify({ id: petId }));
+      custom.set({ petId });
+      expect(new SettingsStore(path).get().petId).toBe(petId);
+    }
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });

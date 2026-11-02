@@ -1,6 +1,6 @@
 import { t } from '../shared/i18n';
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { dirname, join } from 'node:path';
 import type { DesktopSettings, PageSettings, SettingsStoreLike } from '../shared/contract';
 import { DEFAULT_SPEAKER, LOCAL_SPEAKERS, REMOTE_PROVIDERS, SPEEDS, SUMMARY_LANGUAGES, type RemoteProvider, type RemoteVoice, type SummaryLanguage } from '../shared/voice';
 import { MAX_MUTE_RULES, type MuteRule } from '../shared/mutes';
@@ -12,7 +12,6 @@ export const defaults: DesktopSettings = {
   petId: 'moe', petSize: 'M', petMini: false, petSound: true, petVoice: false, petVoiceProvider: 'local', petVoiceSpeaker: DEFAULT_SPEAKER, petVoiceSpeed: 1, petVoiceRemotes: {}, petVoiceSummary: false, petSummaryConnection: null, petSummaryLanguage: 'auto', petMutes: [], petMuteAlerts: false, petEdgeHide: true, launchAtLogin: false,
   quickWindowShortcut: 'Alt+Space', snoozeUntil: null
 };
-const RETIRED_PET_REPLACEMENT = 'frost';
 export function readJson(path: string): unknown { try { return JSON.parse(readFileSync(path, 'utf8')); } catch { return null; } }
 export function writeJson(path: string, data: unknown): void {
   mkdirSync(dirname(path), { recursive: true });
@@ -100,7 +99,12 @@ export class SettingsStore implements SettingsStoreLike {
     // The pack it named was replaced by an original one under a new id.
     // Summaries used to take their own address; upstreams now come only from Settings.
     if (stored) delete (stored as Record<string, unknown>).petSummaryCustom;
-    if (stored?.petId === 'gpt-dragon') stored.petId = RETIRED_PET_REPLACEMENT;
+    // Imported packs are user-owned, even when reusing a retired built-in id.
+    const petId = stored?.petId;
+    if (stored && (petId === 'frost' || petId === 'gpt-dragon')) {
+      const imported = readJson(join(dirname(path), 'pets', petId, 'pet.json')) as { id?: string } | null;
+      if (imported?.id !== petId) stored.petId = 'moe';
+    }
     try { this.value = { ...defaults, ...validateSettings(stored || {}) }; } catch { this.value = { ...defaults }; }
     this.value = { ...this.value, ...validateSettings(overrides) };
     this.firstRun = !hasConnection(this.value);

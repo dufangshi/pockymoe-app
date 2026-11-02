@@ -467,3 +467,11 @@ hash of the forbidden address fragment, reporting paths only. The Windows CI
 also extracts `app.asar` with `scripts/extract-asar.cjs` and the builder's locked asar library and scans the
 contents, unpacked native files and renderer/main output. Mobile sources are
 included in the source guard and must be cleaned by their respective owners.
+
+### Built-in pet
+
+MOE (`moe`) is the only bundled pet and the default. Other pets are user imports.
+Old built-in selections `frost` and `gpt-dragon` fall back to `moe`. Imported ids
+are retained, including an imported `frost` on later launches; only `moe` is
+reserved against import. The package hook verifies that `resources/pets` contains
+exactly `moe`. The procedural placeholder lives only in test fixtures.

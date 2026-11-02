@@ -23,12 +23,12 @@ test.beforeEach(async () => {
   if (test.info().title.startsWith('custom pickers')) {
     const directory = join(profile, 'pets', 'credit-fixture'); mkdirSync(directory, { recursive: true });
     writeFileSync(join(directory, 'pet.json'), JSON.stringify({ id: 'credit-fixture', displayName: 'Credit fixture', description: '', spritesheetPath: 'spritesheet.png', author: 'Fixture Artist', license: 'CC0', licenseUrl: 'https://example.test/license', sourceUrl: 'https://example.test/source' }));
-    copyFileSync('assets/pets/placeholder/spritesheet.png', join(directory, 'spritesheet.png'));
+    copyFileSync('test/fixtures/pets/placeholder/spritesheet.png', join(directory, 'spritesheet.png'));
   }
   if (test.info().title.startsWith('long pickers')) for (let index = 0; index < 12; index++) {
     const id = `extra-${index}`, directory = join(profile, 'pets', id); mkdirSync(directory, { recursive: true });
     writeFileSync(join(directory, 'pet.json'), JSON.stringify({ id, displayName: `Extra ${index}`, description: '', spritesheetPath: 'spritesheet.png' }));
-    copyFileSync('assets/pets/placeholder/spritesheet.png', join(directory, 'spritesheet.png'));
+    copyFileSync('test/fixtures/pets/placeholder/spritesheet.png', join(directory, 'spritesheet.png'));
   }
   const env: Record<string, string> = {};
   for (const key of ['PATH', 'HOME', 'TMPDIR', 'USER', 'LOGNAME', 'DISPLAY', 'SystemRoot', 'WINDIR', 'TEMP', 'TMP', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'ComSpec', 'PATHEXT']) if (process.env[key]) env[key] = process.env[key]!;
