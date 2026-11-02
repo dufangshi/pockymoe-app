@@ -1,3 +1,11 @@
+import { createHash } from 'node:crypto';
+
+const WINDOWS_ID_LIMIT = 64;
+/** Windows refuses longer notification and group ids, and ours join two UUIDs. The hash stays stable, so a repeat still replaces its toast. */
+export function nativeNotificationId(id: string, platform: NodeJS.Platform = process.platform): string {
+  if (platform !== 'win32' || id.length <= WINDOWS_ID_LIMIT) return id;
+  return `pm-${createHash('sha256').update(id).digest('hex').slice(0, 40)}`;
+}
 const xml = (value: string): string => value.replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' })[char]!);
 export function toastXml(token: string, title: string, context: string, body: string, buttons: string[], icon: string, silent = false): string {
   const target = `pockymoe://notification/${token}`;

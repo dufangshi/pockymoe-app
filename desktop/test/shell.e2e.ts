@@ -118,6 +118,16 @@ test('OAuth finishes in a bridge-free sign-in window on the page session', async
   await expect.poll(() => app.windows().some(w => w.url().includes('/relay/auth/'))).toBe(false);
   expect(await page.evaluate(() => !!window.pockymoeHost)).toBe(true);
 });
+test('a real-length notification id reaches the system without an uncaught error', async () => {
+  // Device and turn ids are UUIDs, which together exceed what Windows accepts.
+  const device = 'df3c6acc-a4fc-4e7b-94cd-3df6b5505ae8', turn = '28566358-df65-49ee-9b38-eba327d0bf9a', thread = '195525c3-f221-429a-9860-eb82cbd10db9';
+  const app = await launch('light'); const page = await pageAt(app, origin);
+  await expect.poll(() => page.evaluate(() => !!window.pockymoeHost)).toBe(true);
+  await app.evaluate(() => { globalThis.__pockymoeDesktopTest.settings.set({ alertMode: 'system', petVisible: false }); });
+  const done = item({ key: `${device}:${thread}`, deviceId: device, threadId: thread, turnId: turn, state: 'completed', unread: true, resultSummary: 'done' });
+  await page.evaluate(s => { window.pockymoeHost!.activity.sync({ ...s, items: [], generatedAt: '2026-11-01T05:59:00.000Z', syncedDeviceIds: [s.items[0]!.deviceId] }); window.pockymoeHost!.activity.sync(s); }, snapshot([done]));
+  await expect.poll(() => app.evaluate(() => globalThis.__pockymoeDesktopTest.notifications.constructed.map(entry => entry.alertId)), { timeout: 8000 }).toContain(`${device}:${turn}`);
+});
 test('split origins bridge, activity delivery, tray and quick-window command round trip', async () => {
   const app = await launch('light'); const page = await pageAt(app, origin);
   await expect.poll(() => page.evaluate(() => !!window.pockymoeHost)).toBe(true);

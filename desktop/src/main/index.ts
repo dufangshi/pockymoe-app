@@ -20,6 +20,7 @@ import { DesktopTray } from './tray';
 import { installMenu } from './menu';
 import { apnsEnabled, registerApns } from './apns';
 import { autoUpdater, checkUpdate, configureUpdates, type ShowMessage } from './updates';
+import { nativeNotificationId } from './windowsToast';
 import { LocalMessages } from './messages';
 import { PetCatalog } from './petCatalog';
 import { VoiceService } from './voice';
@@ -135,7 +136,7 @@ else {
     const savedNotifications = new Map<Notification, string>();
     const savedNotification = (path: string, id?: string): void => {
       if (!Notification.isSupported()) return;
-      const n = new Notification({ ...(id ? { id } : {}), title: t('文件已保存'), body: t(process.platform === 'darwin' ? '{name} · 点按以在 Finder 中显示' : '{name} · 点按以在资源管理器中显示', { name: basename(path) }) });
+      const n = new Notification({ ...(id ? { id: nativeNotificationId(id) } : {}), title: t('文件已保存'), body: t(process.platform === 'darwin' ? '{name} · 点按以在 Finder 中显示' : '{name} · 点按以在资源管理器中显示', { name: basename(path) }) });
       savedNotifications.set(n, path);
       n.on('close', () => savedNotifications.delete(n));
       n.on('click', () => shell.showItemInFolder(path)); n.show();
