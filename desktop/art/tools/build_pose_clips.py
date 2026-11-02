@@ -18,8 +18,8 @@ as fractions of the frame.
 
 Every pose is scaled so its head is the same size as the first pose's, and shifted so the heads line
 up across each action, since a character whose head changes size between poses reads as a mistake.
-PLAN.json's "farther" is an exception for a pose seen from further away, such as lying down: pose
-name to how much smaller to draw it, so one long pose doesn't shrink everything else.
+PLAN.json's "farther" is for a pose whose head can't be measured or that is seen from further away,
+such as lying down: pose name to its head size as a fraction of the first pose's.
 
 With "effects": true, separate marks in a cell are kept rather than treated as residue. With "wind": 1 in PLAN.json, hair and veil away from the body sway all the time, so she never
 stands still as a picture. "width" and "height" set the frame size, and "sizeScale" how large she
@@ -87,8 +87,8 @@ def paint_face(frame, other, box):
 def match_heads(drawn, rows):
     """Sets each pose's `norm`, the scale that matches its head to the first pose's, and `nudge`, how
     far its head sits from the body's centre. Each row of a sheet is one action and shares the
-    answer, so the head still moves within an action. A row whose heads can't be found, such as
-    lying down, takes the row before it."""
+    answer, so the head still moves within an action. A row with no head to find, such as lying
+    down, takes the row before it."""
     import cv2
     first = drawn[0]
     x0, y0, x1, y1 = first['body']
@@ -109,7 +109,7 @@ def match_heads(drawn, rows):
     for row in sorted(set(rows)):
         members = [index for index, value in enumerate(rows) if value == row]
         found = [measured[index] for index in members if measured[index][0] >= .5]
-        if len(found) >= len(members) / 2:
+        if found:
             previous = (float(np.median([item[1] for item in found])), float(np.median([item[2] for item in found])))
         for index in members:
             drawn[index]['norm'], drawn[index]['nudge'] = previous
@@ -214,7 +214,7 @@ def main():
     match_heads(drawn, rows)
     HEAD_X = drawn[0]['nudge']
     for name, amount in plan.get('farther', {}).items():
-        poses[name]['norm'] *= amount
+        poses[name]['norm'] = drawn[0]['norm'] * amount
         poses[name]['nudge'] = HEAD_X
     # One scale, the largest at which every pose still fits.
     used = {beat['pose'] for beats in plan['clips'].values() for beat in beats} | {beat['face'] for beats in plan['clips'].values() for beat in beats if beat.get('face')}
