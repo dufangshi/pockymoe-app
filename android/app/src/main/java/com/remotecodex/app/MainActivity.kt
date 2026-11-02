@@ -22,13 +22,20 @@ import androidx.browser.customtabs.CustomTabsIntent
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.lifecycle.lifecycleScope
 import androidx.webkit.JavaScriptReplyProxy
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
+import com.remotecodex.app.data.ConnectionProbe
+import com.remotecodex.app.data.OriginPolicy
+import com.remotecodex.app.data.PageSettings
 import com.remotecodex.app.data.SessionStore
 import com.remotecodex.app.data.ShellOrigins
 import com.remotecodex.app.notify.*
 import java.util.UUID
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -48,6 +55,9 @@ class MainActivity : ComponentActivity() {
     private var backId: String? = null
     private var failed = false
     private var authStopped = false
+    private var connectionAttempt = 0
+    private var authRecovery = false
+    private var debugAuthUrl: String? = null
     private var permissionAsked = false
     private var origin = ""
     private var debugWebOrigin: String? = null
@@ -88,6 +98,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         store = SessionStore(this)
         if (BuildConfig.DEBUG) {
+            debugAuthUrl = intent.getStringExtra("e2eAuthUrl")
             debugWebOrigin = intent.getStringExtra(EXTRA_WEB_URL)
             intent.getStringExtra(EXTRA_RELAY_URL)?.let { address ->
                 val pair = ShellOrigins.forAddress(address)
@@ -148,33 +159,80 @@ class MainActivity : ComponentActivity() {
                 }
             },
         )
-        if (store.hasRelayUrl) openWeb(state) else localPage(false)
+        authRecovery = isAuthCallback(intent.data)
+        if (authRecovery) {
+            intent.data = null
+            debugAuthUrl = null
+        }
+        if (authRecovery) prefs.edit().putString("route", authRecoveryRoute()).apply()
+        when {
+            store.hasRelayUrl -> openWeb(if (authRecovery) null else state)
+            store.connection.needsConfirmation && !store.legacyProbeAttempted -> {
+                startConnection(store.serviceAddress, "", true)
+            }
+            else -> localPage(false, if (store.legacyProbeAttempted) connectionError() else "")
+        }
         if (BuildConfig.DEBUG)
             intent.getStringExtra("e2eNotificationState")?.let {
                 Notifications.debugState(this, it)
             }
     }
 
-    private fun validOrigin(value: String): Boolean {
-        val u = Uri.parse(value)
-        return u.host != null &&
-            u.userInfo == null &&
-            (u.path.isNullOrEmpty() || u.path == "/") &&
-            u.query == null &&
-            u.fragment == null &&
-            (u.scheme == "https" ||
-                (BuildConfig.DEBUG &&
-                    u.scheme == "http" &&
-                    u.host in setOf("localhost", "127.0.0.1", "10.0.2.2")))
+    private fun validOrigin(value: String) = OriginPolicy.allowed(value, BuildConfig.DEBUG)
+
+    private fun sameOrigin(uri: Uri, expected: String = origin) =
+        OriginPolicy.same(uri.toString(), expected)
+
+    private fun connectionError() =
+        shellText(this, "无法连接，请检查服务地址。", "Cannot connect. Check the service address.")
+
+    private fun startConnection(address: String, relay: String, upgrading: Boolean = false) {
+        val attempt = ++connectionAttempt
+        val button = root.findViewWithTag<Button>("connection-button")
+        val error = root.findViewWithTag<TextView>("connection-error")
+        error?.text = ""
+        button?.isEnabled = false
+        button?.text = shellText(this, "连接中…", "Connecting…")
+        lifecycleScope.launch {
+            val result =
+                withContext(Dispatchers.IO) {
+                    runCatching {
+                        ConnectionProbe(BuildConfig.DEBUG, HostDiagnostics::network)
+                            .connect(address, relay)
+                    }
+                }
+            if (attempt != connectionAttempt) return@launch
+            if (upgrading) store.legacyProbeAttempted = true
+            result
+                .onSuccess { pair ->
+                    val unchanged =
+                        OriginPolicy.same(pair.webOrigin, store.webOrigin) &&
+                            OriginPolicy.same(pair.relayOrigin, store.relayUrl)
+                    AgentEventService.stop(this@MainActivity)
+                    Notifications.clear(this@MainActivity)
+                    store.connect(pair, address, upgrading || unchanged)
+                    if (!unchanged) prefs.edit().remove("route").apply()
+                    openWeb(null)
+                }
+                .onFailure {
+                    if (upgrading) localPage(false, connectionError())
+                    else error?.text = connectionError()
+                    button?.isEnabled = true
+                    button?.text = shellText(this@MainActivity, "连接", "Connect")
+                }
+        }
     }
 
-    private fun sameOrigin(uri: Uri, expected: String = origin): Boolean {
-        val a = Uri.parse(expected)
-        fun port(u: Uri) = if (u.port != -1) u.port else if (u.scheme == "https") 443 else 80
-        return uri.scheme == a.scheme && uri.host == a.host && port(uri) == port(a)
-    }
-
-    private fun localPage(offline: Boolean) {
+    private fun localPage(offline: Boolean, notice: String = "") {
+        if (!offline) {
+            connectionAttempt++
+            reply = null
+            if (::web.isInitialized) {
+                web.stopLoading()
+                web.destroy()
+            }
+            root.removeAllViews()
+        }
         if (offline && root.findViewWithTag<View>("offline") != null) return
         val layout =
             LinearLayout(this).apply {
@@ -206,8 +264,8 @@ class MainActivity : ComponentActivity() {
                     text =
                         shellText(
                             this@MainActivity,
-                            "无法连接到 Relay，请检查网络后重试。",
-                            "Cannot connect to the Relay. Check your connection and retry.",
+                            "无法连接到服务，请检查网络后重试。",
+                            "Cannot connect to the service. Check your connection and retry.",
                         )
                     setTextColor(textColor)
                 }
@@ -215,6 +273,9 @@ class MainActivity : ComponentActivity() {
             layout.addView(
                 Button(this).apply {
                     text = shellText(this@MainActivity, "重试", "Retry")
+                    contentDescription = text
+                    isAllCaps = false
+                    tag = "primary"
                     setOnClickListener {
                         root.removeView(layout)
                         failed = false
@@ -223,37 +284,42 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             )
+            layout.addView(
+                Button(this).apply {
+                    text = shellText(this@MainActivity, "更改地址", "Change address")
+                    contentDescription = text
+                    isAllCaps = false
+                    setOnClickListener { localPage(false) }
+                }
+            )
         } else {
             val stored = store.connection
-            if (stored.needsConfirmation)
-                layout.addView(
-                    TextView(this).apply {
-                        text =
-                            shellText(
-                                this@MainActivity,
-                                "请确认服务地址；网页与 Relay 不同时，请展开高级分别填写。",
-                                "Confirm the service address. If Web and Relay differ, enter the Relay address under Advanced.",
-                            )
-                        setTextColor(textColor)
-                    }
-                )
             val input =
                 EditText(this).apply {
-                    setText(stored.webOrigin)
+                    setText(store.serviceAddress)
+                    tag = "service-input"
                     hint = "https://app.example.com"
                     contentDescription = shellText(this@MainActivity, "服务地址", "Service address")
                     setTextColor(textColor)
                     inputType = 17
                 }
             layout.addView(input)
+            layout.addView(
+                TextView(this).apply {
+                    tag = "connection-error"
+                    text = notice
+                    setTextColor(textColor)
+                    accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
+                }
+            )
             val relay =
                 EditText(this).apply {
                     setText(stored.relayOrigin.takeIf { it != stored.webOrigin }.orEmpty())
                     hint =
                         shellText(
                             this@MainActivity,
-                            "留空时使用服务地址",
-                            "Use the service address when blank",
+                            "Relay 地址（留空时自动识别）",
+                            "Relay address (automatic when blank)",
                         )
                     contentDescription = shellText(this@MainActivity, "Relay 地址", "Relay address")
                     setTextColor(textColor)
@@ -276,6 +342,7 @@ class MainActivity : ComponentActivity() {
                 Button(this).apply {
                     text = shellText(this@MainActivity, "连接", "Connect")
                     contentDescription = text
+                    tag = "connection-button"
                     isAllCaps = false
                     setOnClickListener {
                         val address =
@@ -286,7 +353,7 @@ class MainActivity : ComponentActivity() {
                             !validOrigin(address) ||
                                 (relayAddress.isNotBlank() && !validOrigin(relayAddress))
                         ) {
-                            input.error =
+                            root.findViewWithTag<TextView>("connection-error").text =
                                 shellText(
                                     this@MainActivity,
                                     "请输入有效的 HTTPS 服务和 Relay 地址",
@@ -294,15 +361,7 @@ class MainActivity : ComponentActivity() {
                                 )
                             return@setOnClickListener
                         }
-                        AgentEventService.stop(this@MainActivity)
-                        Notifications.clear(this@MainActivity)
-                        store.token = ""
-                        val pair = ShellOrigins.forAddress(address, relayAddress)
-                        store.relayUrl = pair.relayOrigin
-                        store.webOrigin =
-                            if (BuildConfig.DEBUG) debugWebOrigin ?: pair.webOrigin
-                            else pair.webOrigin
-                        openWeb(null)
+                        startConnection(address, relayAddress)
                     }
                 }
             )
@@ -314,11 +373,13 @@ class MainActivity : ComponentActivity() {
                 child.minimumHeight = (44 * resources.displayMetrics.density).toInt()
                 child.background =
                     GradientDrawable().apply {
-                        setColor(Color.TRANSPARENT)
+                        setColor(if (child.tag == "primary") textColor else Color.TRANSPARENT)
                         cornerRadius = 8 * resources.displayMetrics.density
                         setStroke((resources.displayMetrics.density).toInt(), textColor)
                     }
-                (child as? TextView)?.setTextColor(textColor)
+                (child as? TextView)?.setTextColor(
+                    if (child.tag == "primary") pageBackground else textColor
+                )
                 child.layoutParams =
                     LinearLayout.LayoutParams(-1, -2).apply {
                         topMargin = (12 * resources.displayMetrics.density).toInt()
@@ -432,6 +493,7 @@ class MainActivity : ComponentActivity() {
                             url: String,
                             favicon: android.graphics.Bitmap?,
                         ) {
+                            authReply = null
                             reply = null
                             failed = false
                             firstPaint.begin()
@@ -466,7 +528,7 @@ class MainActivity : ComponentActivity() {
                             request: WebResourceRequest,
                             response: WebResourceResponse,
                         ) {
-                            if (request.isForMainFrame && response.statusCode >= 400) {
+                            if (request.isForMainFrame && response.statusCode >= 500) {
                                 failed = true
                                 localPage(true)
                             }
@@ -482,7 +544,19 @@ class MainActivity : ComponentActivity() {
                         }
 
                         override fun onPageFinished(view: WebView, url: String) {
-                            if (sameOrigin(Uri.parse(url))) syncSession()
+                            if (sameOrigin(Uri.parse(url))) {
+                                syncSession()
+                                if (BuildConfig.DEBUG)
+                                    debugAuthUrl?.let { start ->
+                                        debugAuthUrl = null
+                                        web.evaluateJavascript(
+                                            "window.pockymoeHost.auth.openExternal(" +
+                                                JSONObject.quote(start) +
+                                                ").catch(()=>{})",
+                                            null,
+                                        )
+                                    }
+                            }
                         }
 
                         override fun doUpdateVisitedHistory(
@@ -557,9 +631,12 @@ class MainActivity : ComponentActivity() {
                     .build()
             else insets
         }
-        val route = notificationRoute(intent) ?: prefs.getString("route", "/").orEmpty()
+        val route =
+            if (authRecovery) authRecoveryRoute()
+            else notificationRoute(intent) ?: prefs.getString("route", "/").orEmpty()
         if (state != null && notificationRoute(intent) == null && web.restoreState(state) != null)
             return
+        authRecovery = false
         val cookie =
             "remote_codex_relay_session=${store.token}; Path=/; HttpOnly; SameSite=Lax${if (store.relayUrl.startsWith("https:")) "; Secure" else ""}"
         if (BuildConfig.DEBUG && store.token.isNotBlank())
@@ -589,7 +666,6 @@ class MainActivity : ComponentActivity() {
         val id = value.getString("id")
         val args = value.optJSONArray("args") ?: JSONArray()
         var result: Any? = null
-        var reconnect = false
         when (value.getString("method")) {
             "capabilities" ->
                 result =
@@ -623,7 +699,7 @@ class MainActivity : ComponentActivity() {
                 val url = Uri.parse(args.getString(0))
                 require(
                     url.userInfo == null &&
-                        sameOrigin(url, store.relayUrl) &&
+                        (sameOrigin(url, store.relayUrl) || sameOrigin(url)) &&
                         url.path.orEmpty().startsWith("/relay/auth/")
                 )
                 require(authReply == null)
@@ -647,21 +723,17 @@ class MainActivity : ComponentActivity() {
             }
             "settings.get",
             "settings.set" -> {
-                val settings = JSONObject(prefs.getString("settings", "{}")!!)
+                val previous = JSONObject(prefs.getString("settings", "{}")!!)
+                val settings = JSONObject()
+                for (key in listOf("alertMode", "snoozeUntil")) if (previous.has(key))
+                    settings.put(key, previous.get(key))
                 if (value.getString("method") == "settings.set") {
                     val patch = args.getJSONObject(0)
-                    val nextWeb = patch.optString("webOrigin", origin)
-                    val nextRelay = patch.optString("relayOrigin", store.relayUrl)
-                    require(validOrigin(nextWeb) && validOrigin(nextRelay))
-                    reconnect = nextWeb != origin || nextRelay != store.relayUrl
-                    if (reconnect) {
-                        AgentEventService.stop(this)
-                        Notifications.clear(this)
-                        store.token = ""
-                        store.webOrigin = nextWeb
-                        store.relayUrl = nextRelay
-                        prefs.edit().remove("route").apply()
-                    }
+                    PageSettings.validate(
+                        patch.keys().asSequence().associateWith {
+                            patch.opt(it).takeUnless { value -> value == JSONObject.NULL }
+                        }
+                    )
                     for (key in patch.keys()) settings.put(key, patch.get(key))
                     prefs.edit().putString("settings", settings.toString()).apply()
                 }
@@ -719,14 +791,6 @@ class MainActivity : ComponentActivity() {
             else -> error("Unsupported method")
         }
         respond(proxy, id, result)
-        if (reconnect)
-            root.postDelayed(
-                {
-                    reply = null
-                    openWeb(null)
-                },
-                150,
-            )
     }
 
     private fun external(uri: Uri) {
@@ -856,14 +920,7 @@ class MainActivity : ComponentActivity() {
             .getOrNull()
 
     private fun syncSession() {
-        val token =
-            CookieManager.getInstance()
-                .getCookie(store.relayUrl)
-                ?.split(';')
-                ?.map { it.trim() }
-                ?.firstOrNull { it.startsWith("remote_codex_relay_session=") }
-                ?.substringAfter('=')
-                .orEmpty()
+        val token = SessionCookies.read(store)
         if (store.token != token) {
             Notifications.clear(this)
             store.token = token
@@ -882,8 +939,9 @@ class MainActivity : ComponentActivity() {
 
     private fun notificationRoute(intent: Intent): String? {
         if (
-            intent.getStringExtra(Notifications.EXTRA_RELAY_ORIGIN)?.let { it != store.relayUrl } ==
-                true
+            intent.getStringExtra(Notifications.EXTRA_RELAY_ORIGIN)?.let {
+                !OriginPolicy.same(it, store.relayUrl)
+            } == true
         )
             return null
         val d = intent.getStringExtra("deviceId") ?: return null
@@ -891,20 +949,40 @@ class MainActivity : ComponentActivity() {
         return "/devices/${Uri.encode(d)}/threads/${Uri.encode(t)}"
     }
 
+    private fun isAuthCallback(uri: Uri?): Boolean =
+        uri?.scheme in setOf("pockymoe", "remotecodex") &&
+            uri?.host == "auth" &&
+            uri.path == "/callback"
+
+    private fun handleAuthCallback(uri: Uri?): Boolean {
+        if (!isAuthCallback(uri)) return false
+        debugAuthUrl = null
+        val pending = authReply
+        authReply = null
+        authStopped = false
+        if (pending != null && ::web.isInitialized) {
+            respond(pending.first, pending.second, JSONObject().put("callbackUrl", uri.toString()))
+        } else {
+            prefs.edit().putString("route", authRecoveryRoute()).apply()
+            authRecovery = true
+            if (::web.isInitialized) web.loadUrl(origin + authRecoveryRoute())
+        }
+        return true
+    }
+
+    private fun authRecoveryRoute(): String {
+        val message =
+            shellText(this, "登录已中断，请重新登录。", "Sign-in was interrupted. Please sign in again.")
+        // The existing Web sign-in AuthNotice renders this one line. Never replay
+        // the returned grant into a new document whose JavaScript proof is gone.
+        return "/relay-portal?oauthCode=mobile_restart&oauthError=" + Uri.encode(message)
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        val uri = intent.data
-        if (
-            uri?.scheme in setOf("pockymoe", "remotecodex") &&
-                uri?.host == "auth" &&
-                authReply != null
-        ) {
-            authReply?.let {
-                respond(it.first, it.second, JSONObject().put("callbackUrl", uri.toString()))
-            }
-            authReply = null
-        } else notificationRoute(intent)?.let { if (::web.isInitialized) navigate(it) }
+        if (handleAuthCallback(intent.data)) intent.data = null
+        else notificationRoute(intent)?.let { if (::web.isInitialized) navigate(it) }
         if (BuildConfig.DEBUG)
             intent.getStringExtra("e2eNotificationState")?.let {
                 Notifications.debugState(this, it)

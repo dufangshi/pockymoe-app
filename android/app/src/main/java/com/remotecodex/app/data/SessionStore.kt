@@ -19,6 +19,33 @@ class SessionStore(context: Context) {
         get() = prefs.getString(KEY_TOKEN, "").orEmpty()
         set(value) = prefs.edit().putString(KEY_TOKEN, value).apply()
 
+    var cookieOrigin: String
+        get() = prefs.getString("cookie_origin", "").orEmpty()
+        set(value) = prefs.edit().putString("cookie_origin", value).apply()
+
+    var legacyProbeAttempted: Boolean
+        get() = prefs.getBoolean("legacy_probe_attempted", false)
+        set(value) = prefs.edit().putBoolean("legacy_probe_attempted", value).apply()
+
+    val serviceAddress: String
+        get() = prefs.getString("service_address", null) ?: connection.webOrigin
+
+    fun connect(pair: ShellOrigins, address: String, preserveSession: Boolean) {
+        prefs
+            .edit()
+            .putString(KEY_URL, pair.relayOrigin)
+            .putString("web_origin", pair.webOrigin)
+            .putString("service_address", address)
+            .putBoolean("legacy_probe_attempted", true)
+            .apply {
+                if (!preserveSession) {
+                    remove(KEY_TOKEN)
+                    remove("cookie_origin")
+                }
+            }
+            .apply()
+    }
+
     val connection: StoredConnection
         get() =
             ShellOrigins.stored(prefs.getString("web_origin", null), prefs.getString(KEY_URL, null))

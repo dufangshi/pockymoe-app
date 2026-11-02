@@ -4,10 +4,17 @@ The Android entry point is one remote WebView. The application ID remains
 `com.remotecodex.app` (`.debug` for development), and the label is Pockymoe.
 The only local pages are connection and offline/retry. No service address is
 shipped. First launch asks for a service address with `https://app.example.com`
-as a placeholder, plus an Advanced field for a separate Relay address. A blank
-Relay field uses the entered service address. Stored explicit Web/Relay pairs
-are kept exactly. A legacy single stored address is prefilled and asks once for
-confirmation before network loading, since no host-specific mapping is inferred.
+as a placeholder, plus an Advanced override for a separate Relay address. A
+credential-free HTTPS probe follows redirects (at most six requests) and verifies
+the final Pockymoe HTML. A redirected address is the Relay; the final origin is
+Web. A direct Web address serves both unless overridden. Bad addresses or network
+failures stay beside the connection field as one line, with no offline detour.
+Stored explicit Web/Relay pairs are kept exactly. A legacy single stored address
+is probed automatically once; failure returns to the prefilled connection form.
+The offline page always offers Retry and Change address. Retry uses the cached
+foreground as its fill with background-colored text; the secondary action keeps
+the flat outline. This native fallback uses the existing cached colors, since
+the connection decision specifies hierarchy but no additional native palette.
 Product navigation, authentication, account settings, devices, workspaces and threads belong to Web.
 The design authority is `docs/mobile-design.zh.md` on the mobile integration
 branch; the Android branch does not own that document.
@@ -21,20 +28,31 @@ There is no `addJavascriptInterface`, asset-hosted product, native API proxy or
 WebViewAssetLoader. File and content URL access and mixed content are disabled.
 Debug alone permits cleartext loopback/Android emulator host addresses. Web and
 Relay origins are stored separately: only the Web origin receives the bridge,
-while authentication and the durable feed use the Relay origin. Cross-origin
-cookies are enabled in the WebView; only the configured Relay cookie is read
-natively. `settings.set` validates either origin and reconnects when it changes.
+while the durable feed uses the Relay origin. Cross-origin cookies are enabled
+in the WebView. Native session-cookie lookup is restricted to the configured Web
+and Relay origins, preferring the Web host for deployments with an API proxy.
+Once a cookie source is found, it stays pinned to that origin so sign-out cannot
+fall back to a stale cookie on the other host. Tokens never reach the page.
+`settings.set` rejects all keys except `alertMode` and `snoozeUntil`, including
+origin keys even when unchanged. Only native connection setup changes origins.
+Host case and default ports are canonicalized before origin comparisons.
 
 `window.pockymoeHost` implements bridge version 2 with `surface: mobile`, Android
 platform and `liveActivity`, `nativePush`, `haptics`. Android has no APNs/FCM
 registration: `push.register()` returns null. `window.openThread` sends navigation
 to the same page; preferences and pet methods are inert. Files use the system
 picker, and external links use system handlers. Settings are local shell
-preferences; connection-origin changes require validation and a new WebView.
+preferences. Native connection-origin changes require a successful probe and a
+new WebView. Network failures and main-frame 5xx show offline; Pages-style 404
+HTML remains the application, including restored routes and notification taps.
 
-System sign-in opens a Custom Tab for the configured Relay origin's `/relay/auth/*`
-path. A pending call resolves only on a `pockymoe://auth` or legacy
-`remotecodex://auth` return; closing the tab resolves null. The Web implementation
+System sign-in opens a Custom Tab for `/relay/auth/*` on the configured Web or
+Relay origin. The activity is `singleTask`; both cold creation and `onNewIntent`
+handle `/callback` returns to `pockymoe://auth` or legacy `remotecodex://auth`.
+A pending call resolves into its existing document; closing the tab resolves
+null. If that document/proof is gone, the callback is not replayed or redeemed:
+the real Web sign-in page shows its existing AuthNotice with one localized line
+asking the person to sign in again. The Web implementation
 must validate its prepared callback ID/path and redeem the one-use handoff with
 its retained proof. Provider cookies and native service credentials are never
 sent to the page. OAuth requires the matching Web and Relay mobile-auth changes;
@@ -148,7 +166,10 @@ with `javap` against `platforms/android-36.1/android.jar`.
 export JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home
 export ANDROID_HOME="$HOME/Library/Android/sdk"
 (cd android && ./gradlew :app:assembleDebug :app:testDebugUnitTest)
-E2E_RELAY_PORT=19890 E2E_SUPERVISOR_PORT=19891 E2E_WEB_PORT=19892 \
+# Build the integration Web without a fixed Relay for the same-origin API proxy case:
+# (in the integration checkout) POCKYMOE_RUNTIME_RELEASE=1 VITE_POCKYMOE_RELAY_ORIGIN='' pnpm --filter @pockymoe/supervisor-web build
+E2E_WEB_HOST=localhost E2E_RELAY_UPSTREAM_PORT=19893 \
+  E2E_RELAY_PORT=19890 E2E_SUPERVISOR_PORT=19891 E2E_WEB_PORT=19892 \
   REMOTE_CODEX_ROOT=/Users/mac/dev/remoteCodex.worktrees/mobile-host \
   REMOTE_CODEX_RELAY_WEB_DIST_DIR=/Users/mac/dev/remoteCodex.worktrees/mobile-host/apps/supervisor-web/dist \
   scripts/e2e-backend.sh serve
@@ -157,7 +178,9 @@ scripts/e2e-android.sh
 scripts/e2e-backend.sh stop
 ```
 
-The helper defaults to the mobile-host integration checkout and prefers its
+The helper defaults to Relay 18790, Supervisor 18791, Web 18792 and private Rust
+upstream 18793, with different Web/Relay cookie hosts. It uses the mobile-host
+integration checkout and prefers its
 current `pockymoe` binary over a legacy build and uses
 Node 22+ plus the control-plane Web dependency `hash-wasm` to generate a disposable
 modern Argon2id/AES-GCM account fixture. Native instrumentation fills the native connection page and signs in through
@@ -169,8 +192,21 @@ assets under a running test. `.local/review-web-build.json` records the source
 commit and index digest. The helper clears inherited
 old and new Supervisor environment names and owns
 fresh data on independent ports. `E2E_WEB_PORT` optionally starts a separate
-SPA server; build the Web assets with `VITE_POCKYMOE_RELAY_ORIGIN` pointing at the
-isolated Relay to exercise the same split as the deployed public site. The
+SPA server. Its missing deep paths return real HTTP 404 HTML, matching Pages.
+The documented fixture uses Web at localhost:19892 and Relay at
+127.0.0.1:19890, so cookie hosts differ. The current Web reads that Relay origin
+from the host and calls it directly; the native service uses the same Relay.
+`E2E_RELAY_UPSTREAM_PORT=19893` places the real isolated Rust relay behind a
+loopback HTTP/WebSocket proxy. These two local hostnames are different sites:
+only this test proxy changes Set-Cookie from SameSite=Lax to SameSite=None,
+retaining Secure and HttpOnly. For the explicitly configured Web origin only,
+it also translates cross-site Sec-Fetch-Site to same-site; Origin itself stays
+unchanged and the real Relay still validates it. This emulates the site
+relationship of HTTPS sibling hosts, rather than testing production cookie/CSRF
+policy under local HTTP. Real HTTPS sibling hosts keep the production Lax policy. No production setting or cookie policy is changed. The independent
+fixture control API uses 127.0.0.1:19893; the Android helper reverses that port too.
+`E2E_WEB_RELAY_PROXY=1` is an optional same-origin Web proxy for older Web builds
+that address APIs through their Web host. The
 helper refuses occupied ports and the managed Supervisor port. The Android script installs an AOSP image into
 `.local/sdk`, creates its own `pockymoe_aosp` AVD in `.local/avd`, boots only
 `emulator-5580` (override `ANDROID_EMULATOR_PORT` for a free port), targets that
@@ -184,7 +220,14 @@ pulled into `.local/android-e2e/`. `ProductParityTest` asserts mobile capabiliti
 absence of desktop chrome, sheet-first back, CSS Color 4 background resolution,
 status-bar icon appearance, and exactly the three allowed haptic moments. Real
 fake-runtime start/approval events drive the page's `activity.sync`, and the
-notification must contain that real thread title. DEBUG state previews reuse its
+notification must contain that real thread title. The suite also verifies forbidden
+settings patches, one-field 307 discovery, automatic legacy probing, editable
+first-connect errors, offline address correction, and live/cold OAuth returns.
+The cold OAuth case launches the app outside instrumentation, backgrounds it
+under the system browser, kills only its process with `am kill`, then verifies
+the callback starts a different process and displays the lost-proof notice.
+A DEBUG-only `e2eAuthUrl` intent drives the real bridge to the private browser
+fixture; it supplies no proof, session or provider tokens. DEBUG state previews reuse its
 page-owned metadata and verify both languages, indeterminate running, bar-free
 other states and system promotion.
 
@@ -211,6 +254,6 @@ Android Live Update promotion still require separate real-device validation.
 Fresh-install E2E asserts that empty storage shows the native connection page
 without a WebView or app HTTP requests, then enters the isolated local Web and
 Relay origins through the visible fields. DEBUG-only instrumentation records
-origin names (never paths, query strings, headers or tokens) for WebView,
-service-worker and native workbench requests. The test rejects destinations
+origin names (never paths, query strings, headers or tokens) for connection
+probes, WebView, service-worker and native workbench requests. The test rejects destinations
 outside the entered origins; it does not monitor unrelated emulator OS traffic.

@@ -70,7 +70,7 @@ data class E2eEnv(
                         .readText()
                 )
             val appRelayUrl = args.getString("relayUrl")
-            val hostRelayUrl = appRelayUrl
+            val hostRelayUrl = args.optString("hostRelayUrl", appRelayUrl)
             val username = args.getString("username")
             val password = args.getString("password")
             val token = args.getString("token")

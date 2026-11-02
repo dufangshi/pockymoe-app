@@ -14,7 +14,7 @@ ENV_FILE="$ROOT/.local/e2e-env.json"
 ARTIFACTS="$ROOT/.local/android-e2e"
 mkdir -p "$ARTIFACTS" "$ANDROID_AVD_HOME" "$ANDROID_USER_HOME"
 rm -rf "$ARTIFACTS/screenshots"
-rm -f "$ARTIFACTS/fresh-install-test.log" "$ARTIFACTS/fresh-install-evidence.json" "$ARTIFACTS/instrumentation.log" "$ARTIFACTS/system-theme-test.log" "$ARTIFACTS/light-prepare-test.log" "$ARTIFACTS/cold-first-dark.mp4" "$ARTIFACTS/cold-first-launch.mp4" "$ARTIFACTS/cold-web-dark.mp4" "$ARTIFACTS/cold-web-light.mp4"
+rm -f "$ARTIFACTS/oauth-process-death-result.txt" "$ARTIFACTS/oauth-process-ids.json" "$ARTIFACTS/oauth-recovery.xml" "$ARTIFACTS/oauth-process-death.png" "$ARTIFACTS/fresh-install-test.log" "$ARTIFACTS/fresh-install-evidence.json" "$ARTIFACTS/instrumentation.log" "$ARTIFACTS/system-theme-test.log" "$ARTIFACTS/light-prepare-test.log" "$ARTIFACTS/cold-first-dark.mp4" "$ARTIFACTS/cold-first-launch.mp4" "$ARTIFACTS/cold-web-dark.mp4" "$ARTIFACTS/cold-web-light.mp4"
 [[ -f "$ENV_FILE" ]] || { echo 'Start scripts/e2e-backend.sh on isolated ports first.' >&2; exit 1; }
 RELAY_PORT="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["relayPort"])' "$ENV_FILE")"
 [[ "$RELAY_PORT" != 45679 ]] || exit 1
@@ -90,6 +90,8 @@ return 1
 }
 dismiss_boot_anr || true
 adb -s "$SERIAL" reverse "tcp:$RELAY_PORT" "tcp:$RELAY_PORT"
+CONTROL_PORT="$(python3 -c 'import json,sys,urllib.parse; d=json.load(open(sys.argv[1])); print(urllib.parse.urlparse(d.get("hostRelayUrl",d["relayUrl"])).port)' "$ENV_FILE")"
+if [[ "$CONTROL_PORT" != "$RELAY_PORT" ]]; then adb -s "$SERIAL" reverse "tcp:$CONTROL_PORT" "tcp:$CONTROL_PORT"; fi
 WEB_PORT="$(python3 -c 'import json,sys,urllib.parse; d=json.load(open(sys.argv[1])); print(urllib.parse.urlparse(d.get("webUrl",d["relayUrl"])).port)' "$ENV_FILE")"
 if [[ "$WEB_PORT" != "$RELAY_PORT" ]]; then adb -s "$SERIAL" reverse "tcp:$WEB_PORT" "tcp:$WEB_PORT"; fi
 cd "$ROOT/android"
@@ -133,6 +135,51 @@ adb -s "$SERIAL" shell run-as com.remotecodex.app.debug mkdir -p files
 adb -s "$SERIAL" shell "run-as com.remotecodex.app.debug sh -c 'cat > files/e2e-env.json'" < "$ENV_FILE"
 adb -s "$SERIAL" shell am instrument -w -r -e class 'com.remotecodex.app.ProductParityTest#freshInstallConnectsOnlyToEnteredService' -e envFile /data/user/0/com.remotecodex.app.debug/files/e2e-env.json com.remotecodex.app.debug.test/androidx.test.runner.AndroidJUnitRunner | tee "$ARTIFACTS/fresh-install-test.log"
 rg -q 'OK \([0-9]+ tests?\)' "$ARTIFACTS/fresh-install-test.log"
+# Exercise the redirect/upgrade and actual system-browser callback paths before signing in.
+for case in storedRelayIsProbedOnceAndConnectionErrorsStayEditable oauthReturnWithLivingActivity; do
+  adb -s "$SERIAL" shell am instrument -w -r -e class "com.remotecodex.app.ProductParityTest#$case" -e envFile /data/user/0/com.remotecodex.app.debug/files/e2e-env.json com.remotecodex.app.debug.test/androidx.test.runner.AndroidJUnitRunner | tee "$ARTIFACTS/$case.log"
+  rg -q 'OK \([0-9]+ tests?\)' "$ARTIFACTS/$case.log"
+done
+# Run the app normally, outside instrumentation, so am kill really destroys its JS proof.
+WEB_ORIGIN="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["webUrl"])' "$ENV_FILE")"
+adb -s "$SERIAL" shell am start -W -n com.remotecodex.app.debug/com.remotecodex.app.MainActivity --es e2eAuthUrl "$WEB_ORIGIN/relay/auth/e2e-tab" > "$ARTIFACTS/oauth-process-start.log"
+for _ in $(seq 1 60); do
+  adb -s "$SERIAL" shell dumpsys activity activities > "$ARTIFACTS/oauth-browser-state.txt"
+  if python3 - "$ARTIFACTS/oauth-browser-state.txt" <<'PYBROWSER'
+import pathlib,re,sys
+text=pathlib.Path(sys.argv[1]).read_text()
+resumed=re.findall(r'(?:mResumedActivity|topResumedActivity):.*',text)
+raise SystemExit(0 if resumed and all('com.remotecodex.app.debug/' not in row for row in resumed) else 1)
+PYBROWSER
+  then break; fi
+  sleep 0.25
+done
+OLD_APP_PID="$(adb -s "$SERIAL" shell pidof com.remotecodex.app.debug | tr -d '\r')"
+[[ -n "$OLD_APP_PID" ]]
+adb -s "$SERIAL" shell am kill com.remotecodex.app.debug
+for _ in $(seq 1 40); do
+  [[ -z "$(adb -s "$SERIAL" shell pidof com.remotecodex.app.debug | tr -d '\r')" ]] && break
+  sleep 0.25
+done
+[[ -z "$(adb -s "$SERIAL" shell pidof com.remotecodex.app.debug | tr -d '\r')" ]] || { echo 'OAuth app process did not die'; exit 1; }
+adb -s "$SERIAL" shell am start -W -a android.intent.action.VIEW -d 'remotecodex://auth/callback?id=local-fixture' -p com.remotecodex.app.debug > "$ARTIFACTS/oauth-process-return.log"
+NEW_APP_PID=""
+for _ in $(seq 1 40); do
+  NEW_APP_PID="$(adb -s "$SERIAL" shell pidof com.remotecodex.app.debug | tr -d '\r' || true)"
+  [[ -n "$NEW_APP_PID" && "$NEW_APP_PID" != "$OLD_APP_PID" ]] && break
+  sleep 0.25
+done
+[[ -n "$NEW_APP_PID" && "$NEW_APP_PID" != "$OLD_APP_PID" ]]
+printf '{"oldProcessId":%s,"newProcessId":%s}\n' "$OLD_APP_PID" "$NEW_APP_PID" > "$ARTIFACTS/oauth-process-ids.json"
+for _ in $(seq 1 40); do
+  adb -s "$SERIAL" shell uiautomator dump /sdcard/oauth-recovery.xml >/dev/null
+  adb -s "$SERIAL" pull /sdcard/oauth-recovery.xml "$ARTIFACTS/oauth-recovery.xml" >/dev/null 2>&1
+  if rg -q 'Sign-in was interrupted. Please sign in again.' "$ARTIFACTS/oauth-recovery.xml"; then break; fi
+  sleep 0.25
+done
+rg -q 'Sign-in was interrupted. Please sign in again.' "$ARTIFACTS/oauth-recovery.xml"
+adb -s "$SERIAL" exec-out screencap -p > "$ARTIFACTS/oauth-process-death.png"
+printf '%s\n' 'PASS: actual app process killed under the system browser; callback created a new process with sign-in and the lost-proof notice.' > "$ARTIFACTS/oauth-process-death-result.txt"
 adb -s "$SERIAL" shell am instrument -w -r -e class 'com.remotecodex.app.ProductParityTest#thinShellAndLiveUpdates' -e envFile /data/user/0/com.remotecodex.app.debug/files/e2e-env.json com.remotecodex.app.debug.test/androidx.test.runner.AndroidJUnitRunner | tee "$ARTIFACTS/instrumentation.log"
 rg -q 'OK \([0-9]+ tests?\)' "$ARTIFACTS/instrumentation.log"
 adb -s "$SERIAL" shell settings put global animator_duration_scale 1

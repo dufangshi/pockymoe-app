@@ -308,6 +308,115 @@ class ProductParityTest {
     }
 
     @Test
+    fun oauthReturnWithLivingActivity() {
+        val env = E2eEnv.load()
+        scenario =
+            ActivityScenario.launch(
+                Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+        var original: MainActivity? = null
+        try {
+            eventually("OAuth fixture Web ready") { js("!!window.pockymoeHost") == "true" }
+            scenario.onActivity { original = it }
+            js(
+                "window.proofFixture='alive';window.pockymoeHost.auth.openExternal(" +
+                    JSONObject.quote(env.webUrl + "/relay/auth/e2e-tab") +
+                    ").then(r=>window.authFixtureCallback=r?.callbackUrl)"
+            )
+            eventually("system browser covers app") {
+                !com.remotecodex.app.notify.RemoteCodexForeground.isForeground
+            }
+            context.startActivity(
+                Intent(
+                        Intent.ACTION_VIEW,
+                        android.net.Uri.parse("remotecodex://auth/callback?id=local-fixture"),
+                    )
+                    .setPackage(context.packageName)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+            eventually("callback reaches existing proof") {
+                js(
+                    "window.authFixtureCallback === 'remotecodex://auth/callback?id=local-fixture' && window.proofFixture === 'alive'"
+                ) == "true"
+            }
+            scenario.onActivity { assertSame("single activity reused", original, it) }
+            shot("oauth-alive-return")
+        } finally {
+            // ActivityScenario.close assumes its original test task still exists.
+            // A real singleTask return from the browser clears that task's wrapper.
+            InstrumentationRegistry.getInstrumentation().runOnMainSync { original?.finish() }
+        }
+    }
+
+    @Test
+    fun storedRelayIsProbedOnceAndConnectionErrorsStayEditable() {
+        val env = E2eEnv.load()
+        context
+            .getSharedPreferences("remote_codex", Context.MODE_PRIVATE)
+            .edit()
+            .clear()
+            .putString("relay_url", env.appRelayUrl)
+            .commit()
+        scenario =
+            ActivityScenario.launch(
+                Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+        scenario.use {
+            eventually("legacy relay redirect discovers Web silently") {
+                js("!!window.pockymoeHost") == "true"
+            }
+            val store = com.remotecodex.app.data.SessionStore(context)
+            assertEquals(env.webUrl, store.webOrigin)
+            assertEquals(env.appRelayUrl, store.relayUrl)
+            assertTrue(store.legacyProbeAttempted)
+            scenario.recreate()
+            eventually("stored pair restarts without probing") {
+                js("!!window.pockymoeHost") == "true"
+            }
+            scenario.onActivity { find(it.window.decorView)!!.loadUrl("http://127.0.0.1:19998/") }
+            eventually("offline correction action") {
+                device.hasObject(androidx.test.uiautomator.By.desc("Change address"))
+            }
+            device.findObject(androidx.test.uiautomator.By.desc("Change address")).click()
+            eventually("connection is editable again") {
+                device.hasObject(androidx.test.uiautomator.By.desc("Service address"))
+            }
+            val address = device.findObject(androidx.test.uiautomator.By.desc("Service address"))
+            assertEquals("typed relay retained", env.appRelayUrl, address.text)
+            address.text = "http://127.0.0.1:19998"
+            device.findObject(androidx.test.uiautomator.By.desc("Connect")).click()
+            eventually("failed first connect remains on form") {
+                var error = false
+                scenario.onActivity {
+                    error =
+                        it.window.decorView
+                            .findViewWithTag<android.widget.TextView>("connection-error")
+                            ?.text
+                            ?.isNotBlank() == true
+                }
+                error && device.hasObject(androidx.test.uiautomator.By.desc("Service address"))
+            }
+            assertFalse(device.hasObject(androidx.test.uiautomator.By.text("Unable to connect")))
+            scenario.onActivity {
+                assertEquals(
+                    "connection error stays on one line",
+                    1,
+                    it.window.decorView
+                        .findViewWithTag<android.widget.TextView>("connection-error")
+                        .lineCount,
+                )
+            }
+            shot("connection-probe-error")
+            address.text = env.appRelayUrl
+            device.findObject(androidx.test.uiautomator.By.desc("Connect")).click()
+            eventually("one typed relay address connects") { js("!!window.pockymoeHost") == "true" }
+            assertEquals(env.webUrl, store.webOrigin)
+            assertEquals(env.appRelayUrl, store.relayUrl)
+            shot("connection-redirect-resolved")
+        }
+    }
+
+    @Test
     fun freshInstallConnectsOnlyToEnteredService() {
         val env = E2eEnv.load()
         for (name in
@@ -447,7 +556,25 @@ class ProductParityTest {
             eventually("iframe cannot invoke bridge") {
                 js("window.frameSettings && !window.frameSettings.frameProbe") == "true"
             }
+            js(
+                "window.securityMarker='retained';Promise.all([{webOrigin:'https://other.example.test'},{relayOrigin:'https://other.example.test'},{unknown:true},{alertMode:'system',webOrigin:'https://other.example.test'}].map(p=>window.pockymoeHost.settings.set(p).then(()=>false,()=>true))).then(r=>window.rejectedPatches=r)"
+            )
+            eventually("untrusted settings rejected atomically") {
+                js("window.rejectedPatches?.every(Boolean) && rejectedPatches.length === 4") ==
+                    "true"
+            }
+            assertEquals(
+                "settings rejection keeps document",
+                "retained",
+                js("window.securityMarker"),
+            )
+            assertEquals(env.webUrl, com.remotecodex.app.data.SessionStore(context).webOrigin)
+            assertEquals(env.appRelayUrl, com.remotecodex.app.data.SessionStore(context).relayUrl)
             load("/relay-portal")
+            js("fetch(location.pathname).then(r=>window.spaStatus=r.status)")
+            eventually("Pages 404 HTML remains the app") {
+                js("window.spaStatus === 404 && !!window.pockymoeHost") == "true"
+            }
             fun fill(selector: String, value: String) =
                 js(
                     "(() => {const e=document.querySelector(${JSONObject.quote(selector)});Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(e,${JSONObject.quote(value)});e.dispatchEvent(new Event('input',{bubbles:true}));})()"
@@ -493,6 +620,16 @@ class ProductParityTest {
             eventually("native background session ready") {
                 com.remotecodex.app.data.SessionStore(context).isSignedIn
             }
+            assertNotEquals(
+                "separate cookie hosts",
+                android.net.Uri.parse(env.webUrl).host,
+                android.net.Uri.parse(env.appRelayUrl).host,
+            )
+            assertEquals(
+                "session cookie read from configured Relay host",
+                env.appRelayUrl,
+                com.remotecodex.app.data.SessionStore(context).cookieOrigin,
+            )
             env.token = com.remotecodex.app.data.SessionStore(context).token
             env.allowAllNotifications()
             eventually("durable service started") {
@@ -991,6 +1128,10 @@ class ProductParityTest {
                 device.hasObject(androidx.test.uiautomator.By.text("Unable to connect")) ||
                     device.hasObject(androidx.test.uiautomator.By.text("无法连接"))
             }
+            assertTrue(
+                "offline offers address correction",
+                device.hasObject(androidx.test.uiautomator.By.desc("Change address")),
+            )
             shot("offline")
             // Return to the configured origin after the failed navigation.
             scenario.onActivity { find(it.window.decorView)!!.loadUrl(env.webUrl + route) }

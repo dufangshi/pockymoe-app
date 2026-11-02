@@ -13,9 +13,11 @@ ENV_FILE="$ROOT/.local/e2e-env.json"
 PID_FILE="$ROOT/.local/e2e-pids"
 PORT="${E2E_RELAY_PORT:-18790}"
 SUPERVISOR_PORT="${E2E_SUPERVISOR_PORT:-18791}"
-RELAY="http://127.0.0.1:${PORT}"
-WEB_PORT="${E2E_WEB_PORT:-$PORT}"
-WEB_URL="http://127.0.0.1:${WEB_PORT}"
+UPSTREAM_PORT="${E2E_RELAY_UPSTREAM_PORT:-$((PORT + 3))}"
+RELAY="http://127.0.0.1:${UPSTREAM_PORT}"
+APP_RELAY="http://127.0.0.1:${PORT}"
+WEB_PORT="${E2E_WEB_PORT:-$((PORT + 2))}"
+WEB_URL="http://${E2E_WEB_HOST:-localhost}:${WEB_PORT}"
 USERNAME="${E2E_USERNAME:-mobile}"
 PASSWORD="${E2E_PASSWORD:-mobile-pass-1}"
 
@@ -46,7 +48,7 @@ start() {
     echo 'An E2E backend is already recorded. Stop it before starting another.' >&2
     exit 1
   fi
-  python3 - "$PORT" "$SUPERVISOR_PORT" "$WEB_PORT" <<'PYPORT'
+  python3 - "$PORT" "$SUPERVISOR_PORT" "$WEB_PORT" "$UPSTREAM_PORT" <<'PYPORT'
 import socket, sys
 ports = set(map(int, sys.argv[1:]))
 if 45679 in ports:
@@ -79,7 +81,7 @@ PYPIN
   mkdir -p "$DATA/workspaces/mobile-ws"
   echo "# mobile e2e workspace" > "$DATA/workspaces/mobile-ws/README.md"
 
-  HOST=127.0.0.1 PORT="$PORT" \
+  HOST=127.0.0.1 PORT="$UPSTREAM_PORT" \
     REMOTE_CODEX_ADMIN_USERNAME=admin \
     REMOTE_CODEX_ADMIN_PASSWORD=admin-pass-1 \
     REMOTE_CODEX_RELAY_DATA_DIR="$DATA/relay" \
@@ -95,8 +97,12 @@ PYPIN
     sleep 0.25
   done
   curl -sf "$RELAY/healthz" >/dev/null
+  if [[ "$UPSTREAM_PORT" != "$PORT" ]]; then
+    python3 "$ROOT/scripts/e2e-web.py" "$WEB_DIST" "$PORT" "$RELAY" --relay-front "$WEB_URL" > "$DATA/relay-front.log" 2>&1 &
+    echo $! >> "$PID_FILE"
+  fi
   if [[ "$WEB_PORT" != "$PORT" ]]; then
-    python3 "$ROOT/scripts/e2e-web.py" "$WEB_DIST" "$WEB_PORT" > "$DATA/web.log" 2>&1 &
+    python3 "$ROOT/scripts/e2e-web.py" "$WEB_DIST" "$WEB_PORT" "${E2E_WEB_RELAY_PROXY:+$RELAY}" > "$DATA/web.log" 2>&1 &
     echo $! >> "$PID_FILE"
   fi
 
@@ -178,9 +184,9 @@ PY
   done
 
   DEVICE_API="$RELAY/relay/devices/$DEVICE_ID/api"
-  python3 - "$RELAY" "$TOKEN" "$DEVICE_ID" "$DATA" "$ENV_FILE" "$PORT" "$USERNAME" "$PASSWORD" "$DEVICE_TOKEN" "$WEB_URL" <<'PY'
+  python3 - "$RELAY" "$TOKEN" "$DEVICE_ID" "$DATA" "$ENV_FILE" "$PORT" "$USERNAME" "$PASSWORD" "$DEVICE_TOKEN" "$WEB_URL" "$APP_RELAY" <<'PY'
 import json, sys, urllib.request, pathlib
-relay, token, device_id, data_dir, env_file, port, username, password, device_token, web_url = sys.argv[1:11]
+relay, token, device_id, data_dir, env_file, port, username, password, device_token, web_url, app_relay = sys.argv[1:12]
 workspace_path = str(pathlib.Path(data_dir) / "workspaces" / "mobile-ws")
 headers = {"content-type": "application/json", "authorization": f"Bearer {token}"}
 body = json.dumps({"absPath": workspace_path, "label": "mobile-ws"}).encode()
@@ -189,7 +195,8 @@ request = urllib.request.Request(url, data=body, headers=headers, method="POST")
 with urllib.request.urlopen(request) as response:
     workspace = json.loads(response.read().decode())
 env = {
-    "relayUrl": relay,
+    "relayUrl": app_relay,
+    "hostRelayUrl": relay,
     "webUrl": web_url,
     "relayPort": int(port),
     "username": username,

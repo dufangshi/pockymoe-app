@@ -7,7 +7,6 @@ import android.content.pm.ServiceInfo
 import android.net.Uri
 import android.os.Build
 import android.os.IBinder
-import android.webkit.CookieManager
 import androidx.core.app.NotificationManagerCompat
 import com.remotecodex.app.data.ApiClient
 import com.remotecodex.app.data.SessionStore
@@ -43,15 +42,7 @@ class AgentEventService : Service() {
                 // SPA sign-out does not reload the WebView. Observe its HttpOnly cookie locally
                 // too.
                 val cookie =
-                    withContext(Dispatchers.Main) {
-                        CookieManager.getInstance()
-                            .getCookie(store.relayUrl)
-                            ?.split(';')
-                            ?.map { it.trim() }
-                            ?.firstOrNull { it.startsWith("remote_codex_relay_session=") }
-                            ?.substringAfter('=')
-                            .orEmpty()
-                    }
+                    withContext(Dispatchers.Main) { com.remotecodex.app.SessionCookies.read(store) }
                 if (store.token != cookie) {
                     Notifications.clear(this@AgentEventService)
                     store.token = cookie
