@@ -34,8 +34,14 @@ test('quit cannot reopen a main window through a late activation event', async (
     await app.evaluate(({ BrowserWindow }) => {
       const pending = new BrowserWindow({ show: false });
       const tray = globalThis.__pockymoeDesktopTest.tray;
-      tray.dispose();
-      pending.emit('ready-to-show'); tray.update(); tray.dispose();
+      const manager = globalThis.__pockymoeDesktopTest.windows;
+      const internals = tray as unknown as { icon(state: string): Electron.NativeImage };
+      const icon = internals.icon.bind(tray);
+      // Reproduce the CI stack at setImage: image creation pumps a quit event,
+      // retiring the native tray after update's entry check but before disposal.
+      internals.icon = state => { const image = icon(state); manager.quitting = true; tray.tray.destroy(); return image; };
+      tray.update();
+      pending.emit('ready-to-show'); tray.update(); tray.setBadge(1, 'attention'); tray.dispose(); tray.dispose();
       pending.destroy();
     });
     await app.evaluate(({ app }, proof) => {

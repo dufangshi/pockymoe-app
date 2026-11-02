@@ -374,6 +374,10 @@ for (const material of ['native', 'solid']) for (const pack of packs) for (const
   const scales: { url: string; devicePixelRatio: number }[] = [];
   for (const page of app.windows()) {
     await page.waitForLoadState('domcontentloaded');
+    if (page.url().includes('/pet/') && await page.evaluate(() => document.body.dataset.surface) === 'glass') {
+      if (!await page.locator('.panel').count()) await page.evaluate(() => (window as unknown as { rcDesktop: { pet: { action(value: unknown): Promise<unknown> } } }).rcDesktop.pet.action({ type: 'toggleTray' }));
+      await expect(page.locator('.panel')).toBeVisible();
+    }
     const violations = await page.evaluate(() => {
       const text = [document.body.innerText, ...Array.from(document.querySelectorAll('*')).flatMap(el => [el.getAttribute('title') || '', el.getAttribute('aria-label') || ''])].join(' ');
       const scrollbars = Array.from(document.querySelectorAll<HTMLElement>('*')).filter(el => {
@@ -407,6 +411,11 @@ for (const material of ['native', 'solid']) for (const pack of packs) for (const
       await page.evaluate(() => document.fonts.ready);
       const png = await app.evaluate(async ({ BrowserWindow }, url) => {
         const window = BrowserWindow.getAllWindows().find(window => window.webContents.getURL() === url)!;
+        // Captures inspect background surfaces too. Keep this fixture renderer
+        // painting even if the pet's normal hide timer fires during the copy.
+        window.webContents.setBackgroundThrottling(false);
+        window.getParentWindow()?.showInactive();
+        window.showInactive(); window.moveTop();
         return (await window.webContents.capturePage(undefined, { stayHidden: false, stayAwake: true })).toPNG().toString('base64');
       }, page.url());
       writeFileSync(join(evidence, `windows-${material}-${label}-${pack}-${theme}.png`), Buffer.from(png, 'base64'));

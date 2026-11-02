@@ -494,3 +494,9 @@ window. Activity fixtures acknowledge fire-and-forget updates with a same-frame
 IPC round trip before acting in another window. Hover stability checks pin the
 pointer input and await the renderer/native size acknowledgement before measuring,
 so host pointer movement and unfinished initial layout cannot change the premise.
+
+Windows tray updates stop as soon as the window manager enters quitting, before
+native tray disposal. Image/menu preparation can reenter native ready/quit events,
+so updates recheck liveness before touching the tray. The shutdown regression
+retires the native tray during image preparation and delivers a late window-ready
+callback before disposal; the app must still exit cleanly.
