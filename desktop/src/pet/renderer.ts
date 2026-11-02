@@ -4,7 +4,7 @@ import lucideNotice from './NOTICE?raw';
 document.head.append(document.createComment(lucideNotice));
 import { ANIMATIONS, frameAt, type SpriteState } from './animation';
 import { activityStatus, statusMarkStyles, statusMarkSvg, type StatusMark } from '../shared/statusMarks';
-import { conversationTitle } from '../shared/activityGroups';
+import { conversationTitle, alertTitle } from '../shared/activityGroups';
 import { panelConversations, petConversations, petMetadata, replyTarget as conversationReplyTarget, type PetConversation } from './conversations';
 import { applyAppearance } from '../shared/appearance';
 import { accentForeground, escapeHtml as escape, requestSummaryHtml } from './presentation';
@@ -51,6 +51,12 @@ function status(item: ActivityItem): string {
   return statusMarkSvg(kind, t(labels[kind]));
 }
 const title = (item: ActivityItem) => conversationTitle(item, state?.items);
+/** Split the middle of the conversation with CSS so its agent suffix never ellipsizes. */
+function alertHeading(items: ActivityItem[]): string {
+  const full = alertTitle(items, state?.items), conversation = conversationTitle(items[0], state?.items);
+  const suffix = full.slice(conversation.length), chars = Array.from(conversation), split = Math.ceil(chars.length / 2);
+  return `<span class="alert-name" title="${escape(full)}"><span class="alert-head">${escape(chars.slice(0, split).join(''))}</span><span class="alert-tail">${escape(chars.slice(split).join(''))}</span></span><span class="alert-suffix">${escape(suffix)}</span>`;
+}
 function elapsed(ms: number): string { const s = Math.floor(Math.max(0, ms) / 1000); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; }
 function errorSlot(id: string): string { return failures.has(id) ? `<span class="pet-error-slot" data-error-id="${escape(id)}" role="alert"></span>` : ''; }
 function decisions(item: ActivityItem, surface: string): string {
@@ -79,7 +85,7 @@ function taskRow(group: PetConversation, duplicateTitle = false): string {
   const item = group.statusItem, waiting = group.requests.length > 0, active = selected === group.key;
   const expanded = active && group.requests.length > 1 && !collapsedRequests.has(group.key), primary = group.requests[0];
   const toggle = group.requests.length > 1 ? button('toggleRequests', t(expanded ? '收起「{title}」的线程' : '展开「{title}」的线程', { title: group.title }), icon('chevron'), `class="request-toggle ${expanded ? 'expanded' : ''}" aria-expanded="${expanded}"`) : '';
-  return `<article class="conversation-row ${waiting ? 'waiting' : ''}" data-conversation-key="${escape(group.key)}"><div class="task-row ${active && !selectedRequest ? 'selected' : ''} ${item.state === 'idle' ? 'recent' : ''}" data-key="${escape(group.key)}" role="option" aria-selected="${active && !selectedRequest}" tabindex="0" title="${escape(`${group.title} · ${petMetadata(group.root)}`)}"><div class="row-main">${toggle}${status(item)}<span class="row-title">${escape(group.title)}</span><span class="row-meta">${item.state === 'running' && !duplicateTitle ? `<span data-since="${escape(item.since)}">${elapsed(Date.now() - Date.parse(item.since))}</span>` : escape(item.deviceName)}</span><span class="row-actions">${muteButton(group)}${button('open', t('打开'), icon('open'))}${button('revealInMap', t('在地图中显示'), icon('map'))}</span>${robotBadge(group)}${primary && !expanded && primary.request?.kind === 'approval' ? `<span data-key="${escape(primary.key)}">${decisions(primary, 'row')}${errorSlot(`row:${primary.key}`)}</span>` : errorSlot(`row:${group.key}`)}</div></div>${expanded ? `<div class="request-lines">${group.requests.map(request => requestLine(request, group, true)).join('')}</div>` : primary ? requestLine(primary, group, false, group.requests.length > 1 ? button('toggleRequests', `${t('活动面板')} (${group.requests.length})`, `+${group.requests.length - 1}`, 'class="request-more"') : '') : ''}</article>`;
+  return `<article class="conversation-row ${waiting ? 'waiting' : ''}" data-conversation-key="${escape(group.key)}"><div class="task-row ${active && !selectedRequest ? 'selected' : ''} ${item.state === 'idle' ? 'recent' : ''}" data-key="${escape(group.key)}" role="option" aria-selected="${active && !selectedRequest}" tabindex="0" title="${escape(`${group.title} · ${petMetadata(group.root)}`)}"><div class="row-main">${toggle}${status(item)}<span class="row-title">${alertHeading([item])}</span><span class="row-meta">${item.state === 'running' && !duplicateTitle ? `<span data-since="${escape(item.since)}">${elapsed(Date.now() - Date.parse(item.since))}</span>` : escape(item.deviceName)}</span><span class="row-actions">${muteButton(group)}${button('open', t('打开'), icon('open'))}${button('revealInMap', t('在地图中显示'), icon('map'))}</span>${robotBadge(group)}${primary && !expanded && primary.request?.kind === 'approval' ? `<span data-key="${escape(primary.key)}">${decisions(primary, 'row')}${errorSlot(`row:${primary.key}`)}</span>` : errorSlot(`row:${group.key}`)}</div></div>${expanded ? `<div class="request-lines">${group.requests.map(request => requestLine(request, group, true)).join('')}</div>` : primary ? requestLine(primary, group, false, group.requests.length > 1 ? button('toggleRequests', `${t('活动面板')} (${group.requests.length})`, `+${group.requests.length - 1}`, 'class="request-more"') : '') : ''}</article>`;
 }
 /** Everything running on the account, one row per conversation. */
 function runningList(): string {
@@ -105,8 +111,8 @@ function renderGlass(): void {
   const group = bubbleGroups[0];
   if (state.mode === 'bubble' && bubble && group) {
     const item = group.requests[0] ?? group.statusItem, count = bubbleGroups.length, event = bubble.events.find(event => event.item.key === item.key) ?? bubble.events[0];
-    const heading = count > 1 ? t('{count} 完成', { count }) : group.title;
-    content = `<aside class="bubble ${bubble.sticky ? 'sticky' : ''}" data-key="${escape(group.key)}" data-conversation-key="${escape(group.key)}" data-alert-id="${escape(event.alertId)}"><div class="bubble-line">${status(group.statusItem)}${button('open', heading, escape(heading), 'class="bubble-title"')}<span class="bubble-device" title="${escape(petMetadata(group.root))}">${escape(item.deviceName)}</span>${bubble.sticky && item.request?.kind === 'approval' ? `<span data-key="${escape(item.key)}">${decisions(item, 'bubble')}${errorSlot(`bubble:${item.key}`)}</span>` : errorSlot(`bubble:${item.key}`)}</div>${bubble.sticky && item.request?.summary ? `<div class="bubble-request-line"><div class="request-summary" title="${escape(item.request.summary)}">${requestSummaryHtml(item.request.summary)}</div>${group.requests.length > 1 ? button('showConversation', `${t('活动面板')} (${group.requests.length})`, `+${group.requests.length - 1}`, 'class="request-more"') : ''}</div>` : ''}</aside>${state.near ? controls() : ''}`;
+    const heading = count > 1 ? t('{count} 完成', { count }) : alertTitle(group.items, state.items);
+    content = `<aside class="bubble ${bubble.sticky ? 'sticky' : ''}" data-key="${escape(group.key)}" data-conversation-key="${escape(group.key)}" data-alert-id="${escape(event.alertId)}"><div class="bubble-line">${status(group.statusItem)}${button('open', heading, (count > 1 ? escape(heading) : alertHeading(group.items)), 'class="bubble-title"')}<span class="bubble-device" title="${escape(petMetadata(group.root))}">${escape(item.deviceName)}</span>${bubble.sticky && item.request?.kind === 'approval' ? `<span data-key="${escape(item.key)}">${decisions(item, 'bubble')}${errorSlot(`bubble:${item.key}`)}</span>` : errorSlot(`bubble:${item.key}`)}</div>${bubble.sticky && item.request?.summary ? `<div class="bubble-request-line"><div class="request-summary" title="${escape(item.request.summary)}">${requestSummaryHtml(item.request.summary)}</div>${group.requests.length > 1 ? button('showConversation', `${t('活动面板')} (${group.requests.length})`, `+${group.requests.length - 1}`, 'class="request-more"') : ''}</div>` : ''}</aside>${state.near ? controls() : ''}`;
   }
   root.innerHTML = content;
   root.querySelectorAll<HTMLElement>('[data-error-id]').forEach(slot => {

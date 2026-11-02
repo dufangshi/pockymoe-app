@@ -1,12 +1,18 @@
 import type { ActivityEvent, DesktopSettings } from '../shared/contract';
+import { isAgentActivity } from '../shared/activityGroups';
 import { isMuted } from '../shared/mutes';
+/** Agent preferences apply only to terminal events; waiting requests must remain actionable. */
+export function agentAlertPolicy(event: ActivityEvent, settings: DesktopSettings): { alert: boolean; voice: boolean } {
+  const mode = isAgentActivity(event.item) && ['completed', 'failed'].includes(event.type) ? settings.petAgentAlerts ?? 'all' : 'all';
+  return { alert: mode !== 'off', voice: mode === 'all' };
+}
 export interface DeliveryContext {
   settings: DesktopSettings; focused: boolean; focusedThreadKey: string | null;
   petVisible: boolean; idleSeconds: number; now?: number; doNotDisturb?: boolean;
 }
 export function deliveryPolicy(event: ActivityEvent, c: DeliveryContext): { pet: boolean; system: boolean } {
   const none = { pet: false, system: false };
-  if (['started', 'resolved'].includes(event.type) || (c.focused && c.focusedThreadKey === event.item.key) ||
+  if (!agentAlertPolicy(event, c.settings).alert || ['started', 'resolved'].includes(event.type) || (c.focused && c.focusedThreadKey === event.item.key) ||
       (c.settings.snoozeUntil && Date.parse(c.settings.snoozeUntil) > (c.now ?? Date.now())) ||
       (event.type === 'completed' && c.settings.petMuteAlerts && isMuted(event.item, c.settings.petMutes))) return none;
   return {

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { deliveryPolicy, EventCoalescer, type DeliveryContext } from '../src/main/delivery';
+import { agentAlertPolicy, deliveryPolicy, EventCoalescer, type DeliveryContext } from '../src/main/delivery';
 import { defaults } from '../src/main/store';
 import { event } from './fixtures';
 const context = (patch: Partial<DeliveryContext> = {}): DeliveryContext => ({ settings: defaults, focused: false, focusedThreadKey: null, petVisible: true, idleSeconds: 0, ...patch });
@@ -39,5 +39,26 @@ describe('burst coalescing', () => {
     expect(deliver).toHaveBeenCalledTimes(2);
     batch.add(event()); batch.dispose(); vi.advanceTimersByTime(1500); expect(deliver).toHaveBeenCalledTimes(2);
     batch.add(event()); vi.advanceTimersByTime(1500); expect(deliver).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe('agent alert preferences', () => {
+  it.each(['all', 'silent', 'off'] as const)('%s covers every event and leaves root events alone', petAgentAlerts => {
+    const settings = { ...defaults, petAgentAlerts, alertMode: 'both' as const };
+    for (const type of ['started', 'resolved', 'completed', 'failed', 'needsInput'] as const) {
+      const agent = event({ type, item: { ...event().item, rootThreadKey: 'mac:root' } });
+      const terminal = type === 'completed' || type === 'failed';
+      expect(agentAlertPolicy(agent, settings)).toEqual({ alert: !terminal || petAgentAlerts !== 'off', voice: !terminal || petAgentAlerts === 'all' });
+      const show = !['started', 'resolved'].includes(type) && (!terminal || petAgentAlerts !== 'off');
+      expect(deliveryPolicy(agent, context({ settings }))).toEqual({ pet: show, system: show });
+      expect(deliveryPolicy(event({ type }), context({ settings }))).toEqual({ pet: !['started', 'resolved'].includes(type), system: !['started', 'resolved'].includes(type) });
+    }
+  });
+  it('defaults missing values to all and keeps stricter mute rules', () => {
+    const agent = event({ item: { ...event().item, rootThreadKey: 'mac:root' } });
+    expect(agentAlertPolicy(agent, { ...defaults, petAgentAlerts: undefined } as unknown as typeof defaults)).toEqual({ alert: true, voice: true });
+    for (const petAgentAlerts of ['all', 'silent', 'off'] as const) {
+      expect(deliveryPolicy(agent, context({ settings: { ...defaults, petAgentAlerts, petMuteAlerts: true, petMutes: [{ kind: 'thread', id: 'mac:root', label: 'root' }] } }))).toEqual({ pet: false, system: false });
+    }
   });
 });

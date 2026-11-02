@@ -131,6 +131,7 @@ export function bindVoice(root: HTMLElement, state: LocalState, cleanups: (() =>
   const trigger = (id: string): HTMLButtonElement | null => root.querySelector<HTMLButtonElement>(`#${id}`);
   const labels = providerLabels();
   const mount = (id: string, options: { value: string; label: string }[], value: string, change: (value: string) => void): void => { const button = trigger(id); if (button) cleanups.push(mountSelect(button, options, value, change)); };
+  mount('petAgentAlerts', [{ value: 'all', label: t('提醒并播报') }, { value: 'silent', label: t('只提醒，不播报') }, { value: 'off', label: t('不提醒') }], settings.petAgentAlerts ?? 'all', value => { void save({ petAgentAlerts: value as DesktopSettings['petAgentAlerts'] }); });
   mount('petVoiceProvider', (Object.keys(labels) as VoiceProvider[]).map(value => ({ value, label: labels[value] })), provider, value => { void save({ petVoiceProvider: value as VoiceProvider }); });
   mount('petVoiceSpeaker', LOCAL_SPEAKERS.map(speaker => ({ value: String(speaker.sid), label: speakerLabel(speaker) })), String(settings.petVoiceSpeaker), value => { void save({ petVoiceSpeaker: Number(value) }); });
   mount('petVoiceSpeed', SPEEDS.map(speed => ({ value: String(speed), label: `${speed}×` })), String(settings.petVoiceSpeed), value => { void save({ petVoiceSpeed: Number(value) }); });

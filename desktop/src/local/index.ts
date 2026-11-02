@@ -123,6 +123,7 @@ function renderPreferences(): void {
       ${toggle('petEdgeHide', t('贴边自动隐藏'), t('靠近屏幕边缘时收起，指针靠近时探出。'), s.petEdgeHide)}
       ${toggle('petMini', t('Mini 模式'), t('桌宠变小，占更少屏幕。'), s.petMini)}
       ${toggle('petSound', t('提示音'), t('点击桌宠和收到提醒时播放，打开时试听。'), s.petSound)}
+      <div class="setting-row"><div><label for="petAgentAlerts">${t('子线程')}</label><p>${t('子线程等待你处理时仍会提醒')}</p></div>${picker('petAgentAlerts', t('子线程'))}</div>
       </section><h2>${t('语音')}</h2><section class="settings-group voice-group">${voiceSection(state, picker)}</section>`;
   } else content.innerHTML = `<h2>${t('全局快捷键')}</h2><section class="settings-group"><label for="quickWindowShortcut">${t('唤起快捷窗口')}</label><div class="shortcut-field"><input id="quickWindowShortcut" value="${escapeHtml(s.quickWindowShortcut)}" spellcheck="false" aria-label="${t('快捷窗口快捷键')}"/><button id="save-shortcut">${t('保存')}</button></div></section>
     <h2>${t('在 Pockymoe 中')}</h2><section class="settings-group key-list">${[[t('搜索'), shortcutLabel(state.platform ?? 'darwin', 'F')], [t('打开地图'), shortcutLabel(state.platform ?? 'darwin', '0')], [t('新建线程'), shortcutLabel(state.platform ?? 'darwin', 'N')], [t('设置'), shortcutLabel(state.platform ?? 'darwin', ',')], [t('显示 / 隐藏桌宠'), shortcutLabel(state.platform ?? 'darwin', 'P', true)], [t('退出应用'), shortcutLabel(state.platform ?? 'darwin', 'Q')]].map(([label, key]) => `<div class="setting-row"><span>${label}</span><kbd>${key}</kbd></div>`).join('')}</section>`;

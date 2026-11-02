@@ -1,6 +1,12 @@
 /** One source for app-owned desktop strings. Thread titles, summaries and names
  * are user content and are intentionally never translated. */
 export const english = {
+  "子线程": "Agent threads",
+  "提醒并播报": "Alert and announce",
+  "只提醒，不播报": "Alert without announcing",
+  "不提醒": "No alerts",
+  "子线程等待你处理时仍会提醒": "Agent threads still alert when they need your input",
+  "{title} 的子线程 {agent}": "{title}'s agent thread {agent}",
   "无法连接此 Pockymoe 地址，请检查后重试。": "Couldn't connect to Pockymoe here. Check the address and try again.",
   "无法发现 Relay，请检查地址或填写高级设置。": "Couldn't find the Relay. Check the address or use Advanced.",
   "暂时无法连接": "Can't connect right now",
@@ -392,6 +398,7 @@ export function resolveLocale(value?: string | null): UiLocale { return /^zh(?:-
 export function setLocale(value?: string | null): UiLocale { locale = resolveLocale(value); return locale; }
 export function getLocale(): UiLocale { return locale; }
 export function t(key: MessageKey, values: Record<string, string | number> = {}, language: string = locale): string {
+  if (key === '{count} 个子线程' && values.count === 1 && resolveLocale(language) === 'en') return '1 child thread';
   const template: string = resolveLocale(language) === 'zh-CN' ? key : english[key];
   return template.replace(/\{(\w+)\}/g, (match, name: string) => Object.hasOwn(values, name) ? String(values[name]) : match);
 }

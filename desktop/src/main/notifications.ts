@@ -5,7 +5,7 @@ import { pathToFileURL } from 'node:url';
 import { toastActivation, toastXml } from './windowsToast';
 import { app, Notification, powerMonitor } from 'electron';
 import type { ActivityEvent, ActivityItem, PetController } from '../shared/contract';
-import { conversationKey, conversationTitle, groupActivities, isAgentActivity } from '../shared/activityGroups';
+import { conversationKey, alertTitle, groupActivities, isAgentActivity } from '../shared/activityGroups';
 import type { ActivityHub } from './activity';
 import { deliveryPolicy, EventCoalescer } from './delivery';
 import type { SettingsStore } from './store';
@@ -74,7 +74,7 @@ export class Notifications {
     const notification = new Notification({
       id: first.alertId,
       groupId: `pockymoe:${conversationKey(item)}`,
-      title: multiple && conversations.length > 1 ? t(allComplete ? '{count} 个对话完成' : '{count} 个对话有新进展', { count: conversations.length }) : conversationTitle(item, this.hub.snapshot()?.items),
+      title: multiple && conversations.length > 1 ? t(allComplete ? '{count} 个对话完成' : '{count} 个对话有新进展', { count: conversations.length }) : alertTitle(events.map(event => event.item), this.hub.snapshot()?.items, true),
       subtitle: multiple && conversations.length > 1 ? 'Pockymoe' : notificationContext(related),
       body: multiple ? formatList(conversations.map(group => `${group.title} · ${notificationContext(group.items)}`).slice(0, 3)) : item.state === 'interrupted' ? `${t('已中断')}${item.resultSummary ? ` · ${item.resultSummary}` : ''}` : item.request?.summary || item.resultSummary || (first.type === 'failed' ? t('任务遇到了问题') : t('已完成')),
       // The visible pet plays its own cue, so the banner stays quiet to avoid two sounds.
