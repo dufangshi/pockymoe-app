@@ -54,6 +54,7 @@ start() {
     REMOTE_CODEX_RELAY_DATA_DIR="$DATA/relay" \
     REMOTE_CODEX_RELAY_WEB_DIST_DIR="$WEB_DIST" \
     REMOTE_CODEX_RELAY_REGISTRATION_ENABLED=true \
+    POCKYMOE_WEB_ORIGIN="${E2E_WEB_ORIGIN:-}" \
     "$BIN" relay >"$DATA/relay.log" 2>&1 &
   echo $! >> "$PID_FILE"
   for _ in $(seq 1 80); do

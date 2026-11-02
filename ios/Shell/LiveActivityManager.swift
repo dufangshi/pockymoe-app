@@ -10,6 +10,7 @@ final class LiveActivityManager {
     }()
     private var activity: Activity<PockymoeActivityAttributes>?
     private var tokenTask: Task<Void, Never>?
+    private var generation = UUID()
     private var syncTask: Task<Void, Never>?
     #if DEBUG
     private var debugError: String?
@@ -22,12 +23,27 @@ final class LiveActivityManager {
     func sync(_ snapshot: ActivitySnapshot) async {
         // ActivityKit awaits are reentrant; preserve snapshot order across end/account changes.
         let previous = syncTask
-        let next = Task { await previous?.value; await apply(snapshot) }
+        let generation = generation
+        let next = Task {
+            await previous?.value
+            guard generation == self.generation else { return }
+            await apply(snapshot, generation: generation)
+        }
         syncTask = next
         await next.value
     }
 
-    private func apply(_ snapshot: ActivitySnapshot) async {
+    func clear() {
+        generation = UUID()
+        ActivityMetadataCache.clear()
+        UserDefaults.standard.removeObject(forKey: "shell.activityPolicy")
+        policy = ActivityPolicy(); activity = nil
+        tokenTask?.cancel(); tokenTask = nil; lastToken = nil
+        let old = Activity<PockymoeActivityAttributes>.activities
+        Task { for value in old { await value.end(nil, dismissalPolicy: .immediate) } }
+    }
+
+    private func apply(_ snapshot: ActivitySnapshot, generation: UUID) async {
         guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
         ActivityMetadataCache.save(snapshot)
         if activity == nil { activity = Activity.activities.first { $0.attributes.accountId == snapshot.accountId && $0.activityState == .active } }
@@ -38,6 +54,7 @@ final class LiveActivityManager {
         for old in Activity<PockymoeActivityAttributes>.activities where old.attributes.accountId != snapshot.accountId {
             await old.end(nil, dismissalPolicy: .immediate)
         }
+        guard generation == self.generation else { return }
         if activity?.attributes.accountId != snapshot.accountId {
             activity = nil; tokenTask?.cancel(); tokenTask = nil; lastToken = nil
         }
@@ -58,6 +75,7 @@ final class LiveActivityManager {
         if tokenTask == nil {
             tokenTask = Task { [weak self] in
                 for await token in activity.pushTokenUpdates {
+                    guard generation == self?.generation, !Task.isCancelled else { return }
                     let value = token.map { String(format: "%02x", $0) }.joined()
                     self?.lastToken = value
                     self?.onToken?(value)

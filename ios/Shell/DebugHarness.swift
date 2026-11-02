@@ -10,6 +10,9 @@ final class DebugHarness {
     private var runner: Task<Void, Never>?
     func stop() { watcher?.cancel(); runner?.cancel() }
     private var lastInput: Data?
+    var cancelAuth: (() -> Void)?
+    var inspectPrivacy: (() -> Void)?
+    var changeAddress: (() -> Void)?
     var retry: (() -> Void)?
     func record(state: String, path: String) {
         guard ProcessInfo.processInfo.arguments.contains("--debug-harness") else { return }
@@ -25,6 +28,12 @@ final class DebugHarness {
                 let directory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
                 let retryFile = directory.appendingPathComponent("acceptance-retry")
                 if FileManager.default.fileExists(atPath: retryFile.path) { try? FileManager.default.removeItem(at: retryFile); self.retry?() }
+                let change = directory.appendingPathComponent("acceptance-change-address")
+                if FileManager.default.fileExists(atPath: change.path) { try? FileManager.default.removeItem(at: change); self.changeAddress?() }
+                let cancel = directory.appendingPathComponent("acceptance-cancel-auth")
+                if FileManager.default.fileExists(atPath: cancel.path) { try? FileManager.default.removeItem(at: cancel); self.cancelAuth?() }
+                let inspect = directory.appendingPathComponent("acceptance-inspect-privacy")
+                if FileManager.default.fileExists(atPath: inspect.path) { try? FileManager.default.removeItem(at: inspect); self.inspectPrivacy?() }
                 self.run(web: web)
                 try? await Task.sleep(for: .milliseconds(300))
             }

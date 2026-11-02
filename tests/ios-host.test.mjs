@@ -5,15 +5,17 @@ import assert from 'node:assert/strict';
 const source = readFileSync(new URL('../web/pockymoe-host.js', import.meta.url), 'utf8').replace('__POCKYMOE_ORIGIN__', JSON.stringify('https://example.test'));
 function context(origin = 'https://example.test', topFrame = true, webkit = true) {
   const messages = [];
+  const events = new Map();
   const window = { webkit: { messageHandlers: { remoteCodex: { postMessage: value => messages.push(value) } } } };
   if (!webkit) {
     delete window.webkit;
     window.RemoteCodexHost = { postMessage: value => messages.push(JSON.parse(value)) };
   }
+  window.addEventListener = (name, callback) => events.set(name, callback);
   window.top = topFrame ? window : {};
   const env = { window, location: { origin }, document: { readyState: 'complete', getElementById: () => null }, requestAnimationFrame: f => f(), Uint8Array };
   vm.runInNewContext(source, env);
-  return { window, messages };
+  return { window, messages, events };
 }
 test('only configured origin top frame gets the bridge', () => {
   assert.equal(context('https://evil.test').window.pockymoeHost, undefined);
@@ -48,4 +50,16 @@ test('shared injection supports Android string transport without the legacy brid
   window.pockymoeHost.activity.sync({ accountId: 'fixture', items: [] });
   assert.equal(messages.at(-1).method, 'activity.sync');
   assert.equal(messages.at(-1).args[0].accountId, 'fixture');
+});
+
+test('sign-out clears native metadata at the logout event', () => {
+  const { window, messages, events } = context();
+  events.get('pockymoe-account-logout')();
+  assert.equal(messages.at(-1).method, 'session.clear');
+  const count = messages.length;
+  window.pockymoeHost.activity.sync({ accountId: 'stale', items: [] });
+  assert.equal(messages.length, count);
+  events.get('pockymoe-account-changed')();
+  window.pockymoeHost.activity.sync({ accountId: 'signed-in', items: [] });
+  assert.equal(messages.at(-1).method, 'activity.sync');
 });

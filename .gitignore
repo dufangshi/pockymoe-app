@@ -35,3 +35,6 @@ ios/.build/
 # Local task evidence and pnpm cache
 .scratch/
 .pnpm-store/
+
+# Private iOS deployment allowlist
+ios/Local.xcconfig

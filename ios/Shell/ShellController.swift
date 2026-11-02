@@ -29,6 +29,7 @@ final class ShellController: UIViewController, WKNavigationDelegate, WKUIDelegat
     }
     let origin: String
     private let relayOrigin: String
+    var onChangeAddress: (() -> Void)?
     private var web: NativeWebView!
     private let proxy = MessageProxy()
     private let live = LiveActivityManager()
@@ -84,6 +85,13 @@ final class ShellController: UIViewController, WKNavigationDelegate, WKUIDelegat
         }
         live.onToken = { [weak self] token in self?.command(["type": "liveActivityToken", "token": token]) }
         #if DEBUG
+        debugHarness.cancelAuth = { [weak self] in self?.auth?.cancel() }
+        debugHarness.inspectPrivacy = {
+            let value = ["cachedMetadataCount": ActivityMetadataCache.load().count]
+            let url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("privacy-state.json")
+            if let data = try? JSONSerialization.data(withJSONObject: value) { try? data.write(to: url, options: .atomic) }
+        }
+        debugHarness.changeAddress = { [weak self] in self?.changeAddress() }
         debugHarness.retry = { [weak self] in self?.retryLoad() }
         debugHarness.watch(web: web)
         if let state = ProcessInfo.processInfo.environment["E2E_ACTIVITY_STATE"] { Task {
@@ -149,15 +157,21 @@ final class ShellController: UIViewController, WKNavigationDelegate, WKUIDelegat
         #if DEBUG
         debugHarness.record(state: "offline", path: path)
         #endif
-        let label = UILabel(); label.text = "无法连接 Relay"; label.textColor = .label
+        let label = UILabel(); label.text = "无法连接服务"; label.textColor = .label
         let retry = UIButton(type: .system); retry.setTitle("重试", for: .normal); retry.accessibilityIdentifier = "retryConnection"
+        retry.configuration = .filled()
         retry.heightAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
         retry.addTarget(self, action: #selector(retryLoad), for: .touchUpInside)
-        let stack = UIStackView(arrangedSubviews: [label, retry]); stack.axis = .vertical; stack.spacing = 16
+        let change = UIButton(type: .system); change.setTitle("更改地址", for: .normal)
+        change.accessibilityIdentifier = "changeAddress"
+        change.heightAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
+        change.addTarget(self, action: #selector(changeAddress), for: .touchUpInside)
+        let stack = UIStackView(arrangedSubviews: [label, retry, change]); stack.axis = .vertical; stack.spacing = 16
         stack.translatesAutoresizingMaskIntoConstraints = false; view.addSubview(stack)
         NSLayoutConstraint.activate([stack.centerXAnchor.constraint(equalTo: view.centerXAnchor), stack.centerYAnchor.constraint(equalTo: view.centerYAnchor)])
         offline = stack
     }
+    @objc private func changeAddress() { live.clear(); onChangeAddress?() }
     @objc private func retryLoad() { offline?.removeFromSuperview(); offline = nil; navigate(path) }
     @objc private func backGesture(_ gesture: UIScreenEdgePanGestureRecognizer) {
         let x = max(0, gesture.translation(in: web).x)
@@ -197,6 +211,10 @@ final class ShellController: UIViewController, WKNavigationDelegate, WKUIDelegat
             guard let self, let id, self.documentGeneration == generation else { return }
             self.evaluate("window.__pockymoeReply(\(Self.json(id) ?? "null"),\(Self.json(value) ?? "null"))")
         }
+        let reject: (String) -> Void = { [weak self] error in
+            guard let self, let id, self.documentGeneration == generation else { return }
+            self.evaluate("window.__pockymoeReply(\(Self.json(id) ?? "null"),null,\(Self.json(error) ?? "null"))")
+        }
         switch method {
         case "firstFrame":
             guard offline == nil else { return }
@@ -211,6 +229,15 @@ final class ShellController: UIViewController, WKNavigationDelegate, WKUIDelegat
             live.resendToken()
         case "capabilities":
             reply(["surface": "mobile", "platform": "ios", "bridgeVersion": 2, "shellVersion": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0", "liveActivity": ActivityAuthorizationInfo().areActivitiesEnabled, "nativePush": true, "haptics": true])
+        case "session.clear":
+            live.clear()
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("--debug-harness") {
+                let result: [String: Any] = ["metadataEmpty": ActivityMetadataCache.load().isEmpty, "policyRemoved": UserDefaults.standard.object(forKey: "shell.activityPolicy") == nil, "legacyTokenRemoved": UserDefaults.standard.object(forKey: "relay_token") == nil]
+                let directory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                if let data = try? JSONSerialization.data(withJSONObject: result) { try? data.write(to: directory.appendingPathComponent("session-cleanup.json"), options: .atomic) }
+            }
+            #endif
         case "activity.sync":
             #if DEBUG
             if ProcessInfo.processInfo.environment["E2E_ACTIVITY_STATE"] != nil { return }
@@ -234,12 +261,33 @@ final class ShellController: UIViewController, WKNavigationDelegate, WKUIDelegat
         case "appearance.sync": if let appearance = args.first as? [String: Any] { syncAppearance(appearance) }
         case "shell.openExternal": if let raw = args.first as? String, let url = URL(string: raw) { external(url) }
         case "auth.openExternal":
-            guard let raw = args.first as? String, let url = URL(string: raw), (trusted(url) || sameOrigin(url, origin: relayOrigin)), auth == nil else { reply(NSNull()); return }
-            auth = ASWebAuthenticationSession(url: url, callbackURLScheme: "remotecodex") { [weak self] callback, _ in
-                Task { @MainActor in self?.auth = nil; reply(callback.map { ["callbackUrl": $0.absoluteString] } ?? NSNull() as Any) }
+            #if DEBUG
+            let authRecord: (String) -> Void = { stage in
+                guard ProcessInfo.processInfo.arguments.contains("--debug-harness") else { return }
+                let url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("auth-state.json")
+                if let data = try? JSONSerialization.data(withJSONObject: ["stage": stage]) { try? data.write(to: url, options: .atomic) }
+            }
+            #endif
+            guard let raw = args.first as? String, let url = URL(string: raw),
+                  SystemAuthPolicy.allows(url, service: origin, relay: relayOrigin) else { reject("登录地址不属于已配置的服务"); return }
+            guard auth == nil else { reject("登录页面已打开"); return }
+            auth = ASWebAuthenticationSession(url: url, callbackURLScheme: "remotecodex") { [weak self] callback, error in
+                Task { @MainActor in
+                    self?.auth = nil
+                    #if DEBUG
+                    authRecord(callback == nil ? "closed" : "callback")
+                    #endif
+                    if let callback { reply(["callbackUrl": callback.absoluteString]) }
+                    else if (error as? ASWebAuthenticationSessionError)?.code == .canceledLogin { reply(NSNull()) }
+                    else { reject("系统登录未完成，请重试") }
+                }
             }
             auth?.presentationContextProvider = self
-            if auth?.start() != true { auth = nil; reply(NSNull()) }
+            let started = auth?.start() == true
+            if !started { auth = nil; reject("无法打开系统登录页面，请重试") }
+            #if DEBUG
+            if started { authRecord("started") }
+            #endif
         case "push.register":
             Task {
                 guard let token = await NativePush.shared.register() else { reply(NSNull()); return }

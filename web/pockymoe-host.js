@@ -4,6 +4,7 @@
   const listeners = new Set();
   const pending = new Map();
   let sequence = 0;
+  let signedOut = false;
   const post = message => {
     if (window.webkit?.messageHandlers?.remoteCodex) window.webkit.messageHandlers.remoteCodex.postMessage(message);
     else window.RemoteCodexHost.postMessage(JSON.stringify(message));
@@ -25,7 +26,7 @@
   }});
   Object.defineProperty(window, 'pockymoeHost', { value: Object.freeze({
     capabilities: () => request('capabilities'),
-    activity: { sync: snapshot => send('activity.sync', [snapshot]) },
+    activity: { sync: snapshot => { if (!signedOut) send('activity.sync', [snapshot]); } },
     onCommand: listener => { listeners.add(listener); send('ready'); return () => listeners.delete(listener); },
     commandResult: (id, result) => send('commandResult', [id, result]),
     window: {
@@ -43,6 +44,8 @@
     haptics: { play: kind => send('haptics.play', [kind]) },
     auth: { openExternal: url => request('auth.openExternal', url) },
   }) });
+  window.addEventListener('pockymoe-account-logout', () => { signedOut = true; send('session.clear'); });
+  window.addEventListener('pockymoe-account-changed', () => { signedOut = false; });
   // The SPA root must contain painted UI; DOMContentLoaded alone is an empty bundle host.
   const firstFrame = () => {
     const painted = () => {
