@@ -176,6 +176,8 @@ def build_static_web(codex, relay_origin, output):
 def exchange_directories(first, second):
     # Both platforms support an atomic exchange of nonempty directories. The
     # server keeps its directory path and resolves each new request there.
+    if sys.platform != "darwin" and not sys.platform.startswith("linux"):
+        raise FixtureError("Atomic artifact exchange requires macOS or Linux renameat2 support.")
     library = ctypes.CDLL(None, use_errno=True)
     if sys.platform == "darwin":
         exchange = library.renameatx_np

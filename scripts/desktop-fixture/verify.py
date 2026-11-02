@@ -97,11 +97,14 @@ def verify(state):
     token = state["accountToken"]
     session = request(state["relayOrigin"], "/relay/auth/session", token=token)
     assert session["authenticated"] and session["user"]["id"] == state["accountId"]
-    assert state["webOrigin"] != state["relayOrigin"]
+    if state.get("webMode") == "release":
+        assert state["webOrigin"] == state["relayOrigin"]
+    else:
+        assert state["webOrigin"] != state["relayOrigin"]
     with urllib.request.urlopen(state["webOrigin"] + "/devices/fixture/spa-fallback", timeout=3) as response:
         if b"<html" not in response.read().lower():
-            raise FixtureError("Separate static web origin did not serve the SPA fallback")
-    report = {"session": "vault account session passed", "webUi": "separate web origin + SPA fallback passed", "devices": []}
+            raise FixtureError("Fixture Web did not serve the SPA fallback")
+    report = {"session": "vault account session passed", "webUi": ("release runtime Web" if state.get("webMode") == "release" else "separate Web origin") + " + SPA fallback passed", "devices": []}
     sockets = []
     try:
         total = 0

@@ -60,6 +60,7 @@ class IsolationTests(unittest.TestCase):
             output.stdout = "Sun Nov  1 02:17:23 2026 Z\n"
             self.assertEqual(backend.identity(12345), "")
 
+    @unittest.skipIf(os.name == "nt", "Atomic Web rebuild is Mac/Linux-only; release Web startup is separate")
     def test_rebuild_swaps_whole_artifact_and_retains_old_lazy_chunks(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -103,3 +104,32 @@ class IsolationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class OwnedProcessTests(unittest.TestCase):
+    def test_identity_and_cleanup_of_only_our_child(self):
+        import subprocess
+        import sys
+        import time
+        child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)'])
+        try:
+            deadline = time.monotonic() + 3
+            birth = processes.identity(child.pid)
+            while not birth and time.monotonic() < deadline:
+                time.sleep(.01)
+                birth = processes.identity(child.pid)
+            self.assertTrue(birth)
+            owned = {"pid": child.pid, "identity": birth}
+            self.assertTrue(processes.alive(owned))
+            self.assertFalse(processes.alive({"pid": child.pid, "identity": "different birth"}))
+            processes.stop_process(owned)
+            child.wait(timeout=5)
+            self.assertFalse(processes.alive(owned))
+        finally:
+            if child.poll() is None:
+                child.terminate(); child.wait(timeout=5)
+
+    def test_windows_rebuild_reports_supported_platform_requirement(self):
+        with patch.object(backend.sys, 'platform', 'win32'):
+            with self.assertRaisesRegex(backend.FixtureError, 'macOS or Linux'):
+                backend.exchange_directories(Path('first'), Path('second'))

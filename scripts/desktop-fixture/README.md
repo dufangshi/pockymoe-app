@@ -169,3 +169,9 @@ The default Mac separate-origin mode remains unchanged. Existing split-origin
 Electron tests independently cover the host bridge's origin isolation.
 Credentials in `.local/e2e-desktop-env.json` are private test inputs: do not print
 that file, trace authentication or include raw auth errors in reports.
+
+`verify-api` accepts the explicitly selected release same-origin topology while
+retaining the separate-origin assertion for Pages mode. On Windows the atomic
+Web rebuild test is skipped because that operation is unsupported; startup and
+PID/creation-time cleanup are still exercised. The safety suite creates and
+terminates only its own recorded disposable Python child.
