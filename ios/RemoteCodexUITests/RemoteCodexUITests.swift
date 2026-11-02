@@ -10,7 +10,7 @@ final class RemoteCodexUITests: XCTestCase {
         let env = ProcessInfo.processInfo.environment
         let app = XCUIApplication()
         app.launchArguments = ["--uitesting"]
-        app.launchEnvironment = ["E2E_RELAY_URL": try XCTUnwrap(env["E2E_RELAY_URL"])]
+        app.launchEnvironment = ["E2E_RELAY_URL": try XCTUnwrap(env["E2E_RELAY_URL"]), "E2E_SEPARATE_RELAY_URL": env["E2E_SEPARATE_RELAY_URL"] ?? env["E2E_RELAY_URL"] ?? ""]
         app.launch()
         let web = app.webViews["productWebView"]
         XCTAssertTrue(web.waitForExistence(timeout: 30))
@@ -49,7 +49,7 @@ final class RemoteCodexUITests: XCTestCase {
         for state in ["running", "needsInput", "failed", "overflow", "completed"] {
             let app = XCUIApplication()
             app.launchArguments = ["--uitesting"]
-            app.launchEnvironment = ["E2E_RELAY_URL": try XCTUnwrap(env["E2E_RELAY_URL"]), "E2E_ACTIVITY_STATE": state]
+            app.launchEnvironment = ["E2E_RELAY_URL": try XCTUnwrap(env["E2E_RELAY_URL"]), "E2E_ACTIVITY_STATE": state, "E2E_SEPARATE_RELAY_URL": env["E2E_SEPARATE_RELAY_URL"] ?? env["E2E_RELAY_URL"] ?? ""]
             app.launch()
             XCTAssertTrue(app.webViews["productWebView"].waitForExistence(timeout: 20))
             XCUIDevice.shared.press(.home)

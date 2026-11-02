@@ -14,7 +14,9 @@ eval "$(python3 - "$ENV_FILE" <<'PY'
 import json, sys, shlex
 from pathlib import Path
 data=json.loads(Path(sys.argv[1]).read_text())
-for key, field in {'RELAY_URL':'relayUrl','TOKEN':'token','DEVICE_ID':'deviceId','WORKSPACE_ID':'workspaceId','DEVICE_API':'deviceApi','USERNAME':'username','PASSWORD':'password'}.items():
+# New shared fixtures separate the Web from the relay proxy. Keep older env files usable.
+data['iosWebUrl'] = data.get('webUrl', data['relayUrl'])
+for key, field in {'RELAY_URL':'iosWebUrl','SEPARATE_RELAY_URL':'relayUrl','TOKEN':'token','DEVICE_ID':'deviceId','WORKSPACE_ID':'workspaceId','DEVICE_API':'deviceApi','USERNAME':'username','PASSWORD':'password'}.items():
     print('export TEST_RUNNER_E2E_' + key + '=' + shlex.quote(str(data[field])))
 PY
 )"

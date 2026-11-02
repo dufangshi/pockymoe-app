@@ -293,3 +293,9 @@ describe('silencing finished work', () => {
     expect(() => pageSettingsPatch({ petMuteAlerts: false })).toThrow();
   });
 });
+
+it('summary prompt identifies an agent thread by both names', () => {
+  const prompt = summaryPrompt({ title: 'task title', conversation: 'app', agent: 'terminal', workspace: 'dev', request: '', answer: 'Done', failed: false }, 'en');
+  expect(prompt.user).toContain('Thread kind: agent thread\nConversation: app\nAgent name: terminal');
+  expect(prompt.system).toContain('identify both its conversation and agent name');
+});

@@ -2,63 +2,63 @@ package com.remotecodex.app.data
 
 import android.content.Context
 import android.content.SharedPreferences
-import com.remotecodex.app.theme.ThemeMode
 
 class SessionStore(context: Context) {
     private val prefs: SharedPreferences =
         context.applicationContext.getSharedPreferences("remote_codex", Context.MODE_PRIVATE)
 
     var relayUrl: String
-        get() = prefs.getString(KEY_URL, "").orEmpty()
+        get() = prefs.getString(KEY_URL, null) ?: prefs.getString("web_origin", "").orEmpty()
         set(value) = prefs.edit().putString(KEY_URL, normalizeRelayUrl(value)).apply()
+
+    var webOrigin: String
+        get() = prefs.getString("web_origin", null) ?: relayUrl
+        set(value) = prefs.edit().putString("web_origin", normalizeRelayUrl(value)).apply()
 
     var token: String
         get() = prefs.getString(KEY_TOKEN, "").orEmpty()
         set(value) = prefs.edit().putString(KEY_TOKEN, value).apply()
 
-    var deviceId: String
-        get() = prefs.getString(KEY_DEVICE, "").orEmpty()
-        set(value) = prefs.edit().putString(KEY_DEVICE, value).apply()
+    var cookieOrigin: String
+        get() = prefs.getString("cookie_origin", "").orEmpty()
+        set(value) = prefs.edit().putString("cookie_origin", value).apply()
 
-    var themeMode: ThemeMode
-        get() = when (prefs.getString(KEY_THEME, "system")) {
-            "light" -> ThemeMode.Light
-            "dark" -> ThemeMode.Dark
-            else -> ThemeMode.System
-        }
-        set(value) = prefs.edit().putString(
-            KEY_THEME,
-            when (value) {
-                ThemeMode.Light -> "light"
-                ThemeMode.Dark -> "dark"
-                ThemeMode.System -> "system"
-            },
-        ).apply()
+    var legacyProbeAttempted: Boolean
+        get() = prefs.getBoolean("legacy_probe_attempted", false)
+        set(value) = prefs.edit().putBoolean("legacy_probe_attempted", value).apply()
 
-    var autoCollapseCompletedTurns: Boolean
-        get() = prefs.getBoolean(KEY_AUTO_COLLAPSE, true)
-        set(value) = prefs.edit().putBoolean(KEY_AUTO_COLLAPSE, value).apply()
+    val serviceAddress: String
+        get() = prefs.getString("service_address", null) ?: connection.webOrigin
 
-    val hasRelayUrl: Boolean get() = relayUrl.isNotBlank()
-    val isSignedIn: Boolean get() = token.isNotBlank()
-
-    fun clearSession() {
-        prefs.edit()
-            .remove(KEY_TOKEN)
-            .remove(KEY_DEVICE)
+    fun connect(pair: ShellOrigins, address: String, preserveSession: Boolean) {
+        prefs
+            .edit()
+            .putString(KEY_URL, pair.relayOrigin)
+            .putString("web_origin", pair.webOrigin)
+            .putString("service_address", address)
+            .putBoolean("legacy_probe_attempted", true)
+            .apply {
+                if (!preserveSession) {
+                    remove(KEY_TOKEN)
+                    remove("cookie_origin")
+                }
+            }
             .apply()
     }
 
-    fun clearAll() {
-        prefs.edit().clear().apply()
-    }
+    val connection: StoredConnection
+        get() =
+            ShellOrigins.stored(prefs.getString("web_origin", null), prefs.getString(KEY_URL, null))
+
+    val hasRelayUrl: Boolean
+        get() = connection.configured
+
+    val isSignedIn: Boolean
+        get() = token.isNotBlank()
 
     companion object {
         private const val KEY_URL = "relay_url"
         private const val KEY_TOKEN = "relay_token"
-        private const val KEY_DEVICE = "relay_device_id"
-        private const val KEY_THEME = "theme_mode"
-        private const val KEY_AUTO_COLLAPSE = "auto_collapse_completed_turns"
     }
 }
 

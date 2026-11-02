@@ -1,86 +1,432 @@
 package com.remotecodex.app.notify
 
+import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.os.Build
-import androidx.core.app.NotificationCompat
+import android.os.Handler
+import android.os.Looper
+import com.remotecodex.app.BuildConfig
 import com.remotecodex.app.MainActivity
-import com.remotecodex.app.R
+import com.remotecodex.app.data.SessionStore
+import com.remotecodex.app.shellLocale
+import java.time.Instant
+import org.json.JSONArray
+import org.json.JSONObject
 
 object Notifications {
-    const val CHANNEL_AGENT = "agent-runs"
+    const val CHANNEL_AGENT = "account-activity"
     const val WATCH_ID = 41
     const val EXTRA_DEVICE_ID = "deviceId"
     const val EXTRA_THREAD_ID = "threadId"
     const val EXTRA_RELAY_ORIGIN = "relayOrigin"
+    private val activity = AccountActivity()
+    private val metadata = ActivityMetadataCache()
+    private var summary = AccountSummary("idle", emptyList(), 0, System.currentTimeMillis())
+    private val localItems = mutableMapOf<String, AccountItem>()
+    private var account = ""
+    private var loaded = false
+    private var relay = ""
+    private var genericBody = ""
+    private var lastEventKey: String? = null
+    private var debugOverride = false
+    private var debugPreview: AccountItem? = null
+    private val handler = Handler(Looper.getMainLooper())
+    private var expiry: Runnable? = null
 
-    fun ensureChannel(context: Context) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
-        val manager = context.getSystemService(NotificationManager::class.java)
-        val channel = NotificationChannel(
-            CHANNEL_AGENT,
-            context.getString(R.string.notification_channel_name),
-            NotificationManager.IMPORTANCE_HIGH,
-        ).apply {
-            description = context.getString(R.string.notification_channel_desc)
+    private fun itemJson(item: AccountItem) =
+        JSONObject()
+            .put("key", item.key)
+            .put("deviceId", item.deviceId)
+            .put("threadId", item.threadId)
+            .put("title", item.title)
+            .put("deviceName", item.deviceName)
+            .put("workspaceLabel", item.workspaceLabel)
+            .put("state", item.state)
+            .put("since", item.since)
+            .put("rootThreadKey", item.rootThreadKey)
+
+    private fun item(v: JSONObject) =
+        AccountItem(
+            v.getString("key"),
+            v.getString("deviceId"),
+            v.getString("threadId"),
+            v.optString("title", ""),
+            v.optString("deviceName"),
+            v.optString("workspaceLabel"),
+            v.getString("state"),
+            v.getLong("since"),
+            v.optString("rootThreadKey").takeUnless { it.isBlank() || it == "null" },
+        )
+
+    private fun restore(context: Context) {
+        val currentRelay = SessionStore(context).relayUrl
+        if (loaded && relay == currentRelay) return
+        loaded = true
+        relay = currentRelay
+        localItems.clear()
+        metadata.clear()
+        genericBody = ""
+        lastEventKey = null
+        account = ""
+        activity.lifetime = ActivityLifetime()
+        runCatching {
+            val saved =
+                JSONObject(
+                    context
+                        .getSharedPreferences("account_activity", Context.MODE_PRIVATE)
+                        .getString("snapshot", "{}")!!
+                )
+            if (saved.optString("relay") != relay) return
+            account = saved.getString("accountId")
+            genericBody = saved.optString("genericBody")
+            lastEventKey = saved.optString("lastEventKey").takeIf { it.isNotBlank() }
+            val entries = saved.getJSONArray("items")
+            for (i in 0 until entries.length()) item(entries.getJSONObject(i)).let {
+                localItems[it.key] = it
+            }
+            val names = saved.optJSONArray("metadata") ?: JSONArray()
+            metadata.remember(
+                account,
+                (0 until names.length()).map { item(names.getJSONObject(it)) },
+            )
+            val keys = saved.getJSONArray("keys")
+            activity.lifetime =
+                ActivityLifetime(
+                    account,
+                    saved.optBoolean("started"),
+                    saved.optLong("endedAt").takeIf { it > 0 },
+                    (0 until keys.length()).map { keys.getString(it) }.toSet(),
+                )
         }
-        manager.createNotificationChannel(channel)
     }
 
-    fun watchNotification(context: Context) =
-        NotificationCompat.Builder(context, CHANNEL_AGENT)
-            .setSmallIcon(android.R.drawable.stat_notify_sync)
-            .setContentTitle(context.getString(R.string.watch_notification_title))
-            .setContentText(context.getString(R.string.watch_notification_text))
-            .setOngoing(true)
-            .setSilent(true)
-            .setContentIntent(openApp(context))
-            .build()
+    private fun persist(context: Context) {
+        val life = activity.lifetime
+        val value =
+            JSONObject()
+                .put("relay", relay)
+                .put("accountId", account)
+                .put("started", life.started)
+                .put("genericBody", genericBody)
+                .put("lastEventKey", lastEventKey)
+                .put("endedAt", life.endedAt ?: 0)
+                .put("keys", JSONArray(life.keys.toList()))
+                .put("items", JSONArray(localItems.values.map(::itemJson)))
+                .put("metadata", JSONArray(metadata.snapshot().map(::itemJson)))
+        context
+            .getSharedPreferences("account_activity", Context.MODE_PRIVATE)
+            .edit()
+            .putString("snapshot", value.toString())
+            .apply()
+    }
 
+    @Synchronized
+    fun clear(context: Context) {
+        expiry?.let(handler::removeCallbacks)
+        expiry = null
+        debugOverride = false
+        debugPreview = null
+        lastEventKey = null
+        loaded = false
+        localItems.clear()
+        metadata.clear()
+        activity.lifetime = ActivityLifetime()
+        genericBody = ""
+        context
+            .getSharedPreferences("account_activity", Context.MODE_PRIVATE)
+            .edit()
+            .clear()
+            .apply()
+        context.getSystemService(NotificationManager::class.java).cancel(WATCH_ID)
+    }
+
+    fun ensureChannel(context: Context) {
+        val manager = context.getSystemService(NotificationManager::class.java)
+        // This quiet account stream replaces the old high-importance per-turn channel.
+        // Preserve a previous block/minimum setting without inheriting noisy defaults.
+        val importance =
+            minOf(
+                manager.getNotificationChannel("agent-runs")?.importance
+                    ?: NotificationManager.IMPORTANCE_LOW,
+                NotificationManager.IMPORTANCE_LOW,
+            )
+        manager.createNotificationChannel(
+            NotificationChannel(CHANNEL_AGENT, "Pockymoe", importance)
+        )
+        manager.activeNotifications
+            .filter { it.notification.channelId == "agent-runs" && it.id != WATCH_ID }
+            .forEach { manager.cancel(it.id) }
+    }
+
+    @Synchronized
+    fun sync(context: Context, snapshot: JSONObject) {
+        if (BuildConfig.DEBUG && debugOverride && snapshot.optString("accountId") != "debug") return
+        restore(context)
+        val next = snapshot.getString("accountId")
+        if (account != next) {
+            localItems.clear()
+            genericBody = ""
+            lastEventKey = null
+        }
+        account = next
+        localItems.clear()
+        val entries = snapshot.getJSONArray("items")
+        for (i in 0 until entries.length()) {
+            val v = entries.getJSONObject(i)
+            val item =
+                AccountItem(
+                    v.getString("key"),
+                    v.getString("deviceId"),
+                    v.getString("threadId"),
+                    v.optString("rootThreadTitle").takeUnless { it == "null" || it.isBlank() }
+                        ?: v.optString("title", ""),
+                    v.optString("deviceName"),
+                    v.optString("workspaceLabel"),
+                    v.getString("state"),
+                    runCatching { Instant.parse(v.getString("since")).toEpochMilli() }
+                        .getOrDefault(System.currentTimeMillis()),
+                    v.optString("rootThreadKey").takeUnless { it == "null" || it.isBlank() },
+                )
+            localItems[item.key] = item
+        }
+        val names = localItems.values.toMutableList()
+        val recent = snapshot.optJSONArray("recent") ?: JSONArray()
+        for (i in 0 until recent.length()) {
+            val v = recent.getJSONObject(i)
+            names.add(
+                AccountItem(
+                    v.getString("key"),
+                    v.getString("deviceId"),
+                    v.getString("threadId"),
+                    v.getString("title"),
+                    v.optString("deviceName"),
+                    v.optString("workspaceLabel"),
+                    "idle",
+                    System.currentTimeMillis(),
+                )
+            )
+        }
+        metadata.remember(account, names)
+        refresh(context)
+    }
+
+    @Synchronized
+    fun appearanceChanged(context: Context) {
+        if (
+            context.getSystemService(NotificationManager::class.java).activeNotifications.any {
+                it.id == WATCH_ID
+            }
+        )
+            refresh(context)
+    }
+
+    @Synchronized
+    private fun refresh(context: Context) {
+        // One ID is shared with startForeground: no second watcher notification.
+        context
+            .getSystemService(NotificationManager::class.java)
+            .notify(WATCH_ID, watchNotification(context))
+    }
+
+    @Synchronized
+    fun watchNotification(context: Context): Notification {
+        restore(context)
+        summary =
+            activity.update(
+                account,
+                localItems.values.toList(),
+                System.currentTimeMillis(),
+                RemoteCodexForeground.isForeground,
+            )
+        if (summary.state == "idle" && activity.lifetime.endedAt == null && genericBody.isBlank())
+            lastEventKey = null
+        persist(context)
+        expiry?.let(handler::removeCallbacks)
+        activity.lifetime.endedAt?.let { end ->
+            val appContext = context.applicationContext
+            expiry =
+                Runnable {
+                        synchronized(this) {
+                            genericBody = ""
+                            lastEventKey = null
+                        }
+                        if (SessionStore(appContext).isSignedIn) refresh(appContext)
+                        else clear(appContext)
+                    }
+                    .also {
+                        handler.postDelayed(
+                            it,
+                            maxOf(
+                                1,
+                                end + AccountActivity.RETENTION_MS - System.currentTimeMillis(),
+                            ),
+                        )
+                    }
+        }
+        val s = summary
+        val copy = NotificationCopy(shellLocale(context))
+        val displayedItems =
+            if (s.items.isNotEmpty()) s.items
+            else if (s.state == "completed")
+                activity.lifetime.keys
+                    .mapNotNull { metadata[it] }
+                    .map { it.copy(state = "completed") }
+            else emptyList()
+        val first =
+            (displayedItems.firstOrNull() ?: lastEventKey?.let(localItems::get))
+                ?.conversationTarget()
+        val intent =
+            Intent(context, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                if (first != null) {
+                    putExtra(EXTRA_DEVICE_ID, first.deviceId)
+                    putExtra(EXTRA_THREAD_ID, first.threadId)
+                }
+                putExtra(EXTRA_RELAY_ORIGIN, SessionStore(context).relayUrl)
+            }
+        val pending =
+            PendingIntent.getActivity(
+                context,
+                WATCH_ID,
+                intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
+        val state =
+            if (s.state == "idle" && genericBody.isNotBlank()) first?.state ?: "idle" else s.state
+        val count = if (s.state == "idle" && state != "idle") 1 else s.count
+        val otherRunning =
+            (displayedItems.count { it.state == "running" } - if (state == "running") 1 else 0)
+                .coerceAtLeast(0)
+        val lines =
+            copy.lines(
+                state,
+                count,
+                first?.title,
+                first?.deviceName.orEmpty(),
+                first?.workspaceLabel.orEmpty(),
+                otherRunning,
+            )
+        val builder =
+            Notification.Builder(context, CHANNEL_AGENT)
+                .setSmallIcon(
+                    when (state) {
+                        "needsInput" -> com.remotecodex.app.R.drawable.status_waiting
+                        "failed" -> com.remotecodex.app.R.drawable.status_failed
+                        "interrupted" -> com.remotecodex.app.R.drawable.status_interrupted
+                        "completed" -> com.remotecodex.app.R.drawable.status_completed
+                        "idle" -> com.remotecodex.app.R.drawable.status_idle
+                        else -> com.remotecodex.app.R.drawable.status_running
+                    }
+                )
+                .setContentTitle(middleTitle(lines.title))
+                .setContentText(lines.text)
+                .setContentIntent(pending)
+                .setOngoing(true)
+                .setOnlyAlertOnce(true)
+                .setCategory(Notification.CATEGORY_PROGRESS)
+                .setStyle(Notification.BigTextStyle().bigText(lines.expandedText))
+        if (s.state == "running") builder.setWhen(s.since).setUsesChronometer(true)
+        if (Build.VERSION.SDK_INT >= 36 && s.state != "idle") {
+            // There is no measurable percentage. Only running uses an indeterminate
+            // framework progress style; other states retain the bar-free BigTextStyle,
+            // which also has promotable characteristics on supported Android versions.
+            if (s.state == "running")
+                builder
+                    .setContentText(lines.expandedText)
+                    .setStyle(
+                        Notification.ProgressStyle()
+                            .setStyledByProgress(false)
+                            .setProgressIndeterminate(true)
+                            .setProgressSegments(emptyList())
+                            .setProgressPoints(emptyList())
+                    )
+            builder
+                .setColor(
+                    when (s.state) {
+                        "needsInput",
+                        "interrupted" -> 0xFFB7791F.toInt()
+                        "failed" -> 0xFFDC2626.toInt()
+                        else -> 0xFF78716C.toInt()
+                    }
+                )
+                .setShortCriticalText(copy.critical(s.state, s.count))
+            if (Build.VERSION.SDK_INT_FULL >= Build.VERSION_CODES_FULL.BAKLAVA_1)
+                builder.setRequestPromotedOngoing(true)
+        }
+        return builder.build()
+    }
+
+    @Synchronized
     fun agentFinished(
         context: Context,
         deviceId: String,
         threadId: String,
-        title: String,
+        state: String,
         body: String,
-        notificationId: Int,
     ) {
-        ensureChannel(context)
-        val intent = Intent(context, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
-            putExtra(EXTRA_DEVICE_ID, deviceId)
-            putExtra(EXTRA_THREAD_ID, threadId)
-            putExtra(EXTRA_RELAY_ORIGIN, com.remotecodex.app.data.SessionStore(context).relayUrl)
-            data = android.net.Uri.parse("remotecodex://devices/$deviceId/threads/$threadId")
-        }
-        val pending = PendingIntent.getActivity(
-            context,
-            notificationId,
-            intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
-        val notification = NotificationCompat.Builder(context, CHANNEL_AGENT)
-            .setSmallIcon(android.R.drawable.stat_notify_chat)
-            .setContentTitle(title)
-            .setContentText(body)
-            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
-            .setAutoCancel(true)
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setContentIntent(pending)
-            .build()
-        context.getSystemService(NotificationManager::class.java).notify(notificationId, notification)
+        if (RemoteCodexForeground.isForeground || (BuildConfig.DEBUG && debugOverride)) return
+        restore(context)
+        genericBody = body
+        val key = "$deviceId:$threadId"
+        lastEventKey = key
+        val old = localItems[key] ?: metadata[key]
+        // Generic Relay text never replaces local thread titles or device names.
+        localItems[key] =
+            old?.copy(state = state, since = System.currentTimeMillis())
+                ?: AccountItem(
+                    key,
+                    deviceId,
+                    threadId,
+                    "",
+                    "",
+                    "",
+                    state,
+                    System.currentTimeMillis(),
+                )
+        refresh(context)
     }
 
-    private fun openApp(context: Context): PendingIntent {
-        val intent = Intent(context, MainActivity::class.java)
-        return PendingIntent.getActivity(
+    fun debugState(context: Context, state: String, threadKey: String? = null) {
+        if (!BuildConfig.DEBUG) return
+        if (state == "clear") {
+            clear(context)
+            return
+        }
+        if (state !in setOf("running", "needsInput", "failed", "interrupted", "completed", "idle"))
+            return
+        if (!debugOverride) debugPreview = threadKey?.let { metadata[it] }
+        debugOverride = true
+        val now = System.currentTimeMillis()
+        val preview = debugPreview
+        val entry =
+            (preview?.let(::itemJson)
+                    ?: JSONObject()
+                        .put("key", "debug:thread")
+                        .put("deviceId", "debug")
+                        .put("threadId", "thread")
+                        .put("title", "")
+                        .put("deviceName", "AOSP")
+                        .put("workspaceLabel", "mobile-ws"))
+                .put("since", Instant.ofEpochMilli(now - 60_000).toString())
+                .put("state", state)
+        if (state == "idle") activity.lifetime = ActivityLifetime("debug")
+        if (state in setOf("needsInput", "failed", "interrupted", "completed")) {
+            entry.put("state", "running")
+            sync(
+                context,
+                JSONObject().put("accountId", "debug").put("items", org.json.JSONArray().put(entry)),
+            )
+            entry.put("state", state)
+        }
+        sync(
             context,
-            0,
-            intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            JSONObject()
+                .put("accountId", "debug")
+                .put("items", org.json.JSONArray().apply { if (state != "idle") put(entry) }),
         )
     }
 }

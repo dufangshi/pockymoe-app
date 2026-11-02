@@ -157,6 +157,7 @@ export interface DesktopSettings {
   petMutes: MuteRule[];
   /** The same rules also stop its pet bubble, chime and system notification. */
   petMuteAlerts: boolean;
+  petAgentAlerts: 'all' | 'silent' | 'off';
   /** Hide the character past the screen edge when docked; default true. */
   petEdgeHide: boolean;
   launchAtLogin: boolean;
@@ -166,7 +167,7 @@ export interface DesktopSettings {
 }
 
 /** The page never sees or changes where spoken alerts are sent. */
-export type PageSettings = Omit<DesktopSettings, 'petVoiceProvider' | 'petVoiceSpeaker' | 'petVoiceSpeed' | 'petVoiceRemotes' | 'petVoiceSummary' | 'petSummaryConnection' | 'petSummaryLanguage' | 'petMutes' | 'petMuteAlerts'>;
+export type PageSettings = Omit<DesktopSettings, 'petVoiceProvider' | 'petVoiceSpeaker' | 'petVoiceSpeed' | 'petVoiceRemotes' | 'petVoiceSummary' | 'petSummaryConnection' | 'petSummaryLanguage' | 'petMutes' | 'petMuteAlerts' | 'petAgentAlerts'>;
 
 export interface Appearance {
   effective: 'light' | 'dark';
