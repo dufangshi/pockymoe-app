@@ -40,7 +40,7 @@ struct ActivityContentState: Codable, Hashable {
     var completedCount: Int
     var endedAt: Date?
     var status: String {
-        endedAt != nil ? "completed" : waitingCount > 0 ? "needsInput" : failedCount > 0 ? "failed" : runningCount > 0 ? "running" : "completed"
+        endedAt != nil ? "completed" : waitingCount > 0 ? "needsInput" : failedCount > 0 ? "failed" : runningCount > 0 ? "running" : rows.first?.state == "interrupted" ? "interrupted" : "completed"
     }
     var earliestStart: Date
     var dismissalDate: Date? { endedAt?.addingTimeInterval(15 * 60) }

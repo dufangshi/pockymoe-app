@@ -44,5 +44,12 @@
 		<key>UIColorName</key>
 		<string>LaunchBackground</string>
 	</dict>
+	<key>WKAppBoundDomains</key>
+	<array>
+		<string>app.lnz-study.com</string>
+		<string>localhost</string>
+		<string>127.0.0.1</string>
+		<string>::1</string>
+	</array>
 </dict>
 </plist>

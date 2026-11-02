@@ -12,10 +12,21 @@ private final class MessageProxy: NSObject, WKScriptMessageHandler {
 
 final class NativeWebView: WKWebView {
     override var inputAccessoryView: UIView? { nil }
+    // The full-screen SwiftUI host has no inherited safe area; WebKit still
+    // needs the physical window insets for the page's CSS env() values.
+    var hostSafeArea = UIEdgeInsets.zero
+    override var safeAreaInsets: UIEdgeInsets { hostSafeArea }
 }
 
 @MainActor
 final class ShellController: UIViewController, WKNavigationDelegate, WKUIDelegate, ASWebAuthenticationPresentationContextProviding, UIDocumentPickerDelegate {
+    #if DEBUG
+    private let debugHarness = DebugHarness()
+    func runDebugHarness() { loadViewIfNeeded(); debugHarness.run(web: web) }
+    #endif
+    var hostSafeArea = UIEdgeInsets.zero {
+        didSet { web?.hostSafeArea = hostSafeArea; web?.setNeedsLayout() }
+    }
     let origin: String
     private var web: NativeWebView!
     private let proxy = MessageProxy()
@@ -43,12 +54,17 @@ final class ShellController: UIViewController, WKNavigationDelegate, WKUIDelegat
         view.backgroundColor = background
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .default()
+        // Encrypted routing needs Service Workers, which iOS only enables for
+        // app-bound domains. Self-hosted Web origins must be included at build time.
+        configuration.limitsNavigationsToAppBoundDomains = true
         proxy.owner = self
         configuration.userContentController.add(proxy, name: "remoteCodex")
         if let url = Bundle.main.url(forResource: "pockymoe-host", withExtension: "js"), let source = try? String(contentsOf: url), let encoded = Self.json(origin) {
             configuration.userContentController.addUserScript(WKUserScript(source: source.replacingOccurrences(of: "__POCKYMOE_ORIGIN__", with: encoded), injectionTime: .atDocumentStart, forMainFrameOnly: true))
         }
+        configuration.userContentController.addUserScript(WKUserScript(source: "if (window === window.top) { const viewport = document.querySelector('meta[name=viewport]'); if (viewport && !viewport.content.includes('viewport-fit')) viewport.content += ', viewport-fit=cover'; }", injectionTime: .atDocumentEnd, forMainFrameOnly: true))
         web = NativeWebView(frame: .zero, configuration: configuration)
+        web.hostSafeArea = hostSafeArea
         web.isOpaque = false; web.backgroundColor = background; web.scrollView.backgroundColor = background
         web.alpha = 0
         web.navigationDelegate = self; web.uiDelegate = self
@@ -67,11 +83,14 @@ final class ShellController: UIViewController, WKNavigationDelegate, WKUIDelegat
         }
         live.onToken = { [weak self] token in self?.command(["type": "liveActivityToken", "token": token]) }
         #if DEBUG
+        debugHarness.retry = { [weak self] in self?.retryLoad() }
+        debugHarness.watch(web: web)
         if let state = ProcessInfo.processInfo.environment["E2E_ACTIVITY_STATE"] { Task {
             if UIApplication.shared.applicationState != .active {
                 for await _ in NotificationCenter.default.notifications(named: UIApplication.didBecomeActiveNotification) { break }
             }
             await live.drive(state)
+            if ProcessInfo.processInfo.environment["E2E_RENDER_ISLANDS"] == "1" { DebugIslandRenderer.renderAll() }
         } }
         #endif
     }
@@ -83,6 +102,9 @@ final class ShellController: UIViewController, WKNavigationDelegate, WKUIDelegat
         web.load(URLRequest(url: url))
     }
     func close() {
+        #if DEBUG
+        debugHarness.stop()
+        #endif
         web?.configuration.userContentController.removeScriptMessageHandler(forName: "remoteCodex")
         routeObservation = nil; auth?.cancel()
     }
@@ -122,6 +144,9 @@ final class ShellController: UIViewController, WKNavigationDelegate, WKUIDelegat
     private func showOffline(_ error: Error) {
         guard (error as NSError).code != NSURLErrorCancelled, offline == nil else { return }
         web.alpha = 0
+        #if DEBUG
+        debugHarness.record(state: "offline", path: path)
+        #endif
         let label = UILabel(); label.text = "无法连接 Relay"; label.textColor = .label
         let retry = UIButton(type: .system); retry.setTitle("重试", for: .normal); retry.accessibilityIdentifier = "retryConnection"
         retry.heightAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
@@ -173,6 +198,9 @@ final class ShellController: UIViewController, WKNavigationDelegate, WKUIDelegat
         switch method {
         case "firstFrame":
             guard offline == nil else { return }
+            #if DEBUG
+            debugHarness.record(state: "online", path: path)
+            #endif
             UIView.animate(withDuration: 0.12) { self.web.alpha = 1 }
         case "ready":
             ready = true
@@ -182,6 +210,9 @@ final class ShellController: UIViewController, WKNavigationDelegate, WKUIDelegat
         case "capabilities":
             reply(["surface": "mobile", "platform": "ios", "bridgeVersion": 2, "shellVersion": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0", "liveActivity": ActivityAuthorizationInfo().areActivitiesEnabled, "nativePush": true, "haptics": true])
         case "activity.sync":
+            #if DEBUG
+            if ProcessInfo.processInfo.environment["E2E_ACTIVITY_STATE"] != nil { return }
+            #endif
             if let raw = args.first, let data = try? JSONSerialization.data(withJSONObject: raw), let snapshot = try? JSONDecoder().decode(ActivitySnapshot.self, from: data) { Task { await live.sync(snapshot) } }
         case "commandResult":
             if args.count == 2, let key = args[0] as? String, let result = args[1] as? [String: Any] { commandReplies.removeValue(forKey: key)?(result) }
@@ -249,12 +280,41 @@ final class ShellController: UIViewController, WKNavigationDelegate, WKUIDelegat
         dark = (appearance["effective"] as? String) == "dark"
         overrideUserInterfaceStyle = dark == true ? .dark : .light
         setNeedsStatusBarAppearanceUpdate()
-        web.evaluateJavaScript("getComputedStyle(document.documentElement).getPropertyValue('--theme-bg').trim() || getComputedStyle(document.body).backgroundColor") { [weak self] value, _ in
-            guard let self, let raw = value as? String, let color = Self.color(raw) else { return }
-            self.view.backgroundColor = color; self.web.backgroundColor = color; self.web.scrollView.backgroundColor = color
-            UserDefaults.standard.set(raw, forKey: "shell.background")
+        if let raw = appearance["background"] as? String, Self.color(raw) != nil {
+            applyBackground(raw)
+            return
+        }
+        let requested = Self.json(appearance["background"] as? String ?? "") ?? "\"\""
+        let generation = documentGeneration
+        // Theme packs use CSS Color 4 (including oklch). Let WebKit resolve the
+        // page's color space and convert one canvas pixel to native sRGB.
+        let resolveColor = """
+        (() => {
+          const surface = [...document.querySelectorAll('.thread-ui-shell, .auth-shell')].find(node => node.getClientRects().length) || document.documentElement;
+          const raw = \(requested);
+          const probe = document.createElement('i');
+          probe.style.display = 'none';
+          probe.style.color = raw && CSS.supports('color', raw) ? raw : getComputedStyle(surface).backgroundColor;
+          surface.append(probe);
+          const color = getComputedStyle(probe).color;
+          probe.remove();
+          const canvas = document.createElement('canvas'); canvas.width = canvas.height = 1;
+          const context = canvas.getContext('2d'); context.fillStyle = color; context.fillRect(0, 0, 1, 1);
+          const pixel = context.getImageData(0, 0, 1, 1).data;
+          return pixel[3] ? '#' + [...pixel.slice(0, 3)].map(n => n.toString(16).padStart(2, '0')).join('') : null;
+        })()
+        """
+        web.evaluateJavaScript(resolveColor) { [weak self] value, _ in
+            guard let self, self.documentGeneration == generation, let raw = value as? String else { return }
+            self.applyBackground(raw)
         }
     }
+    private func applyBackground(_ raw: String) {
+        guard let color = Self.color(raw) else { return }
+        view.backgroundColor = color; web.backgroundColor = color; web.scrollView.backgroundColor = color
+        UserDefaults.standard.set(raw, forKey: "shell.background")
+    }
+
     func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor { view.window ?? ASPresentationAnchor() }
     func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) { finishSave(false) }
     func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) { finishSave(!urls.isEmpty) }
@@ -273,6 +333,7 @@ final class ShellController: UIViewController, WKNavigationDelegate, WKUIDelegat
         }
         if value.hasPrefix("rgb"), let start = value.firstIndex(of: "("), let end = value.firstIndex(of: ")") {
             let parts = value[value.index(after: start)..<end].split(separator: ",").compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }
+            if parts.count >= 4 && parts[3] == 0 { return nil }
             if parts.count >= 3 { return UIColor(red: parts[0]/255, green: parts[1]/255, blue: parts[2]/255, alpha: 1) }
         }
         return nil

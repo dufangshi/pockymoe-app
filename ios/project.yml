@@ -27,6 +27,7 @@ targets:
       - path: Shared
       - path: ../web/pockymoe-host.js
         buildPhase: resources
+      - path: LiveActivity/Assets.xcassets
       - path: RemoteCodex/Resources
     settings:
       base:

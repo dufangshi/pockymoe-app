@@ -11,6 +11,9 @@ final class LiveActivityManager {
     private var activity: Activity<PockymoeActivityAttributes>?
     private var tokenTask: Task<Void, Never>?
     private var syncTask: Task<Void, Never>?
+    #if DEBUG
+    private var debugError: String?
+    #endif
     var onToken: ((String) -> Void)?
     private var lastToken: String?
 
@@ -39,7 +42,17 @@ final class LiveActivityManager {
             activity = nil; tokenTask?.cancel(); tokenTask = nil; lastToken = nil
         }
         if activity == nil, ActivityPolicy.shouldStart(state, foreground: UIApplication.shared.applicationState == .active) {
-            activity = try? Activity.request(attributes: PockymoeActivityAttributes(accountId: snapshot.accountId), content: ActivityContent(state: state, staleDate: nil), pushType: .token)
+            do {
+                var pushType: PushType? = .token
+                #if DEBUG
+                if ProcessInfo.processInfo.environment["E2E_ACTIVITY_STATE"] != nil { pushType = nil }
+                #endif
+                activity = try Activity.request(attributes: PockymoeActivityAttributes(accountId: snapshot.accountId), content: ActivityContent(state: state, staleDate: nil), pushType: pushType)
+            } catch {
+                #if DEBUG
+                debugError = String(describing: error)
+                #endif
+            }
         }
         guard let activity else { return }
         if tokenTask == nil {
@@ -66,7 +79,18 @@ final class LiveActivityManager {
         let states = state == "failed" ? ["failed", "running"] : state == "overflow" ? ["needsInput", "failed", "running", "running", "running"] : [state]
         // Terminal fixtures first start a real activity; production never uses push-to-start.
         if state != "running" { await sync(.init(accountId: "screenshots", items: [fixture("running", index: 0)])) }
-        await sync(.init(accountId: "screenshots", items: states.enumerated().map { fixture($0.element, index: $0.offset) }))
+        if state == "interrupted", let activity {
+            // Review the interrupted mark independently of the production terminal summary.
+            await activity.update(ActivityContent(state: DebugIslandRenderer.fixture(state), staleDate: nil))
+        } else {
+            await sync(.init(accountId: "screenshots", items: states.enumerated().map { fixture($0.element, index: $0.offset) }))
+        }
+        if ProcessInfo.processInfo.environment["E2E_ACTIVITY_MINIMAL"] == "1" {
+            _ = try? Activity.request(attributes: PockymoeActivityAttributes(accountId: "debug-companion"), content: ActivityContent(state: DebugIslandRenderer.fixture("running"), staleDate: nil), pushType: nil)
+        }
+        let info: [String: Any] = ["error": debugError ?? "", "fixture": state, "enabled": ActivityAuthorizationInfo().areActivitiesEnabled, "activities": Activity<PockymoeActivityAttributes>.activities.map { ["id": $0.id, "status": String(describing: $0.activityState)] }]
+        let directory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        if let data = try? JSONSerialization.data(withJSONObject: info, options: .prettyPrinted) { try? data.write(to: directory.appendingPathComponent("activity-debug.json")) }
     }
     private func fixture(_ state: String, index: Int) -> ActivityItem {
         .init(key: "fixture:\(index)", deviceId: "fixture", deviceName: "Mac", workspaceLabel: "Pockymoe", threadId: "\(index)", title: "修复登录与连接状态 \(index + 1)", state: state, since: ISO8601DateFormatter().string(from: Date(timeIntervalSinceNow: -134)))

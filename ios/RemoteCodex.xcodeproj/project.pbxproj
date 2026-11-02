@@ -8,15 +8,20 @@
 
 /* Begin PBXBuildFile section */
 		1540DB8F3CC5DFE9A756A79D /* LiveActivityManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E0B081B8892FF8A5DA5AD32 /* LiveActivityManager.swift */; };
+		1D191C622281756DCAE00D3C /* ActivityViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 07A4E5B86D3DBAE2FA3F2313 /* ActivityViews.swift */; };
+		2BC38719673855FDB85615D1 /* DebugIslandRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F1682ED2867F79C0C7A4B99 /* DebugIslandRenderer.swift */; };
 		2CEB81250ABEA6950FA5BAA0 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = F532EE5C43393D122FF82300 /* Assets.xcassets */; };
 		35D9A9DFB08B00EFCD65B348 /* LiveActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = AAB66863196DD3C9904D04C6 /* LiveActivityAttributes.swift */; };
 		4F859B3781AFA046F4BFC4AD /* RemoteCodexUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20B8D46B37DE808A09C6B86E /* RemoteCodexUITests.swift */; };
+		5D77C28F4FA6EB4924918755 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = F532EE5C43393D122FF82300 /* Assets.xcassets */; };
 		6FDD22B72356B49ABE18A4AA /* ShellController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D67D00DBC5982FA5D9BADB3F /* ShellController.swift */; };
+		700B4B6C219F9FAD1CC147DB /* DebugHarness.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9A46A460D4C17C4542E57D1 /* DebugHarness.swift */; };
 		75E5220690D6D8DF49C4E2F5 /* LiveActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = AAB66863196DD3C9904D04C6 /* LiveActivityAttributes.swift */; };
 		82CC1E51E945DF54B45CDEC3 /* PockymoeLiveActivity.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 15FC8A17B57538DDCD0D4838 /* PockymoeLiveActivity.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		99BBA5F2F9FC392476FEA35C /* PockymoeLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 424A8B9D2686AFE025A849C5 /* PockymoeLiveActivity.swift */; };
 		9D310DBC5B691B839B53B02E /* pockymoe-host.js in Resources */ = {isa = PBXBuildFile; fileRef = 3F7B69E276D5CB39C6A582A3 /* pockymoe-host.js */; };
 		A782ADD590E7763C3EB388F9 /* MobileApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 998245FEBFC45F287E6EFE6E /* MobileApp.swift */; };
+		AD3903EA9E47A4842A1A8585 /* ActivityViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 07A4E5B86D3DBAE2FA3F2313 /* ActivityViews.swift */; };
 		B1070108A7F0800A381E2AAD /* ActivityPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 035C7B10E9EF4FF34C3B7001 /* ActivityPolicy.swift */; };
 		DD103EE72FEF3C4C48FE40BE /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = E73A168D7BF987C354EE4D65 /* Assets.xcassets */; };
 		E5E3C22F104AE21A42C5155F /* ActivityPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 035C7B10E9EF4FF34C3B7001 /* ActivityPolicy.swift */; };
@@ -56,16 +61,19 @@
 /* Begin PBXFileReference section */
 		035C7B10E9EF4FF34C3B7001 /* ActivityPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityPolicy.swift; sourceTree = "<group>"; };
 		04FECA0E850860B8AC4CBA61 /* RemoteCodexUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = RemoteCodexUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		07A4E5B86D3DBAE2FA3F2313 /* ActivityViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityViews.swift; sourceTree = "<group>"; };
 		15FC8A17B57538DDCD0D4838 /* PockymoeLiveActivity.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = PockymoeLiveActivity.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		20B8D46B37DE808A09C6B86E /* RemoteCodexUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteCodexUITests.swift; sourceTree = "<group>"; };
 		3F7B69E276D5CB39C6A582A3 /* pockymoe-host.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = "pockymoe-host.js"; sourceTree = "<group>"; };
 		424A8B9D2686AFE025A849C5 /* PockymoeLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PockymoeLiveActivity.swift; sourceTree = "<group>"; };
 		4E0B081B8892FF8A5DA5AD32 /* LiveActivityManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveActivityManager.swift; sourceTree = "<group>"; };
 		69B1D02571E1DF177175B33E /* RemoteCodex.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = RemoteCodex.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		7F1682ED2867F79C0C7A4B99 /* DebugIslandRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugIslandRenderer.swift; sourceTree = "<group>"; };
 		998245FEBFC45F287E6EFE6E /* MobileApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileApp.swift; sourceTree = "<group>"; };
 		AAB66863196DD3C9904D04C6 /* LiveActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveActivityAttributes.swift; sourceTree = "<group>"; };
 		D67D00DBC5982FA5D9BADB3F /* ShellController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShellController.swift; sourceTree = "<group>"; };
 		E73A168D7BF987C354EE4D65 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		E9A46A460D4C17C4542E57D1 /* DebugHarness.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugHarness.swift; sourceTree = "<group>"; };
 		F532EE5C43393D122FF82300 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -82,6 +90,7 @@
 			isa = PBXGroup;
 			children = (
 				035C7B10E9EF4FF34C3B7001 /* ActivityPolicy.swift */,
+				07A4E5B86D3DBAE2FA3F2313 /* ActivityViews.swift */,
 				AAB66863196DD3C9904D04C6 /* LiveActivityAttributes.swift */,
 			);
 			path = Shared;
@@ -146,6 +155,8 @@
 		C4DC7315E4267878BA32B34A /* Shell */ = {
 			isa = PBXGroup;
 			children = (
+				E9A46A460D4C17C4542E57D1 /* DebugHarness.swift */,
+				7F1682ED2867F79C0C7A4B99 /* DebugIslandRenderer.swift */,
 				4E0B081B8892FF8A5DA5AD32 /* LiveActivityManager.swift */,
 				998245FEBFC45F287E6EFE6E /* MobileApp.swift */,
 				D67D00DBC5982FA5D9BADB3F /* ShellController.swift */,
@@ -276,6 +287,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				5D77C28F4FA6EB4924918755 /* Assets.xcassets in Resources */,
 				DD103EE72FEF3C4C48FE40BE /* Assets.xcassets in Resources */,
 				9D310DBC5B691B839B53B02E /* pockymoe-host.js in Resources */,
 			);
@@ -289,6 +301,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				E5E3C22F104AE21A42C5155F /* ActivityPolicy.swift in Sources */,
+				AD3903EA9E47A4842A1A8585 /* ActivityViews.swift in Sources */,
 				35D9A9DFB08B00EFCD65B348 /* LiveActivityAttributes.swift in Sources */,
 				99BBA5F2F9FC392476FEA35C /* PockymoeLiveActivity.swift in Sources */,
 			);
@@ -299,6 +312,9 @@
 			buildActionMask = 2147483647;
 			files = (
 				B1070108A7F0800A381E2AAD /* ActivityPolicy.swift in Sources */,
+				1D191C622281756DCAE00D3C /* ActivityViews.swift in Sources */,
+				700B4B6C219F9FAD1CC147DB /* DebugHarness.swift in Sources */,
+				2BC38719673855FDB85615D1 /* DebugIslandRenderer.swift in Sources */,
 				75E5220690D6D8DF49C4E2F5 /* LiveActivityAttributes.swift in Sources */,
 				1540DB8F3CC5DFE9A756A79D /* LiveActivityManager.swift in Sources */,
 				A782ADD590E7763C3EB388F9 /* MobileApp.swift in Sources */,

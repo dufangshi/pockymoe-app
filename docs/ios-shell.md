@@ -62,10 +62,100 @@ uses `hash-wasm` from the control-plane Web package. Never print `.local` fixtur
 credentials. Stop the helper and your simulator when finished.
 
 Debug-only `E2E_ACTIVITY_STATE` accepts `running`, `needsInput`, `failed`,
-`overflow`, or `completed` at launch with `--uitesting`. It starts a local activity
+`interrupted`, `overflow`, or `completed` at launch with `--uitesting`. It starts a local activity
 before terminal fixtures; Release has no fixture driver. System screenshots in
 XCTest are attachments in `.local/ios-results-*.xcresult`. They must be inspected:
 a passing screenshot test alone does not prove that SpringBoard showed the island.
 
 The shared legacy `web/native-bridge.js` and its tests remain for Android. iOS
 loads only `web/pockymoe-host.js`.
+
+## Acceptance without XCTest
+
+Build a Debug simulator app with `CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=-`.
+A local ad-hoc signature is necessary for WebKit to persist nonextractable
+CryptoKeys in IndexedDB; an unsigned build can compile and install but fail login
+with `DataCloneError`. This does not require an Apple developer certificate.
+The existing XCTest script uses the same local signing flags, but needs Xcode's
+first-launch initialization before it can run.
+
+For encrypted thread/file routing, iOS requires Service Workers. The shell uses
+`limitsNavigationsToAppBoundDomains`, with `WKAppBoundDomains` in both plists.
+The default Web domain and loopback hosts are included. Add a self-hosted **Web**
+domain to both plists when building for it; iOS does not permit this allowlist to
+be changed at runtime. This does not restrict the Relay origin that Web calls.
+The WebView obtains physical safe insets from the outer SwiftUI geometry so
+`env(safe-area-inset-*)` remains correct inside its full-screen container.
+
+The opt-in `--debug-harness` launch flag enables `DebugHarness` in Debug builds.
+Write a JSON array to the app container's `Documents/acceptance.json`:
+
+```json
+[{"name":"mobile","script":"return (await window.pockymoeHost.capabilities()).surface === 'mobile'","wait":true,"timeout":20}]
+```
+
+Each `script` is an async JavaScript function body in the WKWebView's page world.
+`wait:true` repeats until the script returns true or times out; false/exception
+stops the batch. Results go to `acceptance-results.json`, with per-step progress
+in `acceptance-progress.json`. Input is deleted after execution. The file watcher
+also accepts a one-shot `acceptance-retry` file to invoke the local Retry action;
+`acceptance-native.json` reports the offline/online transition and route. The
+`remotecodex://debug/run` URL can trigger the same runner, although iOS may require
+an Open confirmation, so the file watcher is the unattended path. All of this
+code is under `#if DEBUG`, and requires the explicit opt-in flag.
+
+Use only a dedicated simulator and disposable loopback backend. Build the mobile
+integration Web checkout with `VITE_POCKYMOE_RELAY_ORIGIN=` for same-origin tests;
+another worker's port-specific build can otherwise retarget API traffic. Set
+`REMOTE_CODEX_ROOT` and `REMOTE_CODEX_RELAY_WEB_DIST_DIR` to that checkout and its
+`apps/supervisor-web/dist` when starting `scripts/e2e-backend.sh serve`.
+
+```sh
+# Always terminate a possibly prewarmed app when supplying launch arguments.
+SIMCTL_CHILD_E2E_RELAY_URL=http://127.0.0.1:28790 xcrun simctl launch \
+  --terminate-running-process "$IOS_SIMULATOR_ID" com.remotecodex.app \
+  --uitesting --debug-harness
+python3 scripts/ios-debug-steps.py login --output .local/ios-login.json
+python3 scripts/ios-debug-run.py "$IOS_SIMULATOR_ID" .local/ios-login.json \
+  --output .scratch/mobile-ios/login.json
+```
+
+The step generator also supports `protect`, `prepare-thread`, `thread`, and
+`send`. `prepare-thread` creates an isolated API fixture; `thread` opens it via
+the host contract; `send` drives the Web composer and verifies a completed,
+persisted turn through the page's encrypted Service Worker routing. Generated
+login input contains disposable fixture credentials: keep it in ignored `.local`
+and never print or share it.
+
+`scripts/ios-capture-themes.py` captures the current thread in all three themes
+and both modes, after checking theme attributes, fonts and the composer.
+`scripts/ios-capture-islands.py` launches each Debug activity fixture, backgrounds
+the app with Settings, then captures compact and minimal attempts in both modes.
+Minimal uses a Debug-only companion activity; production remains one per account.
+Inspect the images: accepting an activity does not prove that SpringBoard rendered
+its content. Completed fixtures use production ending behavior, so their retained
+summary may appear only on the lock screen rather than in the island.
+
+For design renders, additionally launch with `SIMCTL_CHILD_E2E_RENDER_ISLANDS=1`
+and an activity fixture. `DebugIslandRenderer` writes 48 PNGs into
+`Documents/island-renders`: four layouts, six states, two modes. These reuse the
+Widget's SwiftUI views, with a local black island container in the renderer.
+Copy them out and run `scripts/ios-contact-sheet.py` with Pillow to make a contact
+sheet. These are **renders**, not evidence of system presentations. The interrupted
+fixture reviews its mark before the production terminal summary. The renderer is
+opt-in so image generation cannot stall normal launch acceptance.
+
+Record cold launches with `simctl io recordVideo`, then use
+`scripts/ios-video-frames.swift` to sample at 100 ms and inspect the PNGs. Scripted
+DOM actions cannot establish real edge-swipe tracking, keyboard behavior under
+real touches, notification taps, or real-device APNs delivery.
+
+`appearance.sync.background` is authoritative for the native backing color.
+For modern CSS colors (for example `oklch(...)`) WebKit resolves the color and
+converts a one-pixel canvas to sRGB before the shell caches it. Reading an
+unrelated root CSS variable, or accepting transparent black as a page background,
+can otherwise leave a dark backing color behind a light page on the next launch.
+`scripts/ios-record-launch.py` starts video capture, cold-launches the app with
+its arguments, waits for scripted readiness and stops the recording in one run.
+Use one script batch per app instance; capture/launch scripts must not run while
+another batch is still executing.

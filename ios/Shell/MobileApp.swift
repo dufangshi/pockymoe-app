@@ -7,8 +7,10 @@ struct RemoteCodexApp: App {
     @StateObject private var model = ShellModel()
     var body: some Scene {
         WindowGroup {
-            ShellView(model: model).ignoresSafeArea()
-                .onOpenURL { model.open($0) }
+            GeometryReader { geometry in
+                ShellView(model: model, safeArea: geometry.safeAreaInsets).ignoresSafeArea()
+            }
+            .onOpenURL { model.open($0) }
         }
     }
 }
@@ -62,6 +64,11 @@ final class ShellModel: ObservableObject {
         pendingPath = nil
     }
     func open(_ url: URL) {
+        #if DEBUG
+        if url.scheme == "remotecodex", url.host == "debug", ProcessInfo.processInfo.arguments.contains("--debug-harness") {
+            controller?.runDebugHarness(); return
+        }
+        #endif
         guard url.scheme == "remotecodex", url.host == "devices" else { return }
         let path = "/devices" + url.path
         pendingPath = path
@@ -71,6 +78,7 @@ final class ShellModel: ObservableObject {
 
 struct ShellView: View {
     @ObservedObject var model: ShellModel
+    let safeArea: EdgeInsets
     @State private var address = "https://app.lnz-study.com"
     @State private var invalid = false
     var body: some View {
@@ -85,18 +93,20 @@ struct ShellView: View {
                 Button("连接") { invalid = !model.connect(address) }.frame(minHeight: 44).accessibilityIdentifier("connectRelay")
             }.padding(24).frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Color(uiColor: ShellController.systemBackground))
-        } else { ShellWebView(model: model).id(model.origin) }
+        } else { ShellWebView(model: model, safeArea: safeArea).id(model.origin) }
     }
 }
 
 struct ShellWebView: UIViewControllerRepresentable {
     let model: ShellModel
+    let safeArea: EdgeInsets
     func makeUIViewController(context: Context) -> ShellController {
         let controller = ShellController(origin: model.origin)
+        controller.hostSafeArea = UIEdgeInsets(top: safeArea.top, left: safeArea.leading, bottom: safeArea.bottom, right: safeArea.trailing)
         model.attach(controller)
         return controller
     }
-    func updateUIViewController(_ controller: ShellController, context: Context) {}
+    func updateUIViewController(_ controller: ShellController, context: Context) { controller.hostSafeArea = UIEdgeInsets(top: safeArea.top, left: safeArea.leading, bottom: safeArea.bottom, right: safeArea.trailing) }
     static func dismantleUIViewController(_ controller: ShellController, coordinator: ()) { controller.close() }
 }
 
