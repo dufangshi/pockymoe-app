@@ -27,7 +27,7 @@ def seed_device(state, device, api):
     for wi, label in enumerate(WORKSPACES):
         directory = Path(device["dataDir"]) / "workspaces" / label
         directory.mkdir(parents=True)
-        (directory / "README.md").write_text(f"# {label}\n\nIsolated desktop E2E workspace.\n")
+        (directory / "README.md").write_text(f"# {label}\n\nIsolated desktop E2E workspace.\n", encoding="utf-8")
         workspace = api(state, device, "/workspaces", "POST", {"absPath": str(directory), "label": label})
         device["workspaces"].append(workspace)
         if wi in (0, 2):

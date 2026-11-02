@@ -3,8 +3,10 @@
 The main process owns one fixed transparent character window and one reusable,
 parented glass window. Only dragging, size changes and display changes can alter
 character bounds. The glass child resizes to its compact controls, merged activity
-panel, pill bubble or More menu. macOS uses native HUD vibrancy; Windows uses
-acrylic (other platforms retain the translucent fallback). An interactive panel
+panel, pill bubble or More menu. macOS uses native HUD vibrancy. Windows 11 22H2+ requests native Acrylic in a nontransparent frameless child. Older
+builds use a transparent child with the design’s opaque solid fallback, 1px border and
+12px corners. `POCKYMOE_WINDOWS_GLASS=solid` forces that fallback if real-device QA
+finds native corner artifacts or flicker. Other platforms retain the translucent fallback. An interactive panel
 focuses and closes on native blur or Esc; passive bubbles never take focus.
 
 ```ts
@@ -48,6 +50,12 @@ poses, and idle column 6 is not played. Sources are linked in `animation.ts`.
 Optional `remoteCodex.frameScale` slows per-frame timing. Sleeping strips and
 frameScale are validated independently. Import validates dimensions, size caps,
 ZIP paths, symlinks and decoded pixels before atomic installation under userData.
+On Windows, ZIP components and installation IDs also reject device names (CON,
+NUL, COM1, etc.), alternate streams and trailing dots/spaces. Backslashes, drive
+prefixes and traversal are rejected before archive entries reach the filesystem.
+All positioning remains in Electron DIP work areas, including taskbar insets;
+125/150/200% scaling, cross-monitor movement and full-screen behavior still require
+physical Windows verification.
 The shell may call `importPetPack({ settings, petDirectories, parent })`.
 
 `moe` and `frost` are original bundled packs; their sources are in `desktop/art/`.

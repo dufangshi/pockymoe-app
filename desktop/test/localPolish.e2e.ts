@@ -1,3 +1,4 @@
+import { recordLifecycle } from './lifecycle';
 import { test, expect, _electron as electron, type ElectronApplication, type Page } from '@playwright/test';
 import { createServer, type Server } from 'node:http';
 import { copyFileSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -5,10 +6,11 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { Appearance, PockymoeHost } from '../src/shared/contract';
 import { item, snapshot } from './fixtures';
+import { windowAt } from './windowReady';
 // Runtime type is declared by shell.e2e.ts; this spec runs only local shell flows.
 declare global { interface Window { pockymoeHost?: PockymoeHost; commands: unknown[] } }
 let server: Server, origin: string, app: ElectronApplication, profile: string;
-const evidence = process.env.POCKYMOE_DESKTOP_EVIDENCE || join('/tmp', 'rc-desktop/evidence/round3/shell');
+const evidence = process.env.POCKYMOE_DESKTOP_EVIDENCE || join(tmpdir(), 'pockymoe-local-evidence');
 test.beforeAll(async () => {
   server = createServer((_req, res) => { res.setHeader('Content-Type', 'text/html'); res.end(`<!doctype html><title>Isolated shell fixture</title><script>window.commands=[];window.pockymoeHost?.onCommand(command=>{window.commands.push(command);window.pockymoeHost.commandResult(command.id,{ok:true});});</script>`); });
   await new Promise<void>(done => server.listen(0, '127.0.0.1', done));
@@ -18,21 +20,25 @@ test.beforeAll(async () => {
 test.afterAll(async () => { await new Promise<void>(done => server.close(() => done())); });
 test.beforeEach(async () => {
   profile = mkdtempSync(join(tmpdir(), 'pockymoe-polish-'));
+  if (test.info().title.startsWith('custom pickers')) {
+    const directory = join(profile, 'pets', 'credit-fixture'); mkdirSync(directory, { recursive: true });
+    writeFileSync(join(directory, 'pet.json'), JSON.stringify({ id: 'credit-fixture', displayName: 'Credit fixture', description: '', spritesheetPath: 'spritesheet.png', author: 'Fixture Artist', license: 'CC0', licenseUrl: 'https://example.test/license', sourceUrl: 'https://example.test/source' }));
+    copyFileSync('assets/pets/placeholder/spritesheet.png', join(directory, 'spritesheet.png'));
+  }
   if (test.info().title.startsWith('long pickers')) for (let index = 0; index < 12; index++) {
     const id = `extra-${index}`, directory = join(profile, 'pets', id); mkdirSync(directory, { recursive: true });
     writeFileSync(join(directory, 'pet.json'), JSON.stringify({ id, displayName: `Extra ${index}`, description: '', spritesheetPath: 'spritesheet.png' }));
     copyFileSync('assets/pets/placeholder/spritesheet.png', join(directory, 'spritesheet.png'));
   }
   const env: Record<string, string> = {};
-  for (const key of ['PATH', 'HOME', 'TMPDIR', 'USER', 'LOGNAME', 'DISPLAY']) if (process.env[key]) env[key] = process.env[key]!;
+  for (const key of ['PATH', 'HOME', 'TMPDIR', 'USER', 'LOGNAME', 'DISPLAY', 'SystemRoot', 'WINDIR', 'TEMP', 'TMP', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'ComSpec', 'PATHEXT']) if (process.env[key]) env[key] = process.env[key]!;
   Object.assign(env, { POCKYMOE_DESKTOP_E2E: '1', POCKYMOE_DESKTOP_USER_DATA: profile, POCKYMOE_DESKTOP_WEB_ORIGIN: origin, POCKYMOE_DESKTOP_RELAY_ORIGIN: origin });
-  app = await electron.launch({ args: [resolve('.')], env });
+  app = await electron.launch({ ...(process.env.POCKYMOE_PACKAGED_EXECUTABLE ? { executablePath: process.env.POCKYMOE_PACKAGED_EXECUTABLE, args: process.env.POCKYMOE_DESKTOP_SCALE ? [`--force-device-scale-factor=${process.env.POCKYMOE_DESKTOP_SCALE}`] : [] } : { args: [resolve('.')] }), env });
+  await recordLifecycle(app, join(evidence, `lifecycle-${Date.now()}.jsonl`));
 });
 test.afterEach(async () => { await app?.close(); rmSync(profile, { recursive: true, force: true }); });
 async function pageAt(fragment: string): Promise<Page> {
-  await expect.poll(() => app.windows().some(page => page.url().includes(fragment))).toBe(true);
-  const page = app.windows().find(page => page.url().includes(fragment))!;
-  await page.waitForLoadState('domcontentloaded'); return page;
+  return windowAt(app, fragment);
 }
 async function mode(pack = 'classic', effective: 'light' | 'dark' = 'light'): Promise<void> {
   await app.evaluate((_e, value) => globalThis.__pockymoeDesktopTest.appearance.sync(value), { pack, effective, accent: pack === 'terminal' ? '#31bd84' : pack === 'plum-pocket' ? '#d99d36' : '#37856d', locale: 'en' } satisfies Appearance);
@@ -63,12 +69,12 @@ test('custom pickers support keyboard, pet thumbnails/credits and recent quick t
   await expect(prefs.locator('#petEdgeHide')).toBeChecked(); await prefs.locator('#petEdgeHide').uncheck();
   await expect.poll(() => app.evaluate(() => globalThis.__pockymoeDesktopTest.settings.get().petEdgeHide)).toBe(false);
   await prefs.getByRole('button', { name: 'Choose pet', exact: true }).click();
-  const dragon = prefs.getByRole('option').filter({ hasText: 'ouyang070125-cmyk' }); await expect(dragon).toBeVisible();
+  const dragon = prefs.getByRole('option').filter({ hasText: 'Fixture Artist' }); await expect(dragon).toBeVisible();
   await expect.poll(() => dragon.locator('img').evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth > 0)).toBe(true);
-  await dragon.click(); await expect(prefs.locator('.pet-credit')).toContainText('CC BY 4.0');
+  await dragon.click(); await expect(prefs.locator('.pet-credit')).toContainText('CC0');
   await expect(prefs.locator('.pet-credit [data-external]')).toHaveCount(2);
   await app.evaluate(() => globalThis.__pockymoeDesktopTest.windows.createLocal('about'));
-  await expect((await pageAt('view=about')).locator('section')).toContainText('ouyang070125-cmyk');
+  await expect((await pageAt('view=about')).locator('section')).toContainText('Fixture Artist');
   await app.evaluate(() => {
     globalThis.__pockymoeDesktopTest.hub.sync({ version: 1, accountId: 'recent', generatedAt: new Date().toISOString(), focusedThreadKey: null, items: [], syncedDeviceIds: [], recent: [{ key: 'old:recent', deviceId: 'old', deviceName: 'Older device', workspaceLabel: '21 workspaces', threadId: 'recent', title: 'Recently opened conversation' }] });
     globalThis.__pockymoeDesktopTest.windows.createLocal('quick');
@@ -101,6 +107,11 @@ test('long pickers scroll within the overlay and keep keyboard options visible',
 test('close-to-tray keeps the Web activity source running while unfocused', async () => {
   const web = await pageAt(origin);
   expect(await app.evaluate(() => globalThis.__pockymoeDesktopTest.windows.main().webContents.getBackgroundThrottling())).toBe(false);
+  expect(await app.evaluate(() => {
+    const window = globalThis.__pockymoeDesktopTest.windows.createMain();
+    window.close(); window.emit('ready-to-show');
+    const visible = window.isVisible(); window.destroy(); return visible;
+  })).toBe(false);
   await app.evaluate(() => globalThis.__pockymoeDesktopTest.windows.main().close());
   expect(await app.evaluate(() => globalThis.__pockymoeDesktopTest.windows.main().isVisible())).toBe(false);
   await expect.poll(() => web.evaluate(() => document.visibilityState)).toBe('visible');
@@ -132,5 +143,45 @@ test('compact local surfaces in all packs, modes and desktop/narrow widths', asy
       if (section === 'pet') { await prefs.locator('#petId').click(); await capture(prefs, `preferences-picker-${pack}-${effective}`); await prefs.keyboard.press('Escape'); }
     }
     await capture(quick, `quick-${pack}-${effective}`); await capture(about, `about-${pack}-${effective}`);
+  }
+});
+
+test('local confirmations trap and restore focus, cancel safely and follow every theme', async () => {
+  test.setTimeout(120_000);
+  await pageAt(origin);
+  await app.evaluate(() => globalThis.__pockymoeDesktopTest.windows.createLocal('preferences'));
+  const prefs = await pageAt('view=preferences');
+  for (const pack of ['classic', 'plum-pocket', 'terminal']) for (const effective of ['light', 'dark'] as const) {
+    await mode(pack, effective);
+    await prefs.locator('#update').focus();
+    // Exercise the Windows local renderer/queue on Mac too, without replacing Mac's native dialog path.
+    await app.evaluate(() => {
+      const runtime = globalThis.__pockymoeDesktopTest;
+      void runtime.messages.show({ title: 'Pockymoe', message: 'Update available', detail: 'Isolated confirmation fixture', buttons: ['Download', 'Later'], cancelId: 1, defaultId: 1 }, runtime.windows.createLocal('preferences')).then(result => { runtime.lastMessageResponse = result.response; });
+    });
+    const prompt = prefs.getByRole('dialog'); await expect(prompt).toBeVisible();
+    await expect(prompt.getByRole('button', { name: 'Later', exact: true })).toBeFocused();
+    await prefs.keyboard.press('Tab'); await expect(prompt.getByRole('button', { name: 'Download', exact: true })).toBeFocused();
+    await prefs.keyboard.press('Shift+Tab'); await expect(prompt.getByRole('button', { name: 'Later', exact: true })).toBeFocused();
+    await capture(prefs, `preferences-confirmation-${pack}-${effective}`);
+    await app.evaluate(() => [...globalThis.__pockymoeDesktopTest.windows.local].find(([, role]) => role === 'preferences')![0].setContentSize(660, 500));
+    await expect.poll(() => prefs.evaluate(() => innerWidth)).toBe(660);
+    await prefs.keyboard.press('Escape'); await expect(prompt).toHaveCount(0);
+    await expect.poll(() => app.evaluate(() => globalThis.__pockymoeDesktopTest.lastMessageResponse)).toBe(1);
+    await expect(prefs.locator('#update')).toBeFocused();
+  }
+});
+
+
+// Skip before fixtures start Electron; the locale repair is Windows-only.
+test('empty quick reply placeholder follows language changes', async () => {
+  await pageAt(origin);
+  await mode();
+  await app.evaluate(() => globalThis.__pockymoeDesktopTest.windows.createLocal('quick'));
+  const quick = await pageAt('view=quick');
+  await expect(quick.locator('#reply')).toBeDisabled();
+  for (const locale of ['zh-CN', 'en']) {
+    await app.evaluate((_electron, locale) => globalThis.__pockymoeDesktopTest.appearance.sync({ pack: 'classic', effective: 'light', accent: '#a57224', locale }), locale);
+    await expect(quick.locator('#reply')).toHaveAttribute('placeholder', locale === 'en' ? 'Quick reply to the selected thread…' : '给选中的线程快速回复…');
   }
 });

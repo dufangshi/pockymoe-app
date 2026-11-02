@@ -32,4 +32,6 @@ __pycache__/
 ios/.build/
 .local-*.log
 
+# Local task evidence and pnpm cache
 .scratch/
+.pnpm-store/

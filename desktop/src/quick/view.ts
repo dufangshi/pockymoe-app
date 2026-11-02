@@ -89,7 +89,7 @@ export function mountQuick(root: HTMLElement, initial: LocalState): void {
     }
     selected = visible.find(item => conversationKey(item) === selectedConversation)?.key ?? visible[0]?.key ?? null;
     list.scrollTop = scrollTop;
-    if (selected) select(selected);
+    if (selected) select(selected); else reply.placeholder = t('给选中的线程快速回复…');
     reply.disabled = !selected; send.disabled = !selected;
     fit();
   };
