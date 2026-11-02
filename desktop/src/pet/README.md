@@ -99,3 +99,9 @@ names and, optionally, `sleeping.webp` and `clips/*.webp`, and nothing else. Imp
 with an id already imported replaces it; built-in ids are refused. `art/tools/build_clip_pack.py`
 writes such a zip from alpha WebM videos, and `art/tools/build_pose_clips.py` from generated
 pose sheets, turning a few drawings into motion.
+
+`remoteCodex.sizeScale` (0.5 to 2) multiplies the window height for a pack, because a slender
+adult figure needs more height than a chibi to read at the same size. In a pose plan, `grid`,
+`width`, `height` and `sizeScale` set the sheet layout and cell, `wind` adds hair and veil drift,
+`effects` keeps separate marks such as a floating light, and a beat's `face` paints only the face
+of another pose, so a blink doesn't redraw every strand of hair.

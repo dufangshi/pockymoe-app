@@ -14,7 +14,6 @@ import { StableMood, withoutResolvedRequest } from './stability';
 import { configureOverlay, glassOptions } from './windows';
 import type { PetAction, PetCue, PetViewState } from './bridge';
 
-const petHeight = (value: Pick<DesktopSettings, 'petMini' | 'petSize'>): number => value.petMini ? MINI_HEIGHT : PET_HEIGHT[value.petSize];
 type Command = HostCommand extends infer C ? C extends { id: string } ? Omit<C, 'id'> : never : never;
 export function createPetController(deps: PetControllerDeps): PetController {
   const userPets = join(app.getPath('userData'), 'pets'), positionFile = join(app.getPath('userData'), 'pet-positions.json');
@@ -50,6 +49,7 @@ export function createPetController(deps: PetControllerDeps): PetController {
   let drag: { x: number; y: number; origin: PetPosition; moved: boolean } | null = null;
   const completedConversations = new Map<string, number>();
   const primary = screen.getPrimaryDisplay();
+  const petHeight = (value: Pick<DesktopSettings, 'petMini' | 'petSize'>): number => Math.round((value.petMini ? MINI_HEIGHT : PET_HEIGHT[value.petSize]) * (pack?.manifest.remoteCodex?.sizeScale ?? 1));
   let position = restorePosition(positions[String(lastDisplayId ?? primary.id)], screen.getAllDisplays(), primary, petHeight(settings));
   dockAmount = position.edge && settings.petEdgeHide !== false ? 1 : 0;
   const preload = join(__dirname, '../preload/pet.js');
@@ -85,6 +85,14 @@ export function createPetController(deps: PetControllerDeps): PetController {
     const bounds = surfaceLayout(window.getBounds(), display().workArea, glassSize.width, glassSize.height, glassSide);
     const before = glass.getBounds();
     if (Object.keys(bounds).some(key => bounds[key as keyof typeof bounds] !== before[key as keyof typeof before])) glass.setBounds(bounds);
+  }
+  // The size depends on the settings and on the pack, which can change independently.
+  let appliedHeight = petHeight(settings);
+  function applyPetSize(): void {
+    const height = petHeight(settings);
+    if (height === appliedHeight) return;
+    appliedHeight = height;
+    position = restorePosition(position, screen.getAllDisplays(), screen.getPrimaryDisplay(), height); placeSprite(); savePosition();
   }
   function closeSurface(): void { panel = false; menu = false; detailOpen = false; controlsPinned = false; mode = 'controls'; glassDismissed = true; emit(); }
   function play(audio: Uint8Array): void { if (readySprite && !window.isDestroyed()) window.webContents.send('rcDesktop:pet:speech', audio); }
@@ -180,7 +188,7 @@ export function createPetController(deps: PetControllerDeps): PetController {
     if (disposed) return;
     packs = candidates.filter((_, index) => valid[index]);
     pack = packs.find(candidate => candidate.manifest.id === settings.petId) ?? packs.find(candidate => candidate.manifest.id === 'moe') ?? packs[0];
-    moodEpoch++;
+    moodEpoch++; applyPetSize();
     error = pack ? null : t('没有可用的宠物包。', {}, uiLocale); emit();
   }
   function acknowledgeKey(key: string, capturedItem?: ActivityItem): void {
@@ -324,14 +332,14 @@ export function createPetController(deps: PetControllerDeps): PetController {
     }
     emit();
   }), deps.hub.onAcknowledge(id => { bubbles.acknowledge(id, Date.now()); emit(); }), deps.settings.onChange(next => {
-    const sizeChanged = petHeight(settings) !== petHeight(next), packChanged = settings.petId !== next.petId;
+    const packChanged = settings.petId !== next.petId;
     const soundOn = next.petSound && !settings.petSound, voiceOn = next.petVoice && !settings.petVoice;
     settings = next; visible = next.petVisible;
     // Turning a cue on previews it, so the setting's effect is obvious.
     if (soundOn) cue('completed');
     if (voiceOn) cue(undefined, t('语音播报已打开', {}, uiLocale));
-    if (sizeChanged) { position = restorePosition(position, screen.getAllDisplays(), screen.getPrimaryDisplay(), petHeight(next)); placeSprite(); savePosition(); }
     if (packChanged) { pack = packs.find(candidate => candidate.manifest.id === next.petId) ?? pack; if (!packs.some(candidate => candidate.manifest.id === next.petId)) void refreshPacks(); }
+    applyPetSize();
     if (visible && readySprite && !window.isVisible()) window.showInactive();
     if (!visible) { window.hide(); glass.hide(); bubbles.clear(); panel = false; menu = false; }
     emit();

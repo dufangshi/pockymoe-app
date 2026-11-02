@@ -33,7 +33,15 @@ def clean(im):
 
 
 def chroma_key(path):
-    a = np.array(Image.open(path).convert('RGB')).astype(np.float32)
+    source = Image.open(path)
+    # Answered with real transparency: keep that alpha, and only take out the green cast it
+    # picked up. Keying it again over green leaves magenta fringes on anything sheer.
+    if source.mode == 'RGBA' and source.getchannel('A').getextrema()[0] < 255:
+        a = np.array(source).astype(np.float32)
+        a[..., 1] = np.minimum(a[..., 1], np.maximum(a[..., 0], a[..., 2]))
+        a[a[..., 3] <= 0] = 0
+        return Image.fromarray(a.astype(np.uint8), 'RGBA')
+    a = np.array(source.convert('RGB')).astype(np.float32)
     r, g, b = a[..., 0], a[..., 1], a[..., 2]
     excess = g - np.maximum(r, b)
     alpha = 1 - np.clip((excess - 40) / 90, 0, 1)
@@ -47,7 +55,7 @@ def chroma_key(path):
     return Image.fromarray(out.astype(np.uint8), 'RGBA')
 
 
-def slice_sheet(path, cols=4, rows=3, chroma=False):
+def slice_sheet(path, cols=4, rows=3, chroma=False, effects=False):
     im = clean(chroma_key(path) if chroma else Image.open(path))
     alpha = np.array(im)[..., 3] > 0
     # A keyed sheet has no separate effects to gather up, and big hair can nearly touch the next pose.
@@ -66,7 +74,7 @@ def slice_sheet(path, cols=4, rows=3, chroma=False):
     for comps in cells:
         mask = np.zeros_like(alpha)
         # A keyed sheet has no effects outside the character, so anything apart from it is residue.
-        for sl, i, _ in ([max(comps, key=lambda c: c[2])] if chroma else comps):
+        for sl, i, _ in ([max(comps, key=lambda c: c[2])] if chroma and not effects else comps):
             mask[sl] |= (lab[sl] == i)
         mask &= alpha
         ys, xs = np.nonzero(mask)

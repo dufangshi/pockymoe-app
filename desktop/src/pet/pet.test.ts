@@ -162,6 +162,9 @@ describe('v3 atlas and fixed-window regressions', () => {
     expect(parseManifest(manifest({ running: [{ path: 'clips/work.webp', frames: 48 }] })).remoteCodex?.clips?.running?.[0]?.frames).toBe(48);
     for (const bad of [{ running: [{ path: '../secret.webp', frames: 4 }] }, { running: [{ path: 'clips/a/b.webp', frames: 4 }] }, { running: [{ path: 'clips/a.png', frames: 4 }] }, { running: [{ path: 'clips/a.webp', frames: 0 }] }, { other: [{ path: 'clips/a.webp', frames: 4 }] }, { running: [] }]) expect(() => parseManifest(manifest(bad)), JSON.stringify(bad)).toThrow();
     expect(() => parseManifest(manifest({ running: [{ path: 'clips/a.webp', frames: 4 }] }, { fps: 0, columns: 12, width: 240, height: 260 }))).toThrow();
+    const sized = (sizeScale: unknown): Buffer => Buffer.from(JSON.stringify({ ...base, remoteCodex: { sizeScale } }));
+    expect(parseManifest(sized(1.4)).remoteCodex?.sizeScale).toBe(1.4);
+    for (const bad of [0.2, 3, 'big']) expect(() => parseManifest(sized(bad)), String(bad)).toThrow('sizeScale');
   });
   it('imports one zip with the whole pet, clips included, and replaces it when imported again', async () => {
     const temp = await mkdtemp(join(tmpdir(), 'pet-zip-'));
