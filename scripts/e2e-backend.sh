@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
+umask 077
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CODEX="${REMOTE_CODEX_ROOT:-$HOME/dev/remoteCodex}"
-BIN="${REMOTE_CODEX_BIN:-$CODEX/target/debug/remote-codex}"
+DEFAULT_BIN="$CODEX/target/debug/pockymoe"
+[[ -x "$DEFAULT_BIN" ]] || DEFAULT_BIN="$CODEX/target/debug/remote-codex"
+BIN="${REMOTE_CODEX_BIN:-$DEFAULT_BIN}"
 WEB_DIST="${REMOTE_CODEX_RELAY_WEB_DIST_DIR:-$CODEX/apps/supervisor-web/dist}"
 DATA="$ROOT/.local/e2e"
 ENV_FILE="$ROOT/.local/e2e-env.json"
@@ -11,6 +14,8 @@ PID_FILE="$ROOT/.local/e2e-pids"
 PORT="${E2E_RELAY_PORT:-18790}"
 SUPERVISOR_PORT="${E2E_SUPERVISOR_PORT:-18791}"
 RELAY="http://127.0.0.1:${PORT}"
+WEB_PORT="${E2E_WEB_PORT:-$PORT}"
+WEB_URL="http://127.0.0.1:${WEB_PORT}"
 USERNAME="${E2E_USERNAME:-mobile}"
 PASSWORD="${E2E_PASSWORD:-mobile-pass-1}"
 
@@ -41,9 +46,27 @@ start() {
     echo 'An E2E backend is already recorded. Stop it before starting another.' >&2
     exit 1
   fi
+  python3 - "$PORT" "$SUPERVISOR_PORT" "$WEB_PORT" <<'PYPORT'
+import socket, sys
+ports = set(map(int, sys.argv[1:]))
+if 45679 in ports:
+    raise SystemExit('Refusing the managed Supervisor port for E2E')
+sockets = []
+try:
+    for port in ports:
+        sock = socket.socket()
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.bind(('127.0.0.1', port))
+        sockets.append(sock)
+except OSError:
+    raise SystemExit('An isolated E2E port is already in use')
+finally:
+    for sock in sockets: sock.close()
+PYPORT
+  rm -f "$ENV_FILE"
   DATA="$(mktemp -d "$ROOT/.local/e2e.XXXXXX")"
   # Never inherit a managed thread's production database, relay or credentials.
-  for name in ${!REMOTE_CODEX_@}; do unset "$name"; done
+  for name in ${!REMOTE_CODEX_@} ${!POCKYMOE_@}; do unset "$name"; done
   mkdir -p "$DATA/workspaces/mobile-ws"
   echo "# mobile e2e workspace" > "$DATA/workspaces/mobile-ws/README.md"
 
@@ -53,6 +76,7 @@ start() {
     REMOTE_CODEX_RELAY_DATA_DIR="$DATA/relay" \
     REMOTE_CODEX_RELAY_WEB_DIST_DIR="$WEB_DIST" \
     REMOTE_CODEX_RELAY_REGISTRATION_ENABLED=true \
+    POCKYMOE_WEB_ORIGIN="$WEB_URL" \
     "$BIN" relay >"$DATA/relay.log" 2>&1 &
   echo $! >> "$PID_FILE"
   for _ in $(seq 1 80); do
@@ -62,7 +86,13 @@ start() {
     sleep 0.25
   done
   curl -sf "$RELAY/healthz" >/dev/null
+  if [[ "$WEB_PORT" != "$PORT" ]]; then
+    python3 "$ROOT/scripts/e2e-web.py" "$WEB_DIST" "$WEB_PORT" > "$DATA/web.log" 2>&1 &
+    echo $! >> "$PID_FILE"
+  fi
 
+  E2E_FIXTURE_PASSWORD="$PASSWORD" E2E_FIXTURE_USERNAME="$USERNAME" \
+    node "$ROOT/scripts/e2e-account.mjs" "$CODEX/apps/supervisor-web/package.json" "$DATA/account.json"
   python3 - "$RELAY" "$USERNAME" "$PASSWORD" "$DATA" "$ENV_FILE" "$PORT" <<'PY'
 import json, sys, urllib.request, pathlib, time
 relay, username, password, data_dir, env_file, port = sys.argv[1:7]
@@ -84,23 +114,16 @@ def req(method, path, body=None, token=None):
         except Exception:
             raise SystemExit(f"{method} {path}: {error.code} {raw}") from error
 
-reg = req("POST", "/relay/auth/register", {
-    "email": "mobile@example.com",
-    "username": username,
-    "password": password,
-})
+reg = req("POST", "/relay/auth/register", json.loads(pathlib.Path(data_dir, "account.json").read_text()))
 token = reg.get("token") or ""
 if not token:
-    login = req("POST", "/relay/auth/login", {"identifier": username, "password": password})
-    token = login.get("token") or ""
-if not token:
-    raise SystemExit(f"unable to obtain relay user token: {reg}")
+    raise SystemExit("unable to obtain isolated relay session")
 created = req("POST", "/relay/devices", {"name": "e2e-phone"}, token)
 device = created.get("device") or {}
 device_id = device.get("id")
 device_token = created.get("token") or device.get("token")
 if not device_id or not device_token:
-    raise SystemExit(f"unable to create device: {created}")
+    raise SystemExit("unable to create isolated test device")
 pathlib.Path(data_dir, "provision.json").write_text(json.dumps({
     "token": token,
     "deviceId": device_id,
@@ -146,9 +169,9 @@ PY
   done
 
   DEVICE_API="$RELAY/relay/devices/$DEVICE_ID/api"
-  python3 - "$RELAY" "$TOKEN" "$DEVICE_ID" "$DATA" "$ENV_FILE" "$PORT" "$USERNAME" "$PASSWORD" "$DEVICE_TOKEN" <<'PY'
+  python3 - "$RELAY" "$TOKEN" "$DEVICE_ID" "$DATA" "$ENV_FILE" "$PORT" "$USERNAME" "$PASSWORD" "$DEVICE_TOKEN" "$WEB_URL" <<'PY'
 import json, sys, urllib.request, pathlib
-relay, token, device_id, data_dir, env_file, port, username, password, device_token = sys.argv[1:10]
+relay, token, device_id, data_dir, env_file, port, username, password, device_token, web_url = sys.argv[1:11]
 workspace_path = str(pathlib.Path(data_dir) / "workspaces" / "mobile-ws")
 headers = {"content-type": "application/json", "authorization": f"Bearer {token}"}
 body = json.dumps({"absPath": workspace_path, "label": "mobile-ws"}).encode()
@@ -158,6 +181,7 @@ with urllib.request.urlopen(request) as response:
     workspace = json.loads(response.read().decode())
 env = {
     "relayUrl": relay,
+    "webUrl": web_url,
     "relayPort": int(port),
     "username": username,
     "password": password,

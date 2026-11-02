@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.RemoteCodex" parent="Base.Theme.RemoteCodex">
+        <item name="android:windowSplashScreenBackground">#FAFAF8</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@android:color/transparent</item>
+    </style>
+</resources>
