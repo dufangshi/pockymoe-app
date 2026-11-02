@@ -1,15 +1,25 @@
 diff --git a/lib/coreBundle.js b/lib/coreBundle.js
-index 6893f1cf133efec2c5dccc35c77cc7a53870ccbc..50a7fe0247ed2631ba7897508f7e1f0e0253b53c 100644
 --- a/lib/coreBundle.js
 +++ b/lib/coreBundle.js
-@@ -45622,7 +45622,9 @@ var init_electron = __esm({
+@@ -45620,9 +45620,11 @@
+         this.emit(_ElectronApplication.Events.Console, message);
        }
-       async initialize() {
+-      async initialize() {
++      async initialize(injectedLoader) {
          await this._nodeSession.send("Runtime.enable", {});
 -        await this._nodeSession.send("Runtime.evaluate", { expression: "__playwright_run()" });
-+        await this._nodeSession.send("Runtime.evaluate", {
++        if (injectedLoader) await this._nodeSession.send("Runtime.evaluate", {
 +          expression: "(() => { const start = () => { if (typeof __playwright_run !== 'function') return setImmediate(start); void __playwright_run(); }; start(); })()"
 +        });
        }
        process() {
          return this._process;
+@@ -45771,7 +45773,7 @@
+           validateBrowserContextOptions(contextOptions, browserOptions);
+           const browser = await progress2.race(CRBrowser.connect(this.attribution.playwright, chromeTransport, browserOptions));
+           app = new ElectronApplication(this, browser, nodeConnection, launchedProcess);
+-          await progress2.race(app.initialize());
++          await progress2.race(app.initialize(!options.executablePath));
+           return app;
+         } catch (error) {
+           await progress2.race(kill());
