@@ -132,7 +132,7 @@ export class VoiceService {
       const text = result.ok ? result.data as { request?: unknown; answer?: unknown } : {};
       const answer = typeof text.answer === 'string' && text.answer.trim() ? text.answer : item.resultSummary ?? '';
       if (!answer.trim()) return null;
-      const line = await this.complete({ title: item.rootThreadTitle ?? item.title, request: typeof text.request === 'string' ? text.request : '', answer, failed: event.type === 'failed' });
+      const line = await this.complete({ title: item.rootThreadTitle ?? item.title, workspace: item.workspaceLabel, request: typeof text.request === 'string' ? text.request : '', answer, failed: event.type === 'failed' });
       if (this.summaryState.lastError) this.setSummaryState({ lastError: null });
       return line;
     } catch (error) { this.setSummaryState({ lastError: message(error) }); return null; }
@@ -142,8 +142,8 @@ export class VoiceService {
     const zh = getLocale().toLowerCase().startsWith('zh');
     try {
       const line = await this.complete(zh
-        ? { title: '修复登录白屏', failed: false, request: '登录后页面白屏，帮我查一下并修好。', answer: '原因是登录回调里读取了尚未加载的用户信息，导致渲染报错。我在 src/auth/callback.ts 里加了加载判断，并补了两个回归测试，全部通过。白屏已修复。这次没有改接口，部署前端即可生效。' }
-        : { title: 'Fix blank page after sign-in', failed: false, request: 'The page is blank after signing in. Please find out why and fix it.', answer: 'The sign-in callback read user data before it had loaded, which crashed rendering. I added a loading check in src/auth/callback.ts and two regression tests, which pass. The blank page is fixed. No API changed, so deploying the frontend is enough.' });
+        ? { title: '修复登录白屏', workspace: 'web-app', failed: false, request: '登录后页面白屏，帮我查一下并修好。', answer: '原因是登录回调里读取了尚未加载的用户信息，导致渲染报错。我在 src/auth/callback.ts 里加了加载判断，并补了两个回归测试，全部通过。白屏已修复。这次没有改接口，部署前端即可生效。' }
+        : { title: 'Fix blank page after sign-in', workspace: 'web-app', failed: false, request: 'The page is blank after signing in. Please find out why and fix it.', answer: 'The sign-in callback read user data before it had loaded, which crashed rendering. I added a loading check in src/auth/callback.ts and two regression tests, which pass. The blank page is fixed. No API changed, so deploying the frontend is enough.' });
       this.setSummaryState({ sample: line, lastError: null });
       return line;
     } catch (error) { const reason = message(error); this.setSummaryState({ sample: null, lastError: reason }); throw new Error(reason); }
