@@ -7,10 +7,12 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		0E8B0C2EFD3AF0011C0ED961 /* ServiceConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA6A15864472521881E74D70 /* ServiceConfiguration.swift */; };
 		1540DB8F3CC5DFE9A756A79D /* LiveActivityManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E0B081B8892FF8A5DA5AD32 /* LiveActivityManager.swift */; };
 		1D191C622281756DCAE00D3C /* ActivityViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 07A4E5B86D3DBAE2FA3F2313 /* ActivityViews.swift */; };
 		2BC38719673855FDB85615D1 /* DebugIslandRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F1682ED2867F79C0C7A4B99 /* DebugIslandRenderer.swift */; };
 		2CEB81250ABEA6950FA5BAA0 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = F532EE5C43393D122FF82300 /* Assets.xcassets */; };
+		332CC805BA5C266BD55A2B96 /* ServiceConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA6A15864472521881E74D70 /* ServiceConfiguration.swift */; };
 		35D9A9DFB08B00EFCD65B348 /* LiveActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = AAB66863196DD3C9904D04C6 /* LiveActivityAttributes.swift */; };
 		4F859B3781AFA046F4BFC4AD /* RemoteCodexUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20B8D46B37DE808A09C6B86E /* RemoteCodexUITests.swift */; };
 		5D77C28F4FA6EB4924918755 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = F532EE5C43393D122FF82300 /* Assets.xcassets */; };
@@ -72,6 +74,7 @@
 		998245FEBFC45F287E6EFE6E /* MobileApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileApp.swift; sourceTree = "<group>"; };
 		AAB66863196DD3C9904D04C6 /* LiveActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveActivityAttributes.swift; sourceTree = "<group>"; };
 		D67D00DBC5982FA5D9BADB3F /* ShellController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShellController.swift; sourceTree = "<group>"; };
+		DA6A15864472521881E74D70 /* ServiceConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServiceConfiguration.swift; sourceTree = "<group>"; };
 		E73A168D7BF987C354EE4D65 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		E9A46A460D4C17C4542E57D1 /* DebugHarness.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugHarness.swift; sourceTree = "<group>"; };
 		F532EE5C43393D122FF82300 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
@@ -92,6 +95,7 @@
 				035C7B10E9EF4FF34C3B7001 /* ActivityPolicy.swift */,
 				07A4E5B86D3DBAE2FA3F2313 /* ActivityViews.swift */,
 				AAB66863196DD3C9904D04C6 /* LiveActivityAttributes.swift */,
+				DA6A15864472521881E74D70 /* ServiceConfiguration.swift */,
 			);
 			path = Shared;
 			sourceTree = "<group>";
@@ -304,6 +308,7 @@
 				AD3903EA9E47A4842A1A8585 /* ActivityViews.swift in Sources */,
 				35D9A9DFB08B00EFCD65B348 /* LiveActivityAttributes.swift in Sources */,
 				99BBA5F2F9FC392476FEA35C /* PockymoeLiveActivity.swift in Sources */,
+				332CC805BA5C266BD55A2B96 /* ServiceConfiguration.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -318,6 +323,7 @@
 				75E5220690D6D8DF49C4E2F5 /* LiveActivityAttributes.swift in Sources */,
 				1540DB8F3CC5DFE9A756A79D /* LiveActivityManager.swift in Sources */,
 				A782ADD590E7763C3EB388F9 /* MobileApp.swift in Sources */,
+				0E8B0C2EFD3AF0011C0ED961 /* ServiceConfiguration.swift in Sources */,
 				6FDD22B72356B49ABE18A4AA /* ShellController.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

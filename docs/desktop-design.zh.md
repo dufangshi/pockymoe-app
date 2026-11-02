@@ -11,7 +11,7 @@ v2 取代 v1。v1 是在一个落后上游 800 个提交的旧基线上写的。
   - appId `com.pockymoe.desktop`；
   - 页面桥 `window.pockymoeHost`。
   旧名只保留在 `docs/rename-pockymoe.md` 规定的地方。
-- Web UI 部署在 GitHub Pages：`https://app.lnz-study.com`。Relay 只提供 API：`https://remote.lnz-study.com`。
+- Web UI 与 Relay 地址由用户配置，没有默认地址。连接页使用 `https://app.example.com` 作为占位符；Relay 可独立配置。
   桌面主窗口加载 **Web 源**；APNs 注册走 **Relay 源**。
 - 以上游 `docs/ui-principles.md` 为准，它对每一处 UI 改动都有约束。其中与本文关系最大的几条：
   - 一类操作只有一种做法；

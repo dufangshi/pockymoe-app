@@ -81,7 +81,7 @@ first-launch initialization before it can run.
 
 For encrypted thread/file routing, iOS requires Service Workers. The shell uses
 `limitsNavigationsToAppBoundDomains`, with `WKAppBoundDomains` in both plists.
-The default Web domain and loopback hosts are included. Add a self-hosted **Web**
+The example Web domain and loopback hosts are included. Add a self-hosted **Web**
 domain to both plists when building for it; iOS does not permit this allowlist to
 be changed at runtime. This does not restrict the Relay origin that Web calls.
 The WebView obtains physical safe insets from the outer SwiftUI geometry so
@@ -159,3 +159,34 @@ can otherwise leave a dark backing color behind a light page on the next launch.
 its arguments, waits for scripted readiness and stops the recording in one run.
 Use one script batch per app instance; capture/launch scripts must not run while
 another batch is still executing.
+
+## Service selection and release prerequisites
+
+Fresh installs have no service or Relay address. The connection form shows an
+empty service field with `https://app.example.com` as its placeholder. Advanced
+expands a separate Relay field; leaving it empty uses the service origin. Both
+origins are validated and normalized before saving. The bridge reports the pair
+through `settings.get()`. Web integrations must consume that pair (or publish the
+matching Relay in their build); selecting a separate Relay in the shell cannot
+rewrite a Web deployment's compiled network configuration.
+
+Existing installs keep `relay_url`, the old preference name now holding their
+service origin. Without a saved separate Relay, that same origin remains the
+Relay. There is no migration to a new endpoint. Placeholder app-bound hosts in the
+plists are examples, not a service to contact. An operator building a signed app
+must include its actual Web host to enable iOS Service Workers. Arbitrary Web
+hosts cannot be added to the signed app-bound list at runtime; existing stored
+addresses remain saved, but encrypted routing on a host absent from that list
+needs a build configured for that host. No production address is packaged here.
+
+Signing an installable iOS IPA requires matching provisioning profiles for the
+main app (`com.remotecodex.app`) and Widget extension
+(`com.remotecodex.app.liveactivity`). The main app profile must allow Push
+Notifications (`aps-environment`) and the registered App Group
+`group.com.remotecodex.app`; the extension profile must allow that same group.
+Local Live Activities use `NSSupportsLiveActivities` rather than an additional
+signing entitlement. Live Activity APNs updates also need the main app's APNs
+configuration and a sender for its liveactivity push topic. A simulator ad-hoc
+signature is not an installable-device distribution signature. A development
+identity alone cannot replace missing provisioning profiles or an Apple
+Distribution identity for App Store/TestFlight/ad-hoc distribution.

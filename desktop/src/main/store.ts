@@ -8,7 +8,7 @@ import { relayOrigin } from './security';
 import { parseExtra, voiceEndpoint } from './voice/remote';
 
 export const defaults: DesktopSettings = {
-  webOrigin: 'https://app.lnz-study.com', relayOrigin: 'https://remote.lnz-study.com', alertMode: 'petFirst', petVisible: true,
+  webOrigin: '', relayOrigin: '', alertMode: 'petFirst', petVisible: true,
   petId: 'moe', petSize: 'M', petMini: false, petSound: true, petVoice: false, petVoiceProvider: 'local', petVoiceSpeaker: DEFAULT_SPEAKER, petVoiceSpeed: 1, petVoiceRemotes: {}, petVoiceSummary: false, petSummaryConnection: null, petSummaryLanguage: 'auto', petMutes: [], petMuteAlerts: false, petEdgeHide: true, launchAtLogin: false,
   quickWindowShortcut: 'Alt+Space', snoozeUntil: null
 };
@@ -92,7 +92,8 @@ export class SettingsStore implements SettingsStoreLike {
   constructor(private path: string, overrides: Partial<Pick<DesktopSettings, 'webOrigin' | 'relayOrigin'>> = {}) {
     const stored = readJson(path) as Partial<DesktopSettings> | null;
     if (stored?.relayOrigin && !stored.webOrigin) stored.webOrigin = stored.relayOrigin === defaults.relayOrigin ? defaults.webOrigin : stored.relayOrigin;
-    this.firstRun = !stored && !overrides.webOrigin;
+    if (stored?.webOrigin === '') delete stored.webOrigin;
+    if (stored?.relayOrigin === '') delete stored.relayOrigin;
     // Sound used to be off and nearly inaudible; settings saved before petVoice existed get the new default.
     if (stored && stored.petVoice === undefined) stored.petSound = true;
     // The pack it named was replaced by an original one under a new id.
@@ -101,6 +102,7 @@ export class SettingsStore implements SettingsStoreLike {
     if (stored?.petId === 'gpt-dragon') stored.petId = RETIRED_PET_REPLACEMENT;
     try { this.value = { ...defaults, ...validateSettings(stored || {}) }; } catch { this.value = { ...defaults }; }
     this.value = { ...this.value, ...validateSettings(overrides) };
+    this.firstRun = !this.value.webOrigin;
   }
   get(): DesktopSettings { return { ...this.value }; }
   set(patch: Partial<DesktopSettings>): DesktopSettings {

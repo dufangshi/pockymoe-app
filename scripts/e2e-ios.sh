@@ -35,7 +35,7 @@ xcodebuild \
   -destination-timeout 30 \
   -test-timeouts-enabled YES \
   -maximum-test-execution-time-allowance 90 \
-  -only-testing:RemoteCodexUITests/RemoteCodexUITests \
+  -only-testing:"${IOS_ONLY_TESTING:-RemoteCodexUITests/RemoteCodexUITests}" \
   -resultBundlePath "$ROOT/.local/ios-results-$(date +%s).xcresult" \
   CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- \
   test

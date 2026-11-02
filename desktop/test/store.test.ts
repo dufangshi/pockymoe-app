@@ -7,7 +7,7 @@ it('round-trips all settings and rejects invalid patches without mutation', () =
   const dir = mkdtempSync(join(tmpdir(), 'rc-settings-'));
   try {
     const path = join(dir, 'settings.json'), store = new SettingsStore(path);
-    expect(store.firstRun).toBe(true); expect(store.get().petEdgeHide).toBe(true);
+    expect(store.firstRun).toBe(true); expect(store.get().webOrigin).toBe(''); expect(store.get().relayOrigin).toBe(''); expect(store.get().petEdgeHide).toBe(true);
     const settings = { ...defaults, webOrigin: 'https://web.example.com', relayOrigin: 'https://relay.example.com', alertMode: 'both' as const, petVisible: false,
       petId: 'another', petSize: 'L' as const, petMini: true, petSound: true, petEdgeHide: false, launchAtLogin: true,
       quickWindowShortcut: 'CommandOrControl+Shift+Space', snoozeUntil: '2100-01-01T00:00:00Z' };
@@ -32,7 +32,7 @@ it('persists unchanged defaults without recursively publishing identical setting
     const path = join(dir, 'settings.json'), store = new SettingsStore(path); let changes = 0;
     store.onChange(next => { changes++; store.set({ petVisible: next.petVisible }); });
     store.set({ petVisible: true });
-    expect(new SettingsStore(path).firstRun).toBe(false); expect(changes).toBe(0);
+    expect(new SettingsStore(path).firstRun).toBe(true); expect(changes).toBe(0);
     store.set({ petVisible: false }); expect(changes).toBe(1);
   } finally { rmSync(dir, { recursive: true }); }
 });

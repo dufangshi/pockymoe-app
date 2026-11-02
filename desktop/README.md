@@ -19,8 +19,7 @@ POCKYMOE_DESKTOP_RELAY_ORIGIN=http://127.0.0.1:18900 pnpm dev
 ```
 
 The ports above are examples; this package never starts or restarts a Supervisor.
-Defaults are Web `https://app.lnz-study.com` and Relay
-`https://remote.lnz-study.com`. `POCKYMOE_DESKTOP_USER_DATA` selects an isolated
+There is no default service or Relay address. `POCKYMOE_DESKTOP_USER_DATA` selects an isolated
 app profile. Setting Web origin bypasses first run. HTTPS is required except on
 loopback (`localhost`, `127.0.0.1`, `[::1]`).
 
@@ -33,9 +32,8 @@ QA command below are **not notarized** and are for local developer testing;
 normal distribution requires a Developer ID signature and notarization. Windows
 builds without an Authenticode certificate are unsigned.
 
-On first launch, enter your Pockymoe address. The normal hosted Web address is
-`https://app.lnz-study.com`; its Relay is `https://remote.lnz-study.com`. For a
-self-hosted installation, use **Advanced** to enter Web and Relay separately, or
+On first launch, enter your Pockymoe service address (`https://app.example.com`
+is an example placeholder). Use **Advanced** to enter Web and Relay separately, or
 use the same origin for both when the Relay also serves the UI. Sign in with your
 existing account; this client does not install or replace a device Supervisor.
 
@@ -71,8 +69,8 @@ changes. No new backend endpoint is required.
 The app is `Pockymoe` (`com.pockymoe.desktop`); `pockymoe://` is the primary
 protocol and `remotecodex://` is accepted for compatibility. Existing JSON
 settings under the old `Remote Codex` user-data directory are copied once if no
-Pockymoe settings exist. A v1 custom relay maps to both origins; the old production
-Relay default maps to the new production Web/Relay pair. Credentials/keys are
+Pockymoe settings exist. A v1 relay-only configuration maps its stored address to both origins; stored
+addresses are not replaced by a default. Credentials/keys are
 never inspected or copied by this migration. The session partition name remains
 `persist:remote-codex` to avoid changing its persisted identity.
 

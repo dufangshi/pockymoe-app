@@ -18,46 +18,34 @@ struct RemoteCodexApp: App {
 @MainActor
 final class ShellModel: ObservableObject {
     @Published var origin: String
+    @Published var relayOrigin: String
     var controller: ShellController?
     private var pendingPath: String?
     init() {
-        origin = (UserDefaults.standard.string(forKey: "relay_url").flatMap(Self.validOrigin))?.absoluteString ?? ""
+        let stored = ServiceConfiguration.stored(in: .standard)
+        origin = stored?.webOrigin ?? ""
+        relayOrigin = stored?.relayOrigin ?? ""
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("--uitesting") {
             origin = (ProcessInfo.processInfo.environment["E2E_RELAY_URL"].flatMap(Self.validOrigin))?.absoluteString ?? ""
+            relayOrigin = origin
         }
         #endif
         NotificationDelegate.shared.open = { [weak self] path, relay in
-            guard let self, relay == nil || relay.flatMap(Self.validOrigin)?.absoluteString == self.origin else { return }
+            guard let self, relay == nil || relay.flatMap(Self.validOrigin)?.absoluteString == self.relayOrigin else { return }
             self.pendingPath = path
             self.controller?.navigate(path)
         }
         UNUserNotificationCenter.current().delegate = NotificationDelegate.shared
     }
-    func connect(_ raw: String) -> Bool {
-        guard let url = Self.validOrigin(raw) else { return false }
-        origin = url.absoluteString
-        UserDefaults.standard.set(origin, forKey: "relay_url")
+    func connect(_ raw: String, relay: String) -> Bool {
+        guard let configuration = ServiceConfiguration(service: raw, relay: relay) else { return false }
+        configuration.save(in: .standard)
+        relayOrigin = configuration.relayOrigin
+        origin = configuration.webOrigin
         return true
     }
-    static func validOrigin(_ raw: String) -> URL? {
-        guard let url = URL(string: raw.trimmingCharacters(in: .whitespacesAndNewlines)),
-              url.host != nil, url.user == nil, url.password == nil,
-              url.query == nil, url.fragment == nil, ["", "/"].contains(url.path) else { return nil }
-        if url.scheme != "https" {
-            #if DEBUG
-            guard url.scheme == "http", ["localhost", "127.0.0.1", "::1"].contains(url.host!) else { return nil }
-            #else
-            return nil
-            #endif
-        }
-        var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
-        components?.scheme = url.scheme?.lowercased()
-        components?.host = url.host?.lowercased()
-        components?.path = ""
-        if url.port == (url.scheme == "https" ? 443 : 80) { components?.port = nil }
-        return components?.url
-    }
+    static func validOrigin(_ raw: String) -> URL? { ServiceConfiguration.validOrigin(raw) }
     func attach(_ controller: ShellController) {
         self.controller = controller
         controller.navigate(pendingPath ?? UserDefaults.standard.string(forKey: "shell.lastPath.\(origin)") ?? "/")
@@ -79,20 +67,35 @@ final class ShellModel: ObservableObject {
 struct ShellView: View {
     @ObservedObject var model: ShellModel
     let safeArea: EdgeInsets
-    @State private var address = "https://app.lnz-study.com"
+    @State private var address = ""
+    @State private var relayAddress = ""
+    @State private var advanced = false
     @State private var invalid = false
     var body: some View {
         if model.origin.isEmpty {
             VStack(alignment: .leading, spacing: 16) {
-                Text("连接 Relay").font(.headline)
-                TextField("Relay 地址", text: $address).textContentType(.URL).keyboardType(.URL)
+                Text("连接服务").font(.headline)
+                TextField("https://app.example.com", text: $address).textContentType(.URL).keyboardType(.URL)
                     .textInputAutocapitalization(.never).autocorrectionDisabled()
                     .padding(12).overlay(RoundedRectangle(cornerRadius: 8).stroke(.secondary))
-                    .accessibilityIdentifier("relayAddress")
+                    .accessibilityIdentifier("serviceAddress")
+                DisclosureGroup("高级", isExpanded: $advanced) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("单独的 Relay 地址").font(.subheadline)
+                        TextField("留空以使用服务地址", text: $relayAddress)
+                            .textContentType(.URL).keyboardType(.URL)
+                            .textInputAutocapitalization(.never).autocorrectionDisabled()
+                            .padding(12).overlay(RoundedRectangle(cornerRadius: 8).stroke(.secondary))
+                           .accessibilityIdentifier("separateRelayAddress")
+                    }.padding(.top, 8)
+                }
                 if invalid { Text("请输入有效的 HTTPS 地址").foregroundStyle(.red) }
-                Button("连接") { invalid = !model.connect(address) }.frame(minHeight: 44).accessibilityIdentifier("connectRelay")
+                Button("连接") { invalid = !model.connect(address, relay: relayAddress) }.frame(minHeight: 44).accessibilityIdentifier("connectRelay")
             }.padding(24).frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Color(uiColor: ShellController.systemBackground))
+                #if DEBUG
+                .onAppear { advanced = ProcessInfo.processInfo.arguments.contains("--debug-connection-advanced") }
+                #endif
         } else { ShellWebView(model: model, safeArea: safeArea).id(model.origin) }
     }
 }
@@ -101,7 +104,7 @@ struct ShellWebView: UIViewControllerRepresentable {
     let model: ShellModel
     let safeArea: EdgeInsets
     func makeUIViewController(context: Context) -> ShellController {
-        let controller = ShellController(origin: model.origin)
+        let controller = ShellController(origin: model.origin, relayOrigin: model.relayOrigin)
         controller.hostSafeArea = UIEdgeInsets(top: safeArea.top, left: safeArea.leading, bottom: safeArea.bottom, right: safeArea.trailing)
         model.attach(controller)
         return controller

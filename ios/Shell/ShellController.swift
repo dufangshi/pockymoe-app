@@ -28,6 +28,7 @@ final class ShellController: UIViewController, WKNavigationDelegate, WKUIDelegat
         didSet { web?.hostSafeArea = hostSafeArea; web?.setNeedsLayout() }
     }
     let origin: String
+    private let relayOrigin: String
     private var web: NativeWebView!
     private let proxy = MessageProxy()
     private let live = LiveActivityManager()
@@ -46,7 +47,7 @@ final class ShellController: UIViewController, WKNavigationDelegate, WKUIDelegat
     static let systemBackground = UIColor { $0.userInterfaceStyle == .dark ? UIColor(red: 23/255, green: 23/255, blue: 26/255, alpha: 1) : UIColor(red: 250/255, green: 250/255, blue: 248/255, alpha: 1) }
     override var preferredStatusBarStyle: UIStatusBarStyle { (dark ?? (traitCollection.userInterfaceStyle == .dark)) ? .lightContent : .darkContent }
 
-    init(origin: String) { self.origin = origin; super.init(nibName: nil, bundle: nil) }
+    init(origin: String, relayOrigin: String) { self.origin = origin; self.relayOrigin = relayOrigin; super.init(nibName: nil, bundle: nil) }
     required init?(coder: NSCoder) { fatalError("init(coder:) is unavailable") }
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -108,7 +109,8 @@ final class ShellController: UIViewController, WKNavigationDelegate, WKUIDelegat
         web?.configuration.userContentController.removeScriptMessageHandler(forName: "remoteCodex")
         routeObservation = nil; auth?.cancel()
     }
-    private func trusted(_ url: URL?) -> Bool {
+    private func trusted(_ url: URL?) -> Bool { sameOrigin(url, origin: origin) }
+    private func sameOrigin(_ url: URL?, origin: String) -> Bool {
         guard let url, let base = URL(string: origin) else { return false }
         return url.scheme == base.scheme && url.host == base.host && (url.port ?? (url.scheme == "http" ? 80 : 443)) == (base.port ?? (base.scheme == "http" ? 80 : 443)) && url.user == nil && url.password == nil
     }
@@ -232,7 +234,7 @@ final class ShellController: UIViewController, WKNavigationDelegate, WKUIDelegat
         case "appearance.sync": if let appearance = args.first as? [String: Any] { syncAppearance(appearance) }
         case "shell.openExternal": if let raw = args.first as? String, let url = URL(string: raw) { external(url) }
         case "auth.openExternal":
-            guard let raw = args.first as? String, let url = URL(string: raw), trusted(url), auth == nil else { reply(NSNull()); return }
+            guard let raw = args.first as? String, let url = URL(string: raw), (trusted(url) || sameOrigin(url, origin: relayOrigin)), auth == nil else { reply(NSNull()); return }
             auth = ASWebAuthenticationSession(url: url, callbackURLScheme: "remotecodex") { [weak self] callback, _ in
                 Task { @MainActor in self?.auth = nil; reply(callback.map { ["callbackUrl": $0.absoluteString] } ?? NSNull() as Any) }
             }
@@ -272,7 +274,7 @@ final class ShellController: UIViewController, WKNavigationDelegate, WKUIDelegat
     }
     private func settings() -> [String: Any] {
         var value = UserDefaults.standard.dictionary(forKey: "shell.pageSettings") ?? [:]
-        value["webOrigin"] = origin; value["relayOrigin"] = origin
+        value["webOrigin"] = origin; value["relayOrigin"] = relayOrigin
         value["petVisible"] = false
         return value
     }
