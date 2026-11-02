@@ -143,6 +143,11 @@ class ArtifactGateTests(unittest.TestCase):
             self.assertNotIn(key, captured[0])
         self.assertEqual(captured[0]['CSC_IDENTITY_AUTO_DISCOVERY'], 'false')
 
+    def test_new_sdk_scheme_signer_output_is_normalized_and_deduplicated(self):
+        output = b'V2 Signer: certificate SHA-256 digest: ' + b'C' * 64 + b'\nV3 Signer: certificate SHA-256 digest: ' + b'C' * 64 + b'\n'
+        with patch.object(release, 'sdk_tool', return_value='/fixture/apksigner'), patch.object(release, 'run', return_value=output):
+            self.assertEqual(release.apk_certificate(self.root / 'fixture.apk'), ['c' * 64])
+
     def test_signer_details_are_captured_and_only_digest_is_returned(self):
         output = b'Signer #1 certificate DN: CN=Fixture only\nSigner #1 certificate SHA-256 digest: ' + b'c' * 64 + b'\n'
         with patch.object(release, 'sdk_tool', return_value='/fixture/apksigner'), patch.object(release, 'run', return_value=output) as run:

@@ -21,6 +21,7 @@ void app.whenReady().then(async () => {
   await new Promise(resolve => setTimeout(resolve, 1000));
   const checks = { version: app.getVersion(), pid: process.pid, executable: process.execPath,
     packaged: app.isPackaged, cookie: false, encryptedSecret: false, profile: false };
+  writeFileSync(`${fixture.result}.startup`, JSON.stringify({ version: checks.version, pid: checks.pid, executable: checks.executable, packaged: checks.packaged }, null, 2));
   try {
     checks.profile = app.getPath('userData') === fixture.profile;
     const stored = readFileSync(join(fixture.profile, 'update-fixture-secret.bin'));

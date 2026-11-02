@@ -80,10 +80,10 @@ def apk_certificate(apk):
     # Capture certificate subject and digest, never print personal certificate fields.
     env = dict(os.environ, JAVA_HOME=os.environ.get('JAVA_HOME', '/Applications/Android Studio.app/Contents/jbr/Contents/Home'))
     text = run(sdk_tool('apksigner'), 'verify', '--print-certs', apk, capture=True, env=env).decode()
-    digests = re.findall(r'Signer #\d+ certificate SHA-256 digest: ([0-9a-f]+)', text)
+    digests = re.findall(r'(?:Signer #\d+|V\d+ Signer(?: #\d+)?):? certificate SHA-256 digest: ([0-9a-fA-F]{64})', text)
     if not digests:
         raise RuntimeError('APK has no verified signing certificate')
-    return sorted(digests)
+    return sorted(set(digest.lower() for digest in digests))
 
 
 def previous_apk(work, code):

@@ -454,9 +454,10 @@ relaunch and preserved cookie/encrypted secret, while interactive SmartScreen
 behavior still needs real-device observation.
 
 **macOS Keychain limitation:** a stable self-signed identity does not establish an
-Apple TeamIdentifier. In the same-path A→B probe macOS attached a build-specific
+Apple TeamIdentifier. In the real updater A→B test macOS attached a build-specific
 `cdhash` partition ACL to the fixture Safe Storage item; B requested Keychain
-access despite the unchanged leaf certificate/designated requirement. No system
+access despite the unchanged leaf certificate/designated requirement. The signed-DMG
+swap/relaunch succeeded, then B blocked in `SecItemCopyMatching`. No system
 trust/ACL changes are made to hide this. A Keychain prompt or sign-in recovery may
 be needed; seamless sign-in must not be assumed.
 

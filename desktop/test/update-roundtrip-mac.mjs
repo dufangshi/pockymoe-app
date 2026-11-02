@@ -55,8 +55,9 @@ async function roundtrip() {
   assert.equal(existsSync(observerPath), false, 'Refuse to overwrite an existing observer');
   const originalMain = readFileSync(mainPath), originalPackage = readFileSync(packagePath);
   assert.ok(originalMain.toString().includes("app.setName('Pockymoe');"), 'Cannot safely isolate the application name');
+  const fixtureAppName = `PockymoeUpdaterFixture-${randomBytes(6).toString('hex')}`;
   const report = { platform: 'darwin-arm64', versions: { from: versionA, to: versionB }, checks: {},
-    keychainScope: 'Only the temporary PockymoeUpdaterFixture service; real Pockymoe items and /Applications remain untouched' };
+    keychainScope: `Only the temporary ${fixtureAppName} service; real Pockymoe items and /Applications remain untouched` };
   let release, dmg, app;
   let feedRequests = 0, downloadRequests = 0;
   const server = createServer((request, response) => {
@@ -75,7 +76,7 @@ async function roundtrip() {
   const origin = `http://127.0.0.1:${server.address().port}`;
   const { privateKey, publicKey } = generateKeyPairSync('ed25519');
   const publicPath = join(temporary, 'fixture-public.pem'); writeFileSync(publicPath, publicKey.export({ format: 'pem', type: 'spki' }));
-  const fixture = { profile, origin, result: resultPath, versionB, secret: randomBytes(24).toString('hex'), cookie: randomBytes(24).toString('hex') };
+  const fixture = { appName: fixtureAppName, profile, origin, result: resultPath, versionB, secret: randomBytes(24).toString('hex'), cookie: randomBytes(24).toString('hex') };
   const inherited = {};
   for (const key of ['PATH', 'HOME', 'TMPDIR', 'USER', 'LOGNAME', 'LANG']) if (process.env[key]) inherited[key] = process.env[key];
   const env = { ...inherited, CSC_IDENTITY_AUTO_DISCOVERY: 'false', POCKYMOE_UPDATER_TEST_BUILD: '1',
@@ -96,7 +97,7 @@ async function roundtrip() {
   try {
     const observer = readFileSync(join(desktop, 'test/update-fixture-observer.mjs'), 'utf8').replace('__POCKYMOE_ROUNDTRIP_FIXTURE__', JSON.stringify(fixture));
     writeFileSync(observerPath, observer);
-    writeFileSync(mainPath, `import './__updateFixtureObserver.mjs';\n${originalMain.toString().replace("app.setName('Pockymoe');", "app.setName('PockymoeUpdaterFixture');")}`);
+    writeFileSync(mainPath, `import './__updateFixtureObserver.mjs';\n${originalMain.toString().replace("app.setName('Pockymoe');", `app.setName(${JSON.stringify(fixtureAppName)});`)}`);
     const a = build(versionA), b = build(versionB);
     run(process.execPath, [pnpmEntry(), 'exec', 'electron-builder', '--mac', 'dmg', '--arm64', '--prepackaged', b.bundle,
       '--publish', 'never', '-c.mac.identity=null', '-c.mac.hardenedRuntime=false', '-c.mac.notarize=false', `-c.directories.output=${b.output}`], { env });
@@ -135,8 +136,22 @@ async function roundtrip() {
     assert.ok(feedRequests > 0 && downloadRequests > 0);
     console.log('Mac A -> verified signed DMG -> atomic helper swap -> B relaunch passed; fixture cookie and encrypted secret survived');
   } finally {
+    // A blocked Keychain read is synchronous in B's main process. Close only
+    // the PID emitted by our compiled observer after checking its exact path.
+    if (existsSync(`${resultPath}.startup`)) {
+      const started = JSON.parse(readFileSync(`${resultPath}.startup`, 'utf8'));
+      try {
+        const actual = execFileSync('/bin/ps', ['-p', String(started.pid), '-o', 'comm='], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+        if (realpathSync(actual) === realpathSync(executable)) {
+          process.kill(started.pid, 'SIGTERM'); await delay(1000);
+          const stillRunning = execFileSync('/bin/ps', ['-p', String(started.pid), '-o', 'comm='], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+          if (stillRunning === actual) process.kill(started.pid, 'SIGKILL');
+        }
+      } catch { /* Observer normally quit already; never target another process. */ }
+    }
     try { await app?.close(); } catch { /* A already quit to let the helper replace it. */ }
     writeFileSync(mainPath, originalMain); writeFileSync(packagePath, originalPackage); rmSync(observerPath, { force: true });
+    if (existsSync(`${resultPath}.startup`)) report.relaunchStartup = JSON.parse(readFileSync(`${resultPath}.startup`, 'utf8'));
     report.checks.feedRequests = feedRequests; report.checks.downloadRequests = downloadRequests;
     report.success = report.checks.relaunchedB === true && report.checks.cookieSurvived === true && report.checks.encryptedSecretSurvived === true;
     // Preserve only local test evidence, never cookie/key values or private key.
