@@ -9,6 +9,9 @@ interface Tts { generate(input: { text: string; sid: number; speed: number; enab
 const sherpa = require('sherpa-onnx-node') as { OfflineTts: new (config: unknown) => Tts };
 let tts: Tts | null = null;
 function load(dir: string): Tts {
+  // sherpa's Windows native readers also use codepage paths. Keep their file
+  // names relative and let Node select the Unicode working directory.
+  if (process.platform === 'win32') { process.chdir(dir); dir = '.'; }
   const file = (name: string): string => join(dir, name);
   return tts ??= new sherpa.OfflineTts({
     model: {

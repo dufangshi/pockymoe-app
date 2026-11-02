@@ -6,6 +6,7 @@ import type { DockEdge, Rect } from './geometry';
 import type { ClipFormat, PetClip } from './packs';
 export interface PetViewState {
   appearance: Appearance;
+  glassFallback?: boolean;
   surface: 'sprite' | 'glass';
   mode: 'controls' | 'panel' | 'menu' | 'bubble';
   near: boolean;

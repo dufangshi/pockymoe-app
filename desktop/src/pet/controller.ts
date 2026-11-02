@@ -1,4 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, nativeImage, nativeTheme, screen } from 'electron';
+import { release } from 'node:os';
+import { windowsGlassMaterial } from '../shared/platform';
 import { join } from 'node:path';
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import type { ActivityItem, ActivityRecent, Appearance, DesktopSettings, HostCommand, HostCommandResult, PetController, PetControllerDeps } from '../shared/contract';
@@ -11,7 +13,7 @@ import { dockPosition, exposedRect, HEAD_PEEK, MINI_HEIGHT, PET_HEIGHT, petLayou
 import { importPetPack as importPack, listPetPacks, imageDimensions, readClip, type ClipState, type PetPack } from './packs';
 import { petConversations } from './conversations';
 import { StableMood, withoutResolvedRequest } from './stability';
-import { configureOverlay, glassOptions } from './windows';
+import { configureOverlay, glassOptions, windowWasDestroyed } from './windows';
 import type { PetAction, PetCue, PetViewState } from './bridge';
 
 type Command = HostCommand extends infer C ? C extends { id: string } ? Omit<C, 'id'> : never : never;
@@ -34,6 +36,7 @@ export function createPetController(deps: PetControllerDeps): PetController {
   const initial = deps.hub.snapshot();
   if (initial) { items = initial.items; recent = initial.recent ?? []; accountId = initial.accountId; }
   let packs: PetPack[] = [], pack: PetPack | undefined, error: string | null = null;
+  let quitting = false;
   let disposed = false, visible = settings.petVisible, near = false, peek = false, dockAmount = 0;
   let mode: PetViewState['mode'] = 'controls', panel = false, menu = false, detailOpen = false;
   let lastSprite = '', lastGlass = '', readySprite = false, readyGlass = false, glassDismissed = false;
@@ -57,7 +60,7 @@ export function createPetController(deps: PetControllerDeps): PetController {
   const window = new BrowserWindow({ ...petLayout(position, (screen.getAllDisplays().find(candidate => candidate.id === position.displayId) ?? primary).workArea, petHeight(settings)).window, show: false, transparent: true, frame: false,
     focusable: false, hasShadow: false, skipTaskbar: true, resizable: false, maximizable: false, minimizable: false,
     ...(process.platform === 'darwin' ? { type: 'panel' as const } : {}), webPreferences: security });
-  const glass = new BrowserWindow({ ...glassOptions(process.platform), parent: window, width: 280, height: 40, show: false, webPreferences: security });
+  const glass = new BrowserWindow({ ...glassOptions(process.platform, release(), process.env.POCKYMOE_WINDOWS_GLASS === 'solid'), parent: window, width: 280, height: 40, show: false, webPreferences: security });
   configureOverlay(window); configureOverlay(glass);
   window.setIgnoreMouseEvents(true, { forward: true });
   for (const view of [window, glass]) {
@@ -141,8 +144,16 @@ export function createPetController(deps: PetControllerDeps): PetController {
     // show() would activate the app and raise the main window; a panel takes key focus without that.
     glass.setFocusable(true); emit(); glass.showInactive(); glass.focus();
   }
+  const live = (): boolean => !disposed && !window.isDestroyed() && !glass.isDestroyed();
+  function retireDestroyed(error: unknown): void {
+    if (!windowWasDestroyed(error)) throw error;
+    dispose();
+  }
   function emit(): void {
-    if (disposed) return;
+    if (!live()) return;
+    try { emitState(); } catch (error) { retireDestroyed(error); }
+  }
+  function emitState(): void {
     const now = Date.now();
     const expiring = bubbles.current && !bubbles.current.sticky && bubbles.current.shownAt !== null && now - bubbles.current.shownAt >= BUBBLE_MS ? [...bubbles.current.events] : [];
     bubbles.tick(now);
@@ -154,7 +165,7 @@ export function createPetController(deps: PetControllerDeps): PetController {
     const layout = petLayout(position, display().workArea, petHeight(settings), { dockAmount });
     const effectiveTargets = [...new Map([...items, ...targets.values(), ...recent.map(item => ({ ...item, workspaceId: '', state: 'idle' as const, since: new Date(0).toISOString(), unread: false }))].map(item => [item.key, item])).values()];
     const sleeping = pack?.manifest.remoteCodex?.sleeping;
-    const shared = { appearance, accountId, items, recent, targets: effectiveTargets, mood: drag?.moved && pack?.manifest.remoteCodex?.clips?.dragging ? 'dragging' : moods.value(items, now, snoozed), moodEpoch, pinned: controlsPinned && !panel && !menu,
+    const shared = { appearance, glassFallback: process.platform === 'win32' && windowsGlassMaterial(release(), process.env.POCKYMOE_WINDOWS_GLASS === 'solid') === 'solid', accountId, items, recent, targets: effectiveTargets, mood: drag?.moved && pack?.manifest.remoteCodex?.clips?.dragging ? 'dragging' : moods.value(items, now, snoozed), moodEpoch, pinned: controlsPinned && !panel && !menu,
       clips: pack?.manifest.remoteCodex?.clips && pack.manifest.remoteCodex.clipFormat ? { format: pack.manifest.remoteCodex.clipFormat, states: pack.manifest.remoteCodex.clips, epoch: packEpoch } : null,
       // Timing stays here: while the pointer holds a bubble, its restart must not reach the renderer as a change.
       bubble: bubble && { ...bubble, createdAt: 0, shownAt: null },
@@ -166,6 +177,7 @@ export function createPetController(deps: PetControllerDeps): PetController {
       error, locale: uiLocale, tray: panel, chat: panel, mode, near: controlsShown, peek, detailOpen, edgeHide: settings.petEdgeHide !== false,
       edge: position.edge, dockAmount, pet: layout.pet, panelAbove: layout.panelAbove, panelHeight: 258, targetKey };
     for (const view of [window, glass]) {
+      if (!live()) return;
       const state: PetViewState = { ...shared, surface: view === window ? 'sprite' : 'glass' };
       const payload = JSON.stringify(state), previous = view === window ? lastSprite : lastGlass;
       if (payload !== previous && (view === window ? readySprite : readyGlass)) {
@@ -173,11 +185,15 @@ export function createPetController(deps: PetControllerDeps): PetController {
         view.webContents.send('rcDesktop:pet:state', state);
       }
     }
+    if (!live()) return;
     const show = visible && readyGlass && (panel || menu || !!bubble || controlsPinned || !glassDismissed && (near || awaySince > 0 && now - awaySince < 220));
     glass.setIgnoreMouseEvents(mode === 'controls' && !controlsShown, { forward: true });
+    if (!live()) return;
     const opacity = mode === 'controls' && !controlsShown ? Math.max(0, 1 - (now - awaySince) / 220) : 1;
     if (opacity !== lastOpacity && process.platform !== 'linux') { lastOpacity = opacity; glass.setOpacity(opacity); }
-    if (show && !glass.isVisible()) { placeGlass(); glass.showInactive(); }
+    if (!live()) return;
+    if (show && !glass.isVisible()) { placeGlass(); if (live()) glass.showInactive(); }
+    if (!live()) return;
     if (!show && glass.isVisible()) { glass.hide(); glassSide = null; }
     glass.setFocusable(panel || menu || detailOpen);
   }
@@ -346,8 +362,7 @@ export function createPetController(deps: PetControllerDeps): PetController {
   })];
   const displayChanged = (): void => { position = restorePosition(position, screen.getAllDisplays(), screen.getPrimaryDisplay(), petHeight(settings)); placeSprite(); savePosition(); emit(); };
   screen.on('display-removed', displayChanged); screen.on('display-metrics-changed', displayChanged);
-  const timer = setInterval(() => {
-    if (disposed) return;
+  const pollPointer = (): void => {
     const now = Date.now(), cursor = screen.getCursorScreenPoint(), bounds = window.getBounds(), child = glass.getBounds();
     const within = (r: Electron.Rectangle, margin = 0) => cursor.x >= r.x - margin && cursor.x <= r.x + r.width + margin && cursor.y >= r.y - margin && cursor.y <= r.y + r.height + margin;
     const tucked = position.edge && settings.petEdgeHide !== false && dockAmount > 0;
@@ -362,18 +377,40 @@ export function createPetController(deps: PetControllerDeps): PetController {
     const alerting = !!bubbles.current && !(settings.snoozeUntil && Date.parse(settings.snoozeUntil) > now);
     dockAmount = position.edge && settings.petEdgeHide !== false && !peek ? alerting ? HEAD_PEEK : 1 : 0;
     emit();
+  };
+  const timer = setInterval(() => {
+    if (!live()) return;
+    try { pollPointer(); } catch (error) { retireDestroyed(error); }
   }, 100);
+  // Stop native-window polling before Electron begins destroying those windows.
+  const beforeQuit = (): void => { quitting = true; dispose(false); };
+  const closeGlass = (event: Electron.Event): void => { if (!quitting) { event.preventDefault(); dismissSurface(); } };
+  const closeSprite = (event: Electron.Event): void => { if (!quitting) { event.preventDefault(); deps.settings.set({ petVisible: false }); } };
+  const nativeClosed = (): void => dispose();
+  glass.on('close', closeGlass); window.on('close', closeSprite);
+  app.once('before-quit', beforeQuit);
+  window.once('closed', nativeClosed); glass.once('closed', nativeClosed);
   const devUrl = process.env.ELECTRON_RENDERER_URL;
   for (const view of [window, glass]) void (devUrl ? view.loadURL(`${devUrl.replace(/\/$/, '')}/pet/index.html`) : view.loadFile(join(__dirname, '../renderer/pet/index.html'))).then(() => { if (view === window) void refreshPacks(); });
+  function dispose(destroyWindows = true): void {
+    if (disposed) return; disposed = true; clearInterval(timer); clearTimeout(blurTimer); savePosition();
+    app.removeListener('before-quit', beforeQuit);
+    window.removeListener('closed', nativeClosed); glass.removeListener('closed', nativeClosed);
+    glass.removeListener('close', closeGlass); window.removeListener('close', closeSprite);
+    for (const unsubscribe of unsubscribes) unsubscribe();
+    screen.removeListener('display-removed', displayChanged); screen.removeListener('display-metrics-changed', displayChanged);
+    ipcMain.removeListener('rcDesktop:pet:ready', onReady); ipcMain.removeListener('rcDesktop:pet:hitTest', onHitTest); ipcMain.removeHandler('rcDesktop:pet:action'); ipcMain.removeHandler('rcDesktop:pet:clip');
+    // Windows may already be destroying a native owner's children while closed
+    // is delivered. Let that stack unwind before retiring the surviving window.
+    if (destroyWindows) setImmediate(() => {
+      if (!glass.isDestroyed()) glass.destroy();
+      if (!window.isDestroyed()) window.destroy();
+    });
+  }
   return {
     async reloadPacks() { await refreshPacks(); packEpoch++; emit(); },
-    setVisible(value) { if (deps.settings.get().petVisible !== value) deps.settings.set({ petVisible: value }); }, isVisible: () => visible && !disposed, play, say(text) { cue(undefined, text); },
-    dispose() {
-      if (disposed) return; disposed = true; clearInterval(timer); clearTimeout(blurTimer); savePosition();
-      for (const unsubscribe of unsubscribes) unsubscribe();
-      screen.removeListener('display-removed', displayChanged); screen.removeListener('display-metrics-changed', displayChanged);
-      ipcMain.removeListener('rcDesktop:pet:ready', onReady); ipcMain.removeListener('rcDesktop:pet:hitTest', onHitTest); ipcMain.removeHandler('rcDesktop:pet:action'); ipcMain.removeHandler('rcDesktop:pet:clip'); glass.destroy(); window.destroy();
-    },
+    setVisible(value) { if (deps.settings.get().petVisible !== value) deps.settings.set({ petVisible: value }); }, isVisible: () => visible && !disposed, isAvailable: live, play, say(text) { cue(undefined, text); },
+    dispose,
   };
 }
 /** Native Settings import entry; shell owns the parent window, pet owns validation. */

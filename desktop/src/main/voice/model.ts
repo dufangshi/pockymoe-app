@@ -1,13 +1,44 @@
+import { modelTar } from '../platform';
 import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { createReadStream, createWriteStream, existsSync, mkdirSync, renameSync, rmSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import { promisify } from 'node:util';
+import { setTimeout as delay } from 'node:timers/promises';
 import type { LocalModelState } from '../../shared/voice';
 
-const run = promisify(execFile);
+export async function retryModelFile(operation: () => void, platform = process.platform): Promise<void> {
+  const deadline = Date.now() + 3000;
+  for (;;) {
+    try { operation(); return; }
+    catch (error) {
+      if (platform !== 'win32' || !['EPERM', 'EBUSY', 'EACCES'].includes((error as NodeJS.ErrnoException).code || '') || Date.now() >= deadline) throw error;
+      await delay(100);
+    }
+  }
+}
+const removeFile = (path: string): Promise<void> => retryModelFile(() => rmSync(path, { recursive: true, force: true, maxRetries: process.platform === 'win32' ? 5 : 0, retryDelay: 100 }));
+// Abort's error can precede exit. Never remove extraction files before close.
+export function extractModel(archive: string, staging: string, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    signal.throwIfAborted();
+    // Windows tar decodes argv paths through the system codepage. Node sets cwd
+    // through the Unicode process API, so keep archive/destination arguments relative.
+    const child = execFile(tar(), ['-xjf', relative(staging, archive), '-C', '.'], { cwd: staging, windowsHide: process.platform === 'win32' });
+    let failure: Error | null = null;
+    const cancel = (): void => { child.kill(); };
+    signal.addEventListener('abort', cancel, { once: true });
+    child.on('error', error => { failure = error; });
+    child.on('close', code => {
+      signal.removeEventListener('abort', cancel);
+      if (signal.aborted) reject(signal.reason);
+      else if (failure || code !== 0) reject(failure || new Error('extraction'));
+      else resolve();
+    });
+    if (signal.aborted) cancel();
+  });
+}
 export const MODEL = {
   name: 'kokoro-int8-multi-lang-v1_1',
   url: 'https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kokoro-int8-multi-lang-v1_1.tar.bz2',
@@ -21,13 +52,15 @@ const sha256 = async (path: string): Promise<string> => {
   for await (const chunk of createReadStream(path)) hash.update(chunk as Buffer);
   return hash.digest('hex');
 };
-const tar = (): string => process.platform === 'win32' ? join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe') : '/usr/bin/tar';
+const tar = (): string => modelTar(process.platform, process.env.SystemRoot);
 /** Downloads the pinned model into userData, resuming a partial file. Only a verified archive is unpacked. */
 export class LocalModel {
   state: LocalModelState;
   progress = 0;
   error: string | null = null;
   private abort: AbortController | null = null;
+  private running: Promise<void> | null = null;
+  private removing = false;
   constructor(private dir: string, private fetcher: Fetch, private changed: () => void, private source: ModelSource = MODEL, private stallMs = 30_000) {
     this.state = this.installed() ? 'ready' : 'absent';
   }
@@ -35,7 +68,16 @@ export class LocalModel {
   private get archive(): string { return join(this.dir, `${this.source.name}.tar.bz2.partial`); }
   private installed(): boolean { return existsSync(join(this.path, 'model.int8.onnx')); }
   private set(state: LocalModelState, error: string | null = null): void { this.state = state; this.error = error; this.changed(); }
-  async download(): Promise<void> {
+  download(): Promise<void> {
+    if (this.removing) return Promise.resolve();
+    if (this.running) return this.running;
+    const running = this.performDownload();
+    this.running = running;
+    const settled = (): void => { if (this.running === running) this.running = null; };
+    void running.then(settled, settled);
+    return running;
+  }
+  private async performDownload(): Promise<void> {
     if (this.state === 'downloading' || this.state === 'extracting' || this.state === 'ready') return;
     const abort = this.abort = new AbortController();
     mkdirSync(this.dir, { recursive: true });
@@ -59,14 +101,16 @@ export class LocalModel {
         try { await pipeline(body, createWriteStream(this.archive, { flags: from ? 'a' : 'w' }), { signal: AbortSignal.any([abort.signal, stall.signal]) }); }
         finally { clearTimeout(timer); }
       }
-      if (await sha256(this.archive) !== this.source.sha256) { rmSync(this.archive, { force: true }); throw new Error('checksum'); }
+      if (await sha256(this.archive) !== this.source.sha256) { await removeFile(this.archive); throw new Error('checksum'); }
+      abort.signal.throwIfAborted();
       this.progress = 1; this.set('extracting');
       const staging = join(this.dir, 'staging');
-      rmSync(staging, { recursive: true, force: true }); mkdirSync(staging, { recursive: true });
-      await run(tar(), ['-xjf', this.archive, '-C', staging]);
-      rmSync(this.path, { recursive: true, force: true });
-      renameSync(join(staging, this.source.name), this.path);
-      rmSync(staging, { recursive: true, force: true }); rmSync(this.archive, { force: true });
+      await removeFile(staging); mkdirSync(staging, { recursive: true });
+      await extractModel(this.archive, staging, abort.signal);
+      abort.signal.throwIfAborted();
+      await removeFile(this.path);
+      await retryModelFile(() => { abort.signal.throwIfAborted(); renameSync(join(staging, this.source.name), this.path); });
+      await removeFile(staging); await removeFile(this.archive);
       this.set('ready');
     } catch (error) {
       if (abort.signal.aborted) this.set('absent');
@@ -74,5 +118,9 @@ export class LocalModel {
     } finally { if (this.abort === abort) this.abort = null; }
   }
   cancel(): void { this.abort?.abort(); }
-  remove(): void { this.cancel(); rmSync(this.dir, { recursive: true, force: true }); this.progress = 0; this.set('absent'); }
+  async remove(): Promise<void> {
+    this.removing = true; this.cancel();
+    try { await this.running; await removeFile(this.dir); this.progress = 0; this.set('absent'); }
+    finally { this.removing = false; }
+  }
 }

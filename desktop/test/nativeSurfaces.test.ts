@@ -9,13 +9,13 @@ import type { SettingsStore } from '../src/main/store';
 import type { MenuItemConstructorOptions } from 'electron';
 const notices: { options: Record<string, unknown>; emit: (event: string, ...args: unknown[]) => boolean }[] = [];
 vi.mock('electron', () => ({
-  app: {}, Menu: {}, nativeImage: {}, nativeTheme: {}, Tray: class {},
+  app: { getAppPath: () => '/fixture', isPackaged: false }, Menu: {}, nativeImage: {}, nativeTheme: {}, Tray: class {},
   powerMonitor: { getSystemIdleTime: () => 0 },
   Notification: class extends EventEmitter {
     id: string;
     static isSupported = () => true;
     static remove = () => undefined;
-    constructor(options: Record<string, unknown>) { super(); this.id = options.id as string; notices.push({ options, emit: this.emit.bind(this) }); }
+    constructor(options: Record<string, unknown>) { super(); Object.assign(this, options); this.id = options.id as string; notices.push(Object.assign(this, { options, emit: this.emit.bind(this) })); }
     show(): void {}
     close(): void { this.emit('close'); }
   }
@@ -126,4 +126,26 @@ it('matches the Web waiting badge, excluding unread failures and counting conver
   expect(taskbarBadge(snapshot([a, b, failed]))).toEqual({ count: 1, style: 'attention' });
   expect(taskbarBadge(snapshot([failed, item({ key: 'mac:run', threadId: 'run' })]))).toEqual({ count: 1, style: 'running' });
   expect(taskbarBadge(snapshot([failed]))).toEqual({ count: 0, style: 'none' });
+});
+
+it('routes Windows protocol toast buttons once, even if Windows closed the banner first', async () => {
+  vi.stubGlobal('process', { ...process, platform: 'win32' });
+  try {
+    const hub = connected(new ActivityHub()), dispatch = vi.fn().mockResolvedValue({ ok: true }), focusMain = vi.fn();
+    const settings = { get: () => ({ ...defaults, alertMode: 'system' }), onChange: () => () => undefined } as unknown as SettingsStore;
+    const notifications = new Notifications(hub, settings, { relay: new Set(), dispatch, focusMain } as unknown as Windows, () => undefined, () => null);
+    hub.sync(snapshot([item({ state: 'needsInput', request: { id: 'windows-request', kind: 'approval', summary: 'Run tests & checks' } })]));
+    vi.advanceTimersByTime(1500);
+    const notice = notices[0] as typeof notices[number] & { toastXml: string };
+    expect(notice.toastXml).toContain('Run tests &amp; checks');
+    const target = /arguments="([^"]+\/0)"/.exec(notice.toastXml)![1];
+    notice.emit('close');
+    expect(notifications.activate(target)).toBe(true);
+    await Promise.resolve();
+    expect(dispatch).toHaveBeenCalledWith({ type: 'resolveRequest', deviceId: 'mac', threadId: 'thread-1', requestId: 'windows-request', decision: 'approve' });
+    notifications.activate(target); expect(dispatch).toHaveBeenCalledTimes(1); expect(focusMain).toHaveBeenCalledTimes(1);
+    for (const action of ['open', '0', '1']) expect(notifications.activate(`pockymoe://notification/00000000-0000-0000-0000-000000000000/${action}`)).toBe(true);
+    expect(focusMain).toHaveBeenCalledTimes(4); expect(dispatch).toHaveBeenCalledTimes(1);
+    notifications.dispose(); hub.dispose();
+  } finally { vi.unstubAllGlobals(); }
 });

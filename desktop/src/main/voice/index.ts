@@ -1,3 +1,4 @@
+import { windowsVoiceAvailable } from '../platform';
 import { app, net, safeStorage, utilityProcess, type UtilityProcess } from 'electron';
 import { existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
@@ -18,6 +19,10 @@ const fetcher = (url: string, init: RequestInit): Promise<Response> => net.fetch
 /** The addon ships per platform; where none exists (or it fails to load) remote services still work. */
 function addonAvailable(): boolean {
   const platform = process.platform === 'win32' ? 'win' : process.platform;
+  if (process.platform === 'win32') {
+    const directory = join(app.getAppPath(), 'node_modules', `sherpa-onnx-win-${process.arch}`).replace('app.asar', 'app.asar.unpacked');
+    return windowsVoiceAvailable(directory, existsSync);
+  }
   try { return existsSync(join(app.getAppPath(), 'node_modules', `sherpa-onnx-${platform}-${process.arch}`).replace('app.asar', 'app.asar.unpacked')) || !app.isPackaged; } catch { return false; }
 }
 function message(error: unknown): string {

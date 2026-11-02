@@ -6,7 +6,7 @@ import { join } from 'node:path';
 process.env.PLAYWRIGHT_NO_COPY_PROMPT = '1';
 const [command, stateFile] = process.argv.slice(2);
 const state = JSON.parse(await readFile(stateFile, 'utf8'));
-const require = createRequire(join(state.webRoot, 'package.json'));
+const require = createRequire(new URL('../../desktop/package.json', import.meta.url));
 const { chromium, expect } = require('@playwright/test');
 const evidence = `${(process.env.POCKYMOE_DESKTOP_EVIDENCE || '.local/desktop-evidence')}/fixture` + (state.webMode === 'dev' ? '/dev' : '');
 await mkdir(evidence, { recursive: true });

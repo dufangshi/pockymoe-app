@@ -1,3 +1,4 @@
+import { recordLifecycle } from './lifecycle';
 import { test, expect, _electron as electron, type ElectronApplication, type Page } from '@playwright/test';
 import { createServer, type Server } from 'node:http';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
@@ -34,19 +35,26 @@ test.beforeAll(async () => {
 });
 test.afterAll(async () => { await new Promise<void>(done => server.close(() => done())); });
 test.beforeEach(async () => {
-  seen = []; profile = mkdtempSync(join(tmpdir(), 'pockymoe-voice-'));
-  if (realModel && test.info().title.startsWith('local')) { mkdirSync(join(profile, 'voice')); symlinkSync(realModel, join(profile, 'voice', MODEL.name)); }
+  test.skip(test.info().title.includes('synthesizes real speech') && !realModel, 'POCKYMOE_VOICE_MODEL is not set');
+  test.skip(test.info().title.includes('downloads, verifies') && !process.env.POCKYMOE_VOICE_DOWNLOAD, 'POCKYMOE_VOICE_DOWNLOAD is not set');
+  test.skip(test.info().title.includes('offers the download') && !!realModel);
+  seen = []; profile = mkdtempSync(join(tmpdir(), 'pockymoe-张三 voice-'));
+  if (realModel && test.info().title.startsWith('local')) { mkdirSync(join(profile, 'voice')); symlinkSync(realModel, join(profile, 'voice', MODEL.name), process.platform === 'win32' ? 'junction' : 'dir'); }
   const env: Record<string, string> = {};
-  for (const key of ['PATH', 'HOME', 'TMPDIR', 'USER', 'LOGNAME']) if (process.env[key]) env[key] = process.env[key]!;
+  for (const key of ['PATH', 'HOME', 'TMPDIR', 'USER', 'LOGNAME', 'SystemRoot', 'WINDIR', 'TEMP', 'TMP', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'ComSpec', 'PATHEXT']) if (process.env[key]) env[key] = process.env[key]!;
   Object.assign(env, { POCKYMOE_DESKTOP_E2E: '1', POCKYMOE_DESKTOP_USER_DATA: profile, POCKYMOE_DESKTOP_WEB_ORIGIN: origin, POCKYMOE_DESKTOP_RELAY_ORIGIN: origin });
   // POCKYMOE_DESKTOP_APP checks a packaged build, whose addon lives in app.asar.unpacked.
-  const packaged = process.env.POCKYMOE_DESKTOP_APP;
-  app = await electron.launch({ ...(packaged ? { executablePath: packaged, args: [] } : { args: [resolve('.')] }), env });
+  const packaged = process.env.POCKYMOE_PACKAGED_EXECUTABLE || process.env.POCKYMOE_DESKTOP_APP;
+  app = await electron.launch({ ...(packaged ? { executablePath: packaged, args: [`--lang=${process.env.POCKYMOE_TEST_SYSTEM_LOCALE || 'en-US'}`, ...(process.env.POCKYMOE_DESKTOP_SCALE ? [`--force-device-scale-factor=${process.env.POCKYMOE_DESKTOP_SCALE}`] : [])] } : { args: [resolve('.'), `--lang=${process.env.POCKYMOE_TEST_SYSTEM_LOCALE || 'en-US'}`] }), env });
+  await recordLifecycle(app, join(evidence, `lifecycle-${Date.now()}.jsonl`));
+  await expect.poll(() => app.evaluate(() => '__pockymoeDesktopTest' in globalThis)).toBe(true);
+  await app.evaluate(() => globalThis.__pockymoeDesktopTest.appearance.sync({ pack: 'classic', effective: 'light', accent: '#a57224', locale: 'en' }));
 });
 test.afterEach(async () => {
+  if (!app) return;
   // Electron ignores a quit that arrives before it is ready, which a test skipped at once would send.
   await expect.poll(() => app.evaluate(() => '__pockymoeDesktopTest' in globalThis), { timeout: 20_000 }).toBe(true);
-  await app.close(); rmSync(profile, { recursive: true, force: true });
+  await app.close(); app = undefined as unknown as ElectronApplication; rmSync(profile, { recursive: true, force: true });
 });
 async function preferences(): Promise<Page> {
   await expect.poll(() => app.evaluate(() => '__pockymoeDesktopTest' in globalThis)).toBe(true);

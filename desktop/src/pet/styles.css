@@ -119,3 +119,12 @@ hr { border:0;border-top:1px solid var(--theme-border);margin:4px; }
 .bubble-request-line .request-more { align-self:flex-start; }
 /* An alert pops her head out with a little overshoot; the way back in stays plain. */
 #character.peeking { transition:transform 460ms cubic-bezier(.34,1.8,.64,1); }
+
+:root[data-platform=win32]{font-family:"Segoe UI Variable Text","Segoe UI","Microsoft YaHei UI",sans-serif;--glass:color-mix(in srgb,var(--windows-panel-bg) 96%,transparent);--theme-fg:var(--windows-panel-fg);--theme-muted:var(--windows-panel-muted)}
+:root[data-platform=win32][data-glass-fallback=true]{--glass:var(--windows-panel-bg)}
+:root[data-platform=win32][data-theme-preset=terminal]{font-family:"Cascadia Mono",Consolas,"Microsoft YaHei UI",monospace}
+:root[data-platform=win32] .glass{border-radius:12px}
+:root[data-platform=win32] code{font-family:"Cascadia Mono",Consolas,"Microsoft YaHei UI",monospace}
+:root[data-platform=win32] .chat input::placeholder{opacity:1}
+:root[data-platform=win32] .menu-sizes button[aria-checked=true]{color:var(--theme-fg)}
+:root[data-platform=win32] .chat input:disabled{color:var(--theme-muted);-webkit-text-fill-color:var(--theme-muted)}

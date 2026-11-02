@@ -8,6 +8,7 @@ import unittest
 from unittest.mock import patch
 
 import backend
+import processes
 
 
 class IsolationTests(unittest.TestCase):
@@ -27,7 +28,7 @@ class IsolationTests(unittest.TestCase):
             backend.assert_free([45679, 18901, 18902, 18903])
 
     def test_reused_pid_is_not_signalled(self):
-        with patch.object(backend, "identity", return_value="different birth time"), patch.object(os, "kill") as kill:
+        with patch.object(processes, "identity", return_value="different birth time"), patch.object(os, "kill") as kill:
             backend.stop_process({"pid": 12345, "identity": "original process birth time"})
             kill.assert_not_called()
 
@@ -43,10 +44,12 @@ class IsolationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "state.json"
             backend.write_json(path, {"hello": "世界"})
-            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
-            self.assertEqual(json.loads(path.read_text()), {"hello": "世界"})
+            if os.name != "nt":
+                self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+            self.assertEqual(json.loads(path.read_text(encoding="utf-8")), {"hello": "世界"})
             self.assertFalse(path.with_suffix(".tmp").exists())
 
+    @unittest.skipIf(os.name == "nt", "Unix ps parser; Windows uses creation FILETIME")
     def test_process_identity_survives_launcher_exec_and_ignores_zombies(self):
         from types import SimpleNamespace
         output = SimpleNamespace(returncode=0, stdout="Sun Nov  1 02:17:23 2026 S\n")
@@ -57,6 +60,7 @@ class IsolationTests(unittest.TestCase):
             output.stdout = "Sun Nov  1 02:17:23 2026 Z\n"
             self.assertEqual(backend.identity(12345), "")
 
+    @unittest.skipIf(os.name == "nt", "Atomic Web rebuild is Mac/Linux-only; release Web startup is separate")
     def test_rebuild_swaps_whole_artifact_and_retains_old_lazy_chunks(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -78,9 +82,9 @@ class IsolationTests(unittest.TestCase):
                     patch.object(backend, "alive", return_value=True), patch.object(backend, "build_static_web", side_effect=build):
                 result = backend.rebuild_web(state)
             self.assertEqual(set(result), {"path", "durationSeconds"})
-            self.assertEqual((target / "index.html").read_text(), "new entry " + state["relayOrigin"])
-            self.assertEqual((target / "assets" / "old-hash.js").read_text(), "old lazy chunk")
-            self.assertEqual((Path(state["previousWebDist"]) / "index.html").read_text(), "old entry")
+            self.assertEqual((target / "index.html").read_text(encoding="utf-8"), "new entry " + state["relayOrigin"])
+            self.assertEqual((target / "assets" / "old-hash.js").read_text(encoding="utf-8"), "old lazy chunk")
+            self.assertEqual((Path(state["previousWebDist"]) / "index.html").read_text(encoding="utf-8"), "old entry")
 
     def test_failed_rebuild_keeps_served_artifact(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -95,8 +99,37 @@ class IsolationTests(unittest.TestCase):
                     patch.object(backend, "build_static_web", side_effect=backend.FixtureError("failed")):
                 with self.assertRaisesRegex(backend.FixtureError, "failed"):
                     backend.rebuild_web(state)
-            self.assertEqual((target / "index.html").read_text(), "old entry")
+            self.assertEqual((target / "index.html").read_text(encoding="utf-8"), "old entry")
 
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class OwnedProcessTests(unittest.TestCase):
+    def test_identity_and_cleanup_of_only_our_child(self):
+        import subprocess
+        import sys
+        import time
+        child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)'])
+        try:
+            deadline = time.monotonic() + 3
+            birth = processes.identity(child.pid)
+            while not birth and time.monotonic() < deadline:
+                time.sleep(.01)
+                birth = processes.identity(child.pid)
+            self.assertTrue(birth)
+            owned = {"pid": child.pid, "identity": birth}
+            self.assertTrue(processes.alive(owned))
+            self.assertFalse(processes.alive({"pid": child.pid, "identity": "different birth"}))
+            processes.stop_process(owned)
+            child.wait(timeout=5)
+            self.assertFalse(processes.alive(owned))
+        finally:
+            if child.poll() is None:
+                child.terminate(); child.wait(timeout=5)
+
+    def test_windows_rebuild_reports_supported_platform_requirement(self):
+        with patch.object(backend.sys, 'platform', 'win32'):
+            with self.assertRaisesRegex(backend.FixtureError, 'macOS or Linux'):
+                backend.exchange_directories(Path('first'), Path('second'))

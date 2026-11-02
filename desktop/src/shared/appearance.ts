@@ -1,3 +1,4 @@
+import { windowsPanelPalette } from './platform';
 import { getLocale, setLocale } from './i18n';
 import type { Appearance } from './contract';
 let latest: Appearance | null = null;
@@ -15,5 +16,11 @@ export function applyAppearance(appearance: Appearance | null): void {
     root.style.setProperty('--theme-accent-solid', appearance.accent);
     root.style.setProperty('--theme-accent-soft', `color-mix(in srgb, ${appearance.accent} 16%, transparent)`);
   } else { root.style.removeProperty('--theme-accent-solid'); root.style.removeProperty('--theme-accent-soft'); }
+  if (root.dataset.platform === 'win32') {
+    const palette = windowsPanelPalette({ effective: root.dataset.themeEffective as 'light' | 'dark', pack: root.dataset.themePreset, accent: appearance?.accent || '#a57224' });
+    root.style.setProperty('--windows-panel-bg', palette.background);
+    root.style.setProperty('--windows-panel-fg', palette.foreground);
+    root.style.setProperty('--windows-panel-muted', palette.muted);
+  }
   root.style.fontSize = `${13 * (appearance?.fontScale || 1)}px`;
 }

@@ -15,7 +15,7 @@ it('serves only cataloged atlas files and supplies bundled attribution without f
     expect(JSON.stringify(catalog.list())).not.toContain(root);
     expect(await catalog.asset('pockymoe-pet://atlas/frost').text()).toBe('fixture-image');
     for (const path of ['pockymoe-pet://atlas/unknown', 'pockymoe-pet://atlas/%2e%2e%2fpet.json', 'pockymoe-pet://other/frost']) expect(catalog.asset(path).status).toBe(404);
-    rmSync(join(pack, 'spritesheet.webp')); symlinkSync(join(pack, 'pet.json'), join(pack, 'spritesheet.webp'));
+    rmSync(join(pack, 'spritesheet.webp')); symlinkSync(process.platform === 'win32' ? pack : join(pack, 'pet.json'), join(pack, 'spritesheet.webp'), process.platform === 'win32' ? 'junction' : 'file');
     expect(catalog.asset('pockymoe-pet://atlas/frost').status).toBe(404);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

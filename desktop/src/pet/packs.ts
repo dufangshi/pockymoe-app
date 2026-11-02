@@ -1,3 +1,4 @@
+import { windowsReservedName, windowsUnsafeName } from '../shared/platform';
 import { constants } from 'node:fs';
 import { lstat, mkdir, open, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
@@ -25,6 +26,7 @@ export function parseManifest(data: Buffer): PetManifest {
   if (!value || typeof value !== 'object') fail('pet.json must be an object');
   const manifest = value as Record<string, unknown>;
   if (typeof manifest.id !== 'string' || !/^[a-z0-9][a-z0-9_-]{0,63}$/.test(manifest.id)) fail('id must be 1–64 lowercase letters, digits, hyphens or underscores');
+  if (process.platform === 'win32' && windowsReservedName(manifest.id as string)) fail('id is reserved by Windows');
   if (typeof manifest.displayName !== 'string' || !manifest.displayName.trim() || manifest.displayName.length > 100) fail('displayName must contain 1–100 characters');
   if (typeof manifest.description !== 'string' || manifest.description.length > 500) fail('description must be at most 500 characters');
   if (!['spritesheet.png', 'spritesheet.webp'].includes(String(manifest.spritesheetPath))) fail('spritesheetPath must be spritesheet.png or spritesheet.webp');
@@ -171,7 +173,7 @@ export function unpackPetZip(bytes: Buffer): Map<string, Buffer> {
     const next = offset + 46 + nameLength + extraLength + commentLength;
     if (next > end) fail('truncated directory');
     const name = bytes.toString('utf8', offset + 46, offset + 46 + nameLength);
-    if (!name || name.includes('\\') || name.includes('\0') || name.startsWith('/') || /^[a-z]:/i.test(name) || name.split('/').some((part) => part === '..' || part === '.')) fail('unsafe zip path');
+    if (!name || name.includes('\\') || name.includes('\0') || name.startsWith('/') || /^[a-z]:/i.test(name) || name.split('/').some((part) => part === '..' || part === '.' || process.platform === 'win32' && windowsUnsafeName(part))) fail('unsafe zip path');
     const kind = mode & 0xf000;
     if (kind && kind !== 0x8000 && kind !== 0x4000) fail('zip symlinks and special files are not allowed');
     if (flags & 1 || ![0, 8].includes(method)) fail('encrypted or unsupported zip compression');
