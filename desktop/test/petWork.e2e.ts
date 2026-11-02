@@ -1,3 +1,4 @@
+import { recordLifecycle } from './lifecycle';
 import { test, expect, _electron as electron, type ElectronApplication, type Page } from '@playwright/test';
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
@@ -44,16 +45,20 @@ test.beforeEach(async () => {
   speech = []; profile = mkdtempSync(join(tmpdir(), 'pockymoe-pet-work-'));
   if (clipPack && test.info().title.startsWith('clips')) { mkdirSync(join(profile, 'pets')); cpSync(clipPack, join(profile, 'pets', clipPackId()), { recursive: true }); }
   const env: Record<string, string> = {};
-  for (const key of ['PATH', 'HOME', 'TMPDIR', 'USER', 'LOGNAME']) if (process.env[key]) env[key] = process.env[key]!;
+  for (const key of ['PATH', 'HOME', 'TMPDIR', 'USER', 'LOGNAME', 'SystemRoot', 'WINDIR', 'TEMP', 'TMP', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'ComSpec', 'PATHEXT']) if (process.env[key]) env[key] = process.env[key]!;
   Object.assign(env, { POCKYMOE_DESKTOP_E2E: '1', POCKYMOE_DESKTOP_USER_DATA: profile, POCKYMOE_DESKTOP_WEB_ORIGIN: origin, POCKYMOE_DESKTOP_RELAY_ORIGIN: origin });
-  const packaged = process.env.POCKYMOE_DESKTOP_APP;
-  app = await electron.launch({ ...(packaged ? { executablePath: packaged, args: [] } : { args: [resolve('.')] }), env });
+  const packaged = process.env.POCKYMOE_PACKAGED_EXECUTABLE || process.env.POCKYMOE_DESKTOP_APP;
+  app = await electron.launch({ ...(packaged ? { executablePath: packaged, args: [`--lang=${process.env.POCKYMOE_TEST_SYSTEM_LOCALE || 'en-US'}`, ...(process.env.POCKYMOE_DESKTOP_SCALE ? [`--force-device-scale-factor=${process.env.POCKYMOE_DESKTOP_SCALE}`] : [])] } : { args: [resolve('.'), `--lang=${process.env.POCKYMOE_TEST_SYSTEM_LOCALE || 'en-US'}`] }), env });
+  await recordLifecycle(app, join(evidence, `lifecycle-${Date.now()}.jsonl`));
+  await expect.poll(() => app.evaluate(() => '__pockymoeDesktopTest' in globalThis)).toBe(true);
+  await app.evaluate(() => globalThis.__pockymoeDesktopTest.appearance.sync({ pack: 'classic', effective: 'light', accent: '#a57224', locale: 'en' }));
   await expect.poll(() => app.evaluate(() => '__pockymoeDesktopTest' in globalThis)).toBe(true);
   await expect.poll(() => app.windows().filter(window => window.url().includes('pet/index.html')).length, { timeout: 20_000 }).toBe(2);
   await expect.poll(() => app.windows().some(window => window.url().startsWith(origin))).toBe(true);
   page = app.windows().find(window => window.url().startsWith(origin))!;
   await page.waitForLoadState('domcontentloaded');
   await expect.poll(() => page.evaluate(() => !!window.pockymoeHost)).toBe(true);
+  await page.evaluate(() => window.pockymoeHost!.capabilities());
 });
 test.afterEach(async () => { await app?.close(); rmSync(profile, { recursive: true, force: true }); });
 const pet = async (surface: 'sprite' | 'glass'): Promise<Page> => {
@@ -61,8 +66,10 @@ const pet = async (surface: 'sprite' | 'glass'): Promise<Page> => {
   throw new Error(`No ${surface} window`);
 };
 const settings = (patch: Partial<DesktopSettings>): Promise<void> => app.evaluate((_e, value) => (globalThis as unknown as { __pockymoeDesktopTest: Testing }).__pockymoeDesktopTest.settings.set(value), patch);
-const sync = (items: ActivityItem[]): Promise<void> => page.evaluate(value => window.pockymoeHost!.activity.sync(value), snapshot(items));
-const baseline = (): Promise<void> => page.evaluate(value => window.pockymoeHost!.activity.sync(value), snapshot([], { generatedAt: '2026-11-01T05:59:00.000Z', syncedDeviceIds: ['mac', 'pc'] }));
+// The next action comes from a different renderer. Await a same-frame IPC roundtrip
+// so it cannot overtake a fire-and-forget activity update under runner load.
+const sync = (items: ActivityItem[]): Promise<void> => page.evaluate(async value => { window.pockymoeHost!.activity.sync(value); await window.pockymoeHost!.capabilities(); }, snapshot(items));
+const baseline = (): Promise<void> => page.evaluate(async value => { window.pockymoeHost!.activity.sync(value); await window.pockymoeHost!.capabilities(); }, snapshot([], { generatedAt: '2026-11-01T05:59:00.000Z', syncedDeviceIds: ['mac', 'pc'] }));
 const finish = async (): Promise<void> => { await baseline(); await sync([item()]); await sync([item({ state: 'completed', unread: true })]); };
 const movePetUnderPointer = (): Promise<void> => app.evaluate(({ BrowserWindow, screen }) => {
   const sprite = BrowserWindow.getAllWindows().find(window => window.webContents.getURL().includes('pet/index.html') && !window.getParentWindow())!;
@@ -127,6 +134,12 @@ const openPreferences = async (): Promise<Page> => {
   await expect.poll(() => app.windows().some(window => window.url().includes('preferences'))).toBe(true);
   const preferences = app.windows().find(window => window.url().includes('preferences'))!;
   await preferences.locator('[data-section="pet"]').click();
+  // Discovery starts when this section mounts. Open its pickers only after their
+  // data arrives; an open picker deliberately defers replacing its options.
+  await expect.poll(() => preferences.evaluate(async () => {
+    const state = await (window as unknown as { pockymoeDesktop: { getState(): Promise<import('../src/shared/local').LocalState> } }).pockymoeDesktop.getState();
+    return !!state.summary.muteTargets && (!state.settings.petVoiceSummary || state.summary.connections.length > 0);
+  })).toBe(true);
   return preferences;
 };
 test('summary: picks a saved upstream and its model, and reads what the model said', async () => {
@@ -285,7 +298,7 @@ test('closing the panel leaves the main window where it was', async () => {
   await expect.poll(focused).toBe(false);
   await act({ type: 'toggleTray' });
   // What a real click can do on macOS: the app comes forward with its main window.
-  await app.evaluate(({ BrowserWindow }) => { BrowserWindow.getAllWindows().find(window => !window.webContents.getURL().includes('pet/index.html'))?.focus(); });
+  if (process.platform === 'darwin') await app.evaluate(({ BrowserWindow }) => { BrowserWindow.getAllWindows().find(window => !window.webContents.getURL().includes('pet/index.html'))?.focus(); });
   await act({ type: 'close' });
   await expect.poll(focused).toBe(false);
 });
@@ -309,4 +322,53 @@ test('clips: a pack with clips plays them and survives a click', async () => {
   await sprite.waitForTimeout(1500);
   await sprite.screenshot({ path: join(evidence, 'clip-poked.png'), omitBackground: true });
   await expect(sprite.locator('#character')).toHaveClass(/clips/);
+});
+
+for (const surface of ['glass', 'sprite'] as const) test(`native close on ${surface} keeps a usable sprite`, async () => {
+  await baseline(); await settings({ petVisible: true, petEdgeHide: false });
+  const sprite = await pet('sprite'), glass = await pet('glass');
+  const act = (value: unknown) => sprite.evaluate(input => (window as unknown as { rcDesktop: { pet: { action(value: unknown): Promise<unknown> } } }).rcDesktop.pet.action(input), value);
+  await act({ type: 'toggleTray' }); await expect(glass.locator('.panel')).toBeVisible();
+  await app.evaluate(({ BrowserWindow }, surface) => {
+    const window = BrowserWindow.getAllWindows().find(window => window.webContents.getURL().includes('pet/index.html') && !!window.getParentWindow() === (surface === 'glass'))!;
+    window.close();
+  }, surface);
+  await expect(glass.locator('.panel')).toHaveCount(0);
+  if (surface === 'sprite') {
+    expect(await app.evaluate(() => globalThis.__pockymoeDesktopTest.settings.get().petVisible)).toBe(false);
+    await settings({ petVisible: true });
+  }
+  expect(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().filter(window => window.webContents.getURL().includes('pet/index.html')).length)).toBe(2);
+  await act({ type: 'toggleTray' }); await expect(glass.locator('.panel')).toBeVisible();
+  await expect(sprite.locator('#character')).toBeVisible();
+  expect(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find(window => window.webContents.getURL().includes('pet/index.html') && !window.getParentWindow())!.isVisible())).toBe(true);
+});
+
+for (const surface of ['glass', 'sprite'] as const) test(`destroying ${surface} retires both pet windows`, async () => {
+  await app.evaluate(({ BrowserWindow }, surface) => {
+    BrowserWindow.getAllWindows().find(window => window.webContents.getURL().includes('pet/index.html') && !!window.getParentWindow() === (surface === 'glass'))!.destroy();
+  }, surface);
+  await expect.poll(() => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().filter(window => window.webContents.getURL().includes('pet/index.html')).length)).toBe(0);
+  await page.evaluate(() => window.pockymoeHost!.window.openPreferences('pet'));
+  await expect.poll(() => app.windows().some(page => page.url().includes('view=preferences'))).toBe(true);
+  const prefs = app.windows().find(page => page.url().includes('view=preferences'))!;
+  await expect.poll(() => prefs.evaluate(async () => (await (window as unknown as { pockymoeDesktop: { getState(): Promise<{ petAvailable: boolean }> } }).pockymoeDesktop.getState()).petAvailable)).toBe(false);
+});
+
+test('empty panel omits reply row and settles without moving the sprite', async () => {
+  await baseline(); await settings({ petVisible: true, petEdgeHide: false });
+  const sprite = await pet('sprite'), glass = await pet('glass');
+  const act = (value: unknown) => sprite.evaluate(input => (window as unknown as { rcDesktop: { pet: { action(value: unknown): Promise<unknown> } } }).rcDesktop.pet.action(input), value);
+  await act({ type: 'toggleTray' });
+  await expect(glass.locator('.empty')).toHaveText('All caught up');
+  await expect(glass.locator('#chat-form')).toHaveCount(0);
+  const before = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find(window => window.webContents.getURL().includes('pet/index.html') && !window.getParentWindow())!.getBounds());
+  const height = (await glassBounds()).height;
+  await sync([item()]); await expect(glass.locator('#chat-form')).toBeVisible();
+  await page.evaluate(value => window.pockymoeHost!.activity.sync(value), snapshot([], { accountId: 'empty-panel-account', syncedDeviceIds: ['mac', 'pc'] }));
+  await act({ type: 'toggleTray' });
+  await expect(glass.locator('.empty')).toHaveText('All caught up');
+  await expect(glass.locator('#chat-form')).toHaveCount(0);
+  await expect.poll(async () => (await glassBounds()).height).toBe(height);
+  expect(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find(window => window.webContents.getURL().includes('pet/index.html') && !window.getParentWindow())!.getBounds())).toEqual(before);
 });

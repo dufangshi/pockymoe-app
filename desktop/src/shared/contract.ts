@@ -272,6 +272,7 @@ export interface PetControllerDeps {
 export interface PetController {
   setVisible(visible: boolean): void;
   isVisible(): boolean;
+  isAvailable(): boolean;
   /** Reads packs again after one was imported or replaced. */
   reloadPacks(): Promise<void>;
   /** Plays encoded speech now, ahead of the alert queue, for previews. */

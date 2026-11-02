@@ -30,7 +30,20 @@ export function mountSelect(trigger: HTMLButtonElement, options: SelectOption[],
   const focus = (): void => {
     const rows = popup?.querySelectorAll<HTMLElement>('[role=option]');
     rows?.forEach((row, at) => { row.tabIndex = at === index ? 0 : -1; });
-    rows?.[index]?.focus({ preventScroll: true }); rows?.[index]?.scrollIntoView({ block: 'nearest' });
+    const row = rows?.[index], list = popup?.querySelector<HTMLElement>('.select-options');
+    row?.focus({ preventScroll: true });
+    if (row && list) {
+      // Align endpoints exactly; nearest can leave a fractional clipped pixel
+      // after Chromium rounds the scroll offset at 150% display scaling.
+      if (index === 0) list.scrollTop = 0;
+      else if (index === options.length - 1) list.scrollTop = list.scrollHeight;
+      else {
+        const bounds = list.getBoundingClientRect(), target = row.getBoundingClientRect();
+        const padding = 1 / devicePixelRatio;
+        if (target.top < bounds.top + padding) list.scrollTop -= Math.ceil((bounds.top + padding - target.top) * devicePixelRatio) / devicePixelRatio;
+        else if (target.bottom > bounds.bottom - padding) list.scrollTop += Math.ceil((target.bottom - bounds.bottom + padding) * devicePixelRatio) / devicePixelRatio;
+      }
+    }
   };
   const open = (): void => {
     if (popup || trigger.disabled || !options.length) return;

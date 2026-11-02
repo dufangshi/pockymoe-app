@@ -1,6 +1,9 @@
 /** One source for app-owned desktop strings. Thread titles, summaries and names
  * are user content and are intentionally never translated. */
 export const english = {
+  "关闭窗口后仍在通知区域中运行。": "Keep running in the notification area after closing a window.",
+  "关闭窗口后仍在菜单栏中运行。": "Keep running in the menu bar after closing a window.",
+  "Windows 仅在 Pockymoe 运行时提供提醒。": "Windows alerts are available only while Pockymoe is running.",
   "设备": "Device",
   "工作区": "Workspace",
   "对话": "Conversation",
@@ -216,7 +219,6 @@ export const english = {
   "更改…": "Change…",
   "启动": "Startup",
   "登录时启动": "Launch at login",
-  "关闭窗口后仍在菜单栏或托盘中运行。": "Keep running in the menu bar or tray after closing a window.",
   "提醒方式": "Alert delivery",
   "当前正在查看的线程不会打扰你。": "The thread you are viewing will not interrupt you.",
   "桌宠优先": "Pet first",

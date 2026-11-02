@@ -30,7 +30,10 @@ for state in ('attention','running'):
     for n in [*range(1,10),'many']:
         image = Image.new('RGBA',(128,128)); d=ImageDraw.Draw(image)
         color='#d99024' if state=='attention' else '#407ec9'
-        d.ellipse((2,2,126,126),fill=color if state=='attention' else '#ffffff',outline=color,width=10)
+        if state == 'attention':
+            d.rounded_rectangle((4,4,124,104),radius=24,fill=color)
+            d.polygon([(72,96),(100,96),(100,126)],fill=color)
+        else: d.ellipse((2,2,126,126),fill='#ffffff',outline=color,width=10)
         font=ImageFont.truetype('/System/Library/Fonts/Supplemental/Arial Bold.ttf',62 if n=='many' else 76)
         d.text((64,65),'9+' if n=='many' else str(n),anchor='mm',fill='#ffffff' if state=='attention' else color,font=font)
         image.resize((32,32),Image.Resampling.LANCZOS).save(build/f'overlay-{state}-{n}.png')

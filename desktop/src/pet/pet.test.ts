@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { fileURLToPath } from 'node:url';
+import { describe, expect, it, vi } from 'vitest';
 import { access, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -99,17 +100,24 @@ describe('display and dock geometry', () => {
   });
 });
 describe('pack validation and safe import', () => {
-  const fixture = new URL('../../assets/pets/placeholder/', import.meta.url).pathname;
+  const fixture = fileURLToPath(new URL('../../assets/pets/placeholder/', import.meta.url));
   it('accepts a good v1 and v2 atlases and rejects dimensions, unsupported versions, formats and limits', async () => {
     const p = await loadPetPack(fixture); expect(p.manifest.id).toBe('placeholder'); const wrong = Buffer.from(p.image); wrong.writeUInt32BE(1760, 20); expect(() => validateAtlas(wrong, p.manifest)).toThrow('1536×1872'); expect(() => validateAtlas(Buffer.alloc(MAX_PACK_BYTES + 1), p.manifest)).toThrow('8 MB'); expect(() => validateAtlas(Buffer.from('fake'), p.manifest)).toThrow('PNG or WebP'); expect(parseManifest(Buffer.from(JSON.stringify({ ...p.manifest, spriteVersionNumber: 2 }))).spriteVersionNumber).toBe(2); expect(() => parseManifest(Buffer.from(JSON.stringify({ ...p.manifest, spriteVersionNumber: 3 })))).toThrow('spriteVersionNumber'); expect(() => parseManifest(Buffer.from(JSON.stringify({ ...p.manifest, spritesheetPath: '../outside.png' })))).toThrow('spritesheetPath');
   });
   it.each(['../outside', '/absolute', 'C:/windows', 'folder/../../outside', 'folder\\outside'])('rejects zip traversal %s', (name) => { expect(() => unpackPetZip(zip([{ name, data: Buffer.from('x') }]))).toThrow('unsafe zip path'); });
+  it('rejects Windows aliases, drive-relative paths and backslashes before extracting', () => {
+    vi.stubGlobal('process', { ...process, platform: 'win32' });
+    try {
+      for (const name of ['C:pet.json', 'C:/pet.json', 'folder\\pet.json', '//server/share/pet.json', 'CON/pet.json', 'pack./pet.json', 'pack /pet.json', 'clips/aux.webp', 'file:stream'])
+        expect(() => unpackPetZip(zip([{ name, data: Buffer.from('x') }]))).toThrow('unsafe zip path');
+    } finally { vi.unstubAllGlobals(); }
+  });
   it('rejects symlinks, duplicates, corrupt zips and decompression bombs', () => {
     expect(() => unpackPetZip(zip([{ name: 'pet.json', data: Buffer.from('target'), mode: 0xa1ff }]))).toThrow('symlinks'); expect(() => unpackPetZip(zip([{ name: 'x', data: Buffer.alloc(1) }, { name: 'x', data: Buffer.alloc(1) }]))).toThrow('duplicate'); expect(() => unpackPetZip(Buffer.from('bad zip'))).toThrow('end record'); expect(() => unpackPetZip(zip([{ name: 'x', data: Buffer.alloc(MAX_PACK_BYTES + 1) }]))).toThrow('size limit');
   });
   it('imports a nested zip atomically, replaces on a repeat, and refuses symlink folders', async () => {
     const temp = await mkdtemp(join(tmpdir(), 'pet-test-'));
-    try { const image = await readFile(join(fixture, 'spritesheet.png')), manifest = await readFile(join(fixture, 'pet.json')), source = join(temp, 'pack.zip'); await writeFile(source, zip([{ name: 'little/pet.json', data: manifest }, { name: 'little/spritesheet.png', data: image }])); const imported = await importPetPack(source, join(temp, 'pets')); expect(await readFile(join(imported.directory, 'spritesheet.png'))).toEqual(image); await expect(importPetPack(source, join(temp, 'pets'))).resolves.toBeTruthy(); await symlink(fixture, join(temp, 'link')); await expect(loadPetPack(join(temp, 'link'))).rejects.toThrow('regular directory'); } finally { await rm(temp, { recursive: true, force: true }); }
+    try { const image = await readFile(join(fixture, 'spritesheet.png')), manifest = await readFile(join(fixture, 'pet.json')), source = join(temp, 'pack.zip'); await writeFile(source, zip([{ name: 'little/pet.json', data: manifest }, { name: 'little/spritesheet.png', data: image }])); const imported = await importPetPack(source, join(temp, 'pets')); expect(await readFile(join(imported.directory, 'spritesheet.png'))).toEqual(image); await expect(importPetPack(source, join(temp, 'pets'))).resolves.toBeTruthy(); await symlink(fixture, join(temp, 'link'), process.platform === 'win32' ? 'junction' : 'dir'); await expect(loadPetPack(join(temp, 'link'))).rejects.toThrow('regular directory'); } finally { await rm(temp, { recursive: true, force: true }); }
   });
 });
 
@@ -129,11 +137,11 @@ describe('interaction regressions', () => {
     expect(restorePosition({ displayId: 1, x: NaN, y: 400, edge: null }, [display], display, 128)).toEqual(defaultPosition(display, 128));
   });
   it('accepts the final WebP atlas and the optional original sleeping strip', async () => {
-    const pack = await loadPetPack(new URL('../../assets/pets/moe/', import.meta.url).pathname); expect(pack.manifest.id).toBe('moe'); expect(pack.sleepingImage?.length).toBeGreaterThan(0); expect(pack.manifest.remoteCodex?.sleeping?.frames).toBe(4);
+    const pack = await loadPetPack(fileURLToPath(new URL('../../assets/pets/moe/', import.meta.url))); expect(pack.manifest.id).toBe('moe'); expect(pack.sleepingImage?.length).toBeGreaterThan(0); expect(pack.manifest.remoteCodex?.sleeping?.frames).toBe(4);
   });
   it('refuses a header-valid image if the pixel decoder rejects it, before installing anything', async () => {
     const temp = await mkdtemp(join(tmpdir(), 'pet-decode-'));
-    try { const source = new URL('../../assets/pets/placeholder/', import.meta.url).pathname; await expect(importPetPack(source, join(temp, 'pets'), undefined, ['placeholder'])).rejects.toThrow('built in'); await expect(importPetPack(source, join(temp, 'pets'), () => false)).rejects.toThrow('cannot decode'); await expect(access(join(temp, 'pets', 'placeholder'))).rejects.toThrow(); } finally { await rm(temp, { recursive: true, force: true }); }
+    try { const source = fileURLToPath(new URL('../../assets/pets/placeholder/', import.meta.url)); await expect(importPetPack(source, join(temp, 'pets'), undefined, ['placeholder'])).rejects.toThrow('built in'); await expect(importPetPack(source, join(temp, 'pets'), () => false)).rejects.toThrow('cannot decode'); await expect(access(join(temp, 'pets', 'placeholder'))).rejects.toThrow(); } finally { await rm(temp, { recursive: true, force: true }); }
   });
 });
 
@@ -171,7 +179,7 @@ describe('v3 atlas and fixed-window regressions', () => {
   it('imports one zip with the whole pet, clips included, and replaces it when imported again', async () => {
     const temp = await mkdtemp(join(tmpdir(), 'pet-zip-'));
     try {
-      const fixture = new URL('../../assets/pets/frost/', import.meta.url).pathname;
+      const fixture = fileURLToPath(new URL('../../assets/pets/frost/', import.meta.url));
       const image = await readFile(join(fixture, 'spritesheet.webp')), strip = await readFile(join(fixture, 'sleeping.webp'));
       // A real WebP header: 4 frames of 192×208 in one row.
       const manifest = (description: string): Buffer => Buffer.from(JSON.stringify({ id: 'custom', displayName: 'Custom', description, spritesheetPath: 'spritesheet.webp', remoteCodex: { clipFormat: { fps: 12, columns: 4, width: 192, height: 208 }, clips: { running: [{ path: 'clips/work.webp', frames: 4 }] } } }));
@@ -193,14 +201,14 @@ describe('v3 atlas and fixed-window regressions', () => {
     } finally { await rm(temp, { recursive: true, force: true }); }
   });
   it('accepts the v2 layout of imported packs without adding look slots to animation loops', async () => {
-    const pack = await loadPetPack(new URL('../../assets/pets/frost/', import.meta.url).pathname);
+    const pack = await loadPetPack(fileURLToPath(new URL('../../assets/pets/frost/', import.meta.url)));
     const v2 = PNG.sync.write(new PNG({ width: 1536, height: 2288 })), manifest = { ...pack.manifest, spritesheetPath: 'spritesheet.png' as const, spriteVersionNumber: 2 };
     validateAtlas(v2, manifest);
     expect(ANIMATIONS.idle.durations).toHaveLength(6); expect(ANIMATIONS.review.row).toBe(8);
     expect(() => validateAtlas(v2, { ...manifest, spriteVersionNumber: 1 })).toThrow('8×9');
   });
   it('honours frameScale, caps one-shots on the last frame, and rejects unsafe values', async () => {
-    const pack = await loadPetPack(new URL('../../assets/pets/moe/', import.meta.url).pathname);
+    const pack = await loadPetPack(fileURLToPath(new URL('../../assets/pets/moe/', import.meta.url)));
     expect(pack.manifest.remoteCodex?.frameScale).toBe(2.5);
     expect(frameAt('idle', 699, false, 2.5)).toBe(0); expect(frameAt('idle', 700, false, 2.5)).toBe(1);
     expect(frameAt('waving', 10000, false, 2.5, true)).toBe(3);

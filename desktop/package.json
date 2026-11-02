@@ -43,7 +43,9 @@
     ],
     "supportedArchitectures": {
       "os": [
-        "current"
+        "current",
+        "darwin",
+        "win32"
       ],
       "cpu": [
         "arm64",
