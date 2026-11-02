@@ -1,5 +1,5 @@
 import { test, expect, _electron as electron, type ElectronApplication, type Page } from '@playwright/test';
-import { cpSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -12,6 +12,7 @@ const evidence = process.env.POCKYMOE_DESKTOP_EVIDENCE || join(tmpdir(), 'pockym
 /** An unpacked pack with clips, to check real playback; the fixtures here have no WebP encoder. */
 const clipPack = process.env.POCKYMOE_CLIP_PACK;
 type Testing = { hub: { sync(value: unknown): void }; settings: { set(patch: Partial<DesktopSettings>): void }; appearance: { sync(value: unknown): void }; windows: { createLocal(view: string): void } };
+const clipPackId = (): string => (JSON.parse(readFileSync(join(clipPack!, 'pet.json'), 'utf8')) as { id: string }).id;
 let server: Server, origin: string, app: ElectronApplication, profile: string, page: Page;
 let speech: string[] = [];
 function wav(): Buffer {
@@ -41,7 +42,7 @@ test.beforeAll(async () => {
 test.afterAll(async () => { await new Promise<void>(done => server.close(() => done())); });
 test.beforeEach(async () => {
   speech = []; profile = mkdtempSync(join(tmpdir(), 'pockymoe-pet-work-'));
-  if (clipPack && test.info().title.startsWith('clips')) { mkdirSync(join(profile, 'pets')); cpSync(clipPack, join(profile, 'pets', 'bailong'), { recursive: true }); }
+  if (clipPack && test.info().title.startsWith('clips')) { mkdirSync(join(profile, 'pets')); cpSync(clipPack, join(profile, 'pets', clipPackId()), { recursive: true }); }
   const env: Record<string, string> = {};
   for (const key of ['PATH', 'HOME', 'TMPDIR', 'USER', 'LOGNAME']) if (process.env[key]) env[key] = process.env[key]!;
   Object.assign(env, { POCKYMOE_DESKTOP_E2E: '1', POCKYMOE_DESKTOP_USER_DATA: profile, POCKYMOE_DESKTOP_WEB_ORIGIN: origin, POCKYMOE_DESKTOP_RELAY_ORIGIN: origin });
@@ -291,7 +292,7 @@ test('closing the panel leaves the main window where it was', async () => {
 test('clips: a pack with clips plays them and survives a click', async () => {
   test.skip(!clipPack, 'POCKYMOE_CLIP_PACK is not set');
   test.setTimeout(60_000);
-  await settings({ petId: 'bailong' });
+  await settings({ petId: clipPackId() });
   await baseline();
   await sync([item()]);
   const sprite = await pet('sprite');
