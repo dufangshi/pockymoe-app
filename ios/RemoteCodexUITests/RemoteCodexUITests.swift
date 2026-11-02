@@ -1,65 +1,68 @@
 import XCTest
 
 final class RemoteCodexUITests: XCTestCase {
-    func testLoginNavigateThreadAndOpenCompletedNotification() throws {
+    private func capture(_ app: XCUIApplication, _ name: String) {
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = name; attachment.lifetime = .keepAlways; add(attachment)
+    }
+    func testWebLoginAndResume() throws {
         continueAfterFailure = false
         let env = ProcessInfo.processInfo.environment
-        func value(_ key: String) throws -> String {
-            try XCTUnwrap(env[key], "Missing simulator test configuration: \(key)")
-        }
-        let relay = try value("E2E_RELAY_URL")
-        let token = try value("E2E_TOKEN")
-        let device = try value("E2E_DEVICE_ID")
-        let workspace = try value("E2E_WORKSPACE_ID")
-        let api = try value("E2E_DEVICE_API")
         let app = XCUIApplication()
         app.launchArguments = ["--uitesting"]
-        app.launchEnvironment = ["E2E_RELAY_URL": relay, "E2E_TOKEN": token]
+        app.launchEnvironment = ["E2E_RELAY_URL": try XCTUnwrap(env["E2E_RELAY_URL"])]
         app.launch()
-        let system = XCUIApplication(bundleIdentifier: "com.apple.springboard")
-        let allow = system.alerts.buttons["Allow"].firstMatch
-        if allow.waitForExistence(timeout: 10) { allow.tap() }
         let web = app.webViews["productWebView"]
-        XCTAssertTrue(web.waitForExistence(timeout: 20))
-        XCTAssertTrue(app.links["Open devices"].waitForExistence(timeout: 20), app.debugDescription)
-
-        func post(_ path: String, _ body: [String: Any]) throws -> [String: Any] {
-            var request = URLRequest(url: try XCTUnwrap(URL(string: api + path)))
-            request.httpMethod = "POST"
-            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            request.httpBody = try JSONSerialization.data(withJSONObject: body)
-            let done = expectation(description: path)
-            var result: [String: Any] = [:]
-            URLSession.shared.dataTask(with: request) { data, response, error in
-                XCTAssertNil(error)
-                XCTAssertTrue((200..<300).contains((response as? HTTPURLResponse)?.statusCode ?? 0))
-                if let data { result = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:] }
-                done.fulfill()
-            }.resume()
-            wait(for: [done], timeout: 20)
-            return result
+        XCTAssertTrue(web.waitForExistence(timeout: 30))
+        let loginLink = web.links.matching(NSPredicate(format: "label == 'Sign in' OR label == '登录'")).firstMatch
+        if loginLink.waitForExistence(timeout: 10) { loginLink.tap() }
+        let username = web.textFields.firstMatch
+        XCTAssertTrue(username.waitForExistence(timeout: 30), app.debugDescription)
+        username.tap(); username.typeText(try XCTUnwrap(env["E2E_USERNAME"]))
+        let password = web.secureTextFields.firstMatch
+        XCTAssertTrue(password.exists)
+        password.tap(); password.typeText(try XCTUnwrap(env["E2E_PASSWORD"]))
+        let signIn = web.buttons.matching(NSPredicate(format: "label == 'Sign in' OR label == '登录'")).firstMatch
+        XCTAssertTrue(signIn.exists, app.debugDescription)
+        signIn.tap()
+        let devices = web.staticTexts["e2e-phone"].firstMatch
+        XCTAssertTrue(devices.waitForExistence(timeout: 40), app.debugDescription)
+        capture(app, "web-login-devices")
+        XCUIDevice.shared.press(.home)
+        app.activate()
+        XCTAssertTrue(devices.waitForExistence(timeout: 10))
+        capture(app, "resume-preserves-web-page")
+    }
+    func testOfflineRetry() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["--uitesting"]
+        app.launchEnvironment = ["E2E_RELAY_URL": "http://127.0.0.1:28799"]
+        app.launch()
+        let retry = app.buttons["retryConnection"]
+        XCTAssertTrue(retry.waitForExistence(timeout: 20))
+        capture(app, "offline")
+        retry.tap()
+        XCTAssertTrue(retry.waitForExistence(timeout: 20))
+    }
+    func testActivityFixtures() throws {
+        let env = ProcessInfo.processInfo.environment
+        for state in ["running", "needsInput", "failed", "overflow", "completed"] {
+            let app = XCUIApplication()
+            app.launchArguments = ["--uitesting"]
+            app.launchEnvironment = ["E2E_RELAY_URL": try XCTUnwrap(env["E2E_RELAY_URL"]), "E2E_ACTIVITY_STATE": state]
+            app.launch()
+            XCTAssertTrue(app.webViews["productWebView"].waitForExistence(timeout: 20))
+            XCUIDevice.shared.press(.home)
+            // The system renders asynchronously after ActivityKit accepts the update.
+            let system = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+            XCTAssertTrue(system.wait(for: .runningForeground, timeout: 10))
+            let label = state == "needsInput" || state == "overflow" ? "等待你" : state == "running" ? "运行中" : state == "failed" ? "失败" : "已完成"
+            XCTAssertTrue(system.descendants(matching: .any).matching(identifier: label).firstMatch.waitForExistence(timeout: 15), "System must render the activity before taking evidence")
+            capture(system, "island-compact-\(state)")
+            let island = system.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.035))
+            island.press(forDuration: 1.5)
+            capture(system, "island-expanded-\(state)")
+            app.terminate()
         }
-        // The foreground durable-feed watcher must deliver a real system banner
-        // for another completed thread; no test-only in-app banner substitutes.
-        let created = try post("/threads/start", ["workspaceId": workspace, "title": "iOS notification regression", "provider": "acp", "agentId": "codex", "model": "ios-e2e-stream", "approvalMode": "yolo"])
-        let thread = try XCTUnwrap(created["id"] as? String ?? (created["thread"] as? [String: Any])?["id"] as? String)
-        _ = try post("/threads/\(thread)/prompt", ["prompt": "Reply with hello."])
-        let banner = system.staticTexts["Agent run finished. Tap to open this thread."].firstMatch
-        XCTAssertTrue(banner.waitForExistence(timeout: 30), "Real system completion banner must arrive")
-        banner.tap()
-        let route = NSPredicate(format: "value == %@", "/devices/\(device)/threads/\(thread)")
-        expectation(for: route, evaluatedWith: web)
-        waitForExpectations(timeout: 30)
-        let prompt = app.textViews["Prompt"]
-        XCTAssertTrue(prompt.waitForExistence(timeout: 30), app.debugDescription)
-        XCTAssertEqual(app.buttons.matching(identifier: "Thread tools").count, 1, "No duplicate native toolbar")
-        XCTAssertFalse(app.buttons["Download transcript"].exists, "Tools default collapsed")
-        app.buttons["Thread tools"].tap()
-        XCTAssertTrue(app.buttons["Download transcript"].waitForExistence(timeout: 5))
-        let screenshot = XCTAttachment(screenshot: app.screenshot())
-        screenshot.name = "Shared thread UI opened from system notification"
-        screenshot.lifetime = .keepAlways
-        add(screenshot)
     }
 }

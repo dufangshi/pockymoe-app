@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
+umask 077
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CODEX="${REMOTE_CODEX_ROOT:-$HOME/dev/remoteCodex}"
-BIN="${REMOTE_CODEX_BIN:-$CODEX/target/debug/remote-codex}"
+BIN="${REMOTE_CODEX_BIN:-$CODEX/target/debug/pockymoe}"
 WEB_DIST="${REMOTE_CODEX_RELAY_WEB_DIST_DIR:-$CODEX/apps/supervisor-web/dist}"
 DATA="$ROOT/.local/e2e"
 ENV_FILE="$ROOT/.local/e2e-env.json"
@@ -43,7 +44,7 @@ start() {
   fi
   DATA="$(mktemp -d "$ROOT/.local/e2e.XXXXXX")"
   # Never inherit a managed thread's production database, relay or credentials.
-  for name in ${!REMOTE_CODEX_@}; do unset "$name"; done
+  for name in ${!REMOTE_CODEX_@} ${!POCKYMOE_@}; do unset "$name"; done
   mkdir -p "$DATA/workspaces/mobile-ws"
   echo "# mobile e2e workspace" > "$DATA/workspaces/mobile-ws/README.md"
 
@@ -62,6 +63,8 @@ start() {
     sleep 0.25
   done
   curl -sf "$RELAY/healthz" >/dev/null
+
+  E2E_WEB_PACKAGE="$CODEX/apps/supervisor-web/package.json" node "$ROOT/scripts/e2e-account.mjs" "$DATA/account.json" "$USERNAME" "$PASSWORD"
 
   python3 - "$RELAY" "$USERNAME" "$PASSWORD" "$DATA" "$ENV_FILE" "$PORT" <<'PY'
 import json, sys, urllib.request, pathlib, time
@@ -84,23 +87,20 @@ def req(method, path, body=None, token=None):
         except Exception:
             raise SystemExit(f"{method} {path}: {error.code} {raw}") from error
 
-reg = req("POST", "/relay/auth/register", {
-    "email": "mobile@example.com",
-    "username": username,
-    "password": password,
-})
+registration = json.loads(pathlib.Path(data_dir, "account.json").read_text())
+reg = req("POST", "/relay/auth/register", registration)
 token = reg.get("token") or ""
 if not token:
-    login = req("POST", "/relay/auth/login", {"identifier": username, "password": password})
+    login = req("POST", "/relay/auth/login", {"identifier": username, "authKey": registration["authKey"]})
     token = login.get("token") or ""
 if not token:
-    raise SystemExit(f"unable to obtain relay user token: {reg}")
+    raise SystemExit("unable to authenticate isolated account")
 created = req("POST", "/relay/devices", {"name": "e2e-phone"}, token)
 device = created.get("device") or {}
 device_id = device.get("id")
 device_token = created.get("token") or device.get("token")
 if not device_id or not device_token:
-    raise SystemExit(f"unable to create device: {created}")
+    raise SystemExit("unable to create isolated device")
 pathlib.Path(data_dir, "provision.json").write_text(json.dumps({
     "token": token,
     "deviceId": device_id,

@@ -7,21 +7,19 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		05CCA3E32E28E12558B4249B /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100A28395AD9249007892B6B /* Theme.swift */; };
-		1F6F27A62C0F6815B4761169 /* native-bridge.js in Resources */ = {isa = PBXBuildFile; fileRef = 34686CB902BE2B65E8948084 /* native-bridge.js */; };
-		30619D85A639E15267F80C8E /* SessionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD620A3F2229D517B02A755E /* SessionStore.swift */; };
-		3A23EBA385C41E209FD38C82 /* RemoteCodexApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B582C49511E8012D3779A31 /* RemoteCodexApp.swift */; };
-		3AD446CEDDCAB344691F851C /* ThreadWebView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A6226F10BCBCF75780F727F /* ThreadWebView.swift */; };
+		1540DB8F3CC5DFE9A756A79D /* LiveActivityManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E0B081B8892FF8A5DA5AD32 /* LiveActivityManager.swift */; };
+		2CEB81250ABEA6950FA5BAA0 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = F532EE5C43393D122FF82300 /* Assets.xcassets */; };
+		35D9A9DFB08B00EFCD65B348 /* LiveActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = AAB66863196DD3C9904D04C6 /* LiveActivityAttributes.swift */; };
 		4F859B3781AFA046F4BFC4AD /* RemoteCodexUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20B8D46B37DE808A09C6B86E /* RemoteCodexUITests.swift */; };
-		534F5BC87D71F06C8B7C6E91 /* DeviceAccessViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = EAF0D9FCC1B95CEA1BB8A696 /* DeviceAccessViews.swift */; };
-		6E5D47588FB12D78C3CE90BD /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = B78B224F68B667D7F2B51D56 /* Models.swift */; };
-		77FD2B0E44B01BBE8FF17A74 /* Components.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D38F8A2105252D4BD4D5680 /* Components.swift */; };
-		83EA4DEC46FF2DD4706071C2 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D8938FC70E7D30BF5DE7202 /* RootView.swift */; };
-		9F2C5BADE73A3EBFBE906D62 /* EventWatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 52E282EC58A24F97EC20C184 /* EventWatcher.swift */; };
-		A39C7A1ADB44D858D4A41673 /* AppRoute.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D420E8C1B58B03B714B5B09 /* AppRoute.swift */; };
-		B6B667CBEE8F850E50664E54 /* Screens.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A75764386B1AF70AF05EE49 /* Screens.swift */; };
-		C829676B20F6307B68F458D4 /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 88C8C0C499C787CE487A2ABA /* APIClient.swift */; };
+		6FDD22B72356B49ABE18A4AA /* ShellController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D67D00DBC5982FA5D9BADB3F /* ShellController.swift */; };
+		75E5220690D6D8DF49C4E2F5 /* LiveActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = AAB66863196DD3C9904D04C6 /* LiveActivityAttributes.swift */; };
+		82CC1E51E945DF54B45CDEC3 /* PockymoeLiveActivity.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 15FC8A17B57538DDCD0D4838 /* PockymoeLiveActivity.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		99BBA5F2F9FC392476FEA35C /* PockymoeLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 424A8B9D2686AFE025A849C5 /* PockymoeLiveActivity.swift */; };
+		9D310DBC5B691B839B53B02E /* pockymoe-host.js in Resources */ = {isa = PBXBuildFile; fileRef = 3F7B69E276D5CB39C6A582A3 /* pockymoe-host.js */; };
+		A782ADD590E7763C3EB388F9 /* MobileApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 998245FEBFC45F287E6EFE6E /* MobileApp.swift */; };
+		B1070108A7F0800A381E2AAD /* ActivityPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 035C7B10E9EF4FF34C3B7001 /* ActivityPolicy.swift */; };
 		DD103EE72FEF3C4C48FE40BE /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = E73A168D7BF987C354EE4D65 /* Assets.xcassets */; };
+		E5E3C22F104AE21A42C5155F /* ActivityPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 035C7B10E9EF4FF34C3B7001 /* ActivityPolicy.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -32,43 +30,61 @@
 			remoteGlobalIDString = C182733512020F08EF9A30A0;
 			remoteInfo = RemoteCodex;
 		};
+		EF843780ECEBD0CBAC4DC455 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = C9B559F80656FF95E243992F /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = BCE1AEF055D5A18C5A0B7633;
+			remoteInfo = PockymoeLiveActivity;
+		};
 /* End PBXContainerItemProxy section */
 
+/* Begin PBXCopyFilesBuildPhase section */
+		470408A1DC897EEAF06C047B /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				82CC1E51E945DF54B45CDEC3 /* PockymoeLiveActivity.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
+		035C7B10E9EF4FF34C3B7001 /* ActivityPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityPolicy.swift; sourceTree = "<group>"; };
 		04FECA0E850860B8AC4CBA61 /* RemoteCodexUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = RemoteCodexUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		100A28395AD9249007892B6B /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
-		15AE2BF1DDBD2E6CCB66D786 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
-		1D8938FC70E7D30BF5DE7202 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
+		15FC8A17B57538DDCD0D4838 /* PockymoeLiveActivity.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = PockymoeLiveActivity.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		20B8D46B37DE808A09C6B86E /* RemoteCodexUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteCodexUITests.swift; sourceTree = "<group>"; };
-		2B582C49511E8012D3779A31 /* RemoteCodexApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteCodexApp.swift; sourceTree = "<group>"; };
-		34686CB902BE2B65E8948084 /* native-bridge.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = "native-bridge.js"; sourceTree = "<group>"; };
-		4D38F8A2105252D4BD4D5680 /* Components.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Components.swift; sourceTree = "<group>"; };
-		52E282EC58A24F97EC20C184 /* EventWatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventWatcher.swift; sourceTree = "<group>"; };
+		3F7B69E276D5CB39C6A582A3 /* pockymoe-host.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = "pockymoe-host.js"; sourceTree = "<group>"; };
+		424A8B9D2686AFE025A849C5 /* PockymoeLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PockymoeLiveActivity.swift; sourceTree = "<group>"; };
+		4E0B081B8892FF8A5DA5AD32 /* LiveActivityManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveActivityManager.swift; sourceTree = "<group>"; };
 		69B1D02571E1DF177175B33E /* RemoteCodex.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = RemoteCodex.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		6A75764386B1AF70AF05EE49 /* Screens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Screens.swift; sourceTree = "<group>"; };
-		786AE81657944A93ECB13B05 /* RemoteCodex.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = RemoteCodex.entitlements; sourceTree = "<group>"; };
-		7A6226F10BCBCF75780F727F /* ThreadWebView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThreadWebView.swift; sourceTree = "<group>"; };
-		88C8C0C499C787CE487A2ABA /* APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClient.swift; sourceTree = "<group>"; };
-		8D420E8C1B58B03B714B5B09 /* AppRoute.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppRoute.swift; sourceTree = "<group>"; };
-		B78B224F68B667D7F2B51D56 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
-		BD620A3F2229D517B02A755E /* SessionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionStore.swift; sourceTree = "<group>"; };
+		998245FEBFC45F287E6EFE6E /* MobileApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileApp.swift; sourceTree = "<group>"; };
+		AAB66863196DD3C9904D04C6 /* LiveActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveActivityAttributes.swift; sourceTree = "<group>"; };
+		D67D00DBC5982FA5D9BADB3F /* ShellController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShellController.swift; sourceTree = "<group>"; };
 		E73A168D7BF987C354EE4D65 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
-		EAF0D9FCC1B95CEA1BB8A696 /* DeviceAccessViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceAccessViews.swift; sourceTree = "<group>"; };
+		F532EE5C43393D122FF82300 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
 		0F2339B4A16BEA2302FE5375 /* RemoteCodex */ = {
 			isa = PBXGroup;
 			children = (
-				15AE2BF1DDBD2E6CCB66D786 /* Info.plist */,
-				786AE81657944A93ECB13B05 /* RemoteCodex.entitlements */,
-				8EA444466E4F4ED86D733D43 /* App */,
-				598CA49E4EDC04CA145D879B /* Core */,
-				CE01D238D6EE70BE1CCE2A52 /* Design */,
-				557B61B89AA8CD3F37C46359 /* Features */,
 				589187D3009E90C059356279 /* Resources */,
 			);
 			path = RemoteCodex;
+			sourceTree = "<group>";
+		};
+		2B91CBB6F2D8640D11E857FB /* Shared */ = {
+			isa = PBXGroup;
+			children = (
+				035C7B10E9EF4FF34C3B7001 /* ActivityPolicy.swift */,
+				AAB66863196DD3C9904D04C6 /* LiveActivityAttributes.swift */,
+			);
+			path = Shared;
 			sourceTree = "<group>";
 		};
 		3928E330EF06B715CDD913B2 /* RemoteCodexUITests */ = {
@@ -79,16 +95,6 @@
 			path = RemoteCodexUITests;
 			sourceTree = "<group>";
 		};
-		557B61B89AA8CD3F37C46359 /* Features */ = {
-			isa = PBXGroup;
-			children = (
-				6A75764386B1AF70AF05EE49 /* Screens.swift */,
-				C30CC743AA5F50657B1514E7 /* Devices */,
-				B7C70CA9B06694E654B82023 /* ThreadWeb */,
-			);
-			path = Features;
-			sourceTree = "<group>";
-		};
 		589187D3009E90C059356279 /* Resources */ = {
 			isa = PBXGroup;
 			children = (
@@ -97,48 +103,29 @@
 			path = Resources;
 			sourceTree = "<group>";
 		};
-		598CA49E4EDC04CA145D879B /* Core */ = {
-			isa = PBXGroup;
-			children = (
-				88C8C0C499C787CE487A2ABA /* APIClient.swift */,
-				52E282EC58A24F97EC20C184 /* EventWatcher.swift */,
-				B78B224F68B667D7F2B51D56 /* Models.swift */,
-				BD620A3F2229D517B02A755E /* SessionStore.swift */,
-			);
-			path = Core;
-			sourceTree = "<group>";
-		};
 		83562AAAEC3F3EF6AD7C188E /* Products */ = {
 			isa = PBXGroup;
 			children = (
+				15FC8A17B57538DDCD0D4838 /* PockymoeLiveActivity.appex */,
 				69B1D02571E1DF177175B33E /* RemoteCodex.app */,
 				04FECA0E850860B8AC4CBA61 /* RemoteCodexUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
 		};
-		8EA444466E4F4ED86D733D43 /* App */ = {
+		86659364683018756C37ED26 /* LiveActivity */ = {
 			isa = PBXGroup;
 			children = (
-				8D420E8C1B58B03B714B5B09 /* AppRoute.swift */,
-				2B582C49511E8012D3779A31 /* RemoteCodexApp.swift */,
-				1D8938FC70E7D30BF5DE7202 /* RootView.swift */,
+				F532EE5C43393D122FF82300 /* Assets.xcassets */,
+				424A8B9D2686AFE025A849C5 /* PockymoeLiveActivity.swift */,
 			);
-			path = App;
+			path = LiveActivity;
 			sourceTree = "<group>";
 		};
-		B7C70CA9B06694E654B82023 /* ThreadWeb */ = {
+		90A6E431F481C924A0290C36 /* web */ = {
 			isa = PBXGroup;
 			children = (
-				7A6226F10BCBCF75780F727F /* ThreadWebView.swift */,
-			);
-			path = ThreadWeb;
-			sourceTree = "<group>";
-		};
-		BC55688C603659B45774BA22 /* web */ = {
-			isa = PBXGroup;
-			children = (
-				34686CB902BE2B65E8948084 /* native-bridge.js */,
+				3F7B69E276D5CB39C6A582A3 /* pockymoe-host.js */,
 			);
 			path = web;
 			sourceTree = "<group>";
@@ -146,36 +133,32 @@
 		BCA123D6461D26C7DF87D803 = {
 			isa = PBXGroup;
 			children = (
-				FD466F578995947AEC9E52F7 /* remote-codex-app */,
+				86659364683018756C37ED26 /* LiveActivity */,
+				D50EF6B60B82F8348503FEB4 /* mobile-ios */,
 				0F2339B4A16BEA2302FE5375 /* RemoteCodex */,
 				3928E330EF06B715CDD913B2 /* RemoteCodexUITests */,
+				2B91CBB6F2D8640D11E857FB /* Shared */,
+				C4DC7315E4267878BA32B34A /* Shell */,
 				83562AAAEC3F3EF6AD7C188E /* Products */,
 			);
 			sourceTree = "<group>";
 		};
-		C30CC743AA5F50657B1514E7 /* Devices */ = {
+		C4DC7315E4267878BA32B34A /* Shell */ = {
 			isa = PBXGroup;
 			children = (
-				EAF0D9FCC1B95CEA1BB8A696 /* DeviceAccessViews.swift */,
+				4E0B081B8892FF8A5DA5AD32 /* LiveActivityManager.swift */,
+				998245FEBFC45F287E6EFE6E /* MobileApp.swift */,
+				D67D00DBC5982FA5D9BADB3F /* ShellController.swift */,
 			);
-			path = Devices;
+			path = Shell;
 			sourceTree = "<group>";
 		};
-		CE01D238D6EE70BE1CCE2A52 /* Design */ = {
+		D50EF6B60B82F8348503FEB4 /* mobile-ios */ = {
 			isa = PBXGroup;
 			children = (
-				4D38F8A2105252D4BD4D5680 /* Components.swift */,
-				100A28395AD9249007892B6B /* Theme.swift */,
+				90A6E431F481C924A0290C36 /* web */,
 			);
-			path = Design;
-			sourceTree = "<group>";
-		};
-		FD466F578995947AEC9E52F7 /* remote-codex-app */ = {
-			isa = PBXGroup;
-			children = (
-				BC55688C603659B45774BA22 /* web */,
-			);
-			name = "remote-codex-app";
+			name = "mobile-ios";
 			path = ..;
 			sourceTree = "<group>";
 		};
@@ -200,16 +183,36 @@
 			productReference = 04FECA0E850860B8AC4CBA61 /* RemoteCodexUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
 		};
+		BCE1AEF055D5A18C5A0B7633 /* PockymoeLiveActivity */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 2F490ADF1AEF80E42AC7A76E /* Build configuration list for PBXNativeTarget "PockymoeLiveActivity" */;
+			buildPhases = (
+				204D07672A25F74B91676559 /* Sources */,
+				82B5E56EE8A5044E0741B94A /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = PockymoeLiveActivity;
+			packageProductDependencies = (
+			);
+			productName = PockymoeLiveActivity;
+			productReference = 15FC8A17B57538DDCD0D4838 /* PockymoeLiveActivity.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 		C182733512020F08EF9A30A0 /* RemoteCodex */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 66997D93373A53F812BB85DB /* Build configuration list for PBXNativeTarget "RemoteCodex" */;
 			buildPhases = (
 				22A42F8769E73D93CC7FE20B /* Sources */,
 				90B25EB70B1F2ECBD71C2203 /* Resources */,
+				470408A1DC897EEAF06C047B /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				7D078FD943682745FF741D5B /* PBXTargetDependency */,
 			);
 			name = RemoteCodex;
 			packageProductDependencies = (
@@ -231,6 +234,9 @@
 						DevelopmentTeam = "";
 						TestTargetID = C182733512020F08EF9A30A0;
 					};
+					BCE1AEF055D5A18C5A0B7633 = {
+						DevelopmentTeam = "";
+					};
 					C182733512020F08EF9A30A0 = {
 						DevelopmentTeam = "";
 					};
@@ -250,6 +256,7 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
+				BCE1AEF055D5A18C5A0B7633 /* PockymoeLiveActivity */,
 				C182733512020F08EF9A30A0 /* RemoteCodex */,
 				BC3980D6E1F9CC5DFE347B2D /* RemoteCodexUITests */,
 			);
@@ -257,34 +264,45 @@
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		82B5E56EE8A5044E0741B94A /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				2CEB81250ABEA6950FA5BAA0 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		90B25EB70B1F2ECBD71C2203 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
 				DD103EE72FEF3C4C48FE40BE /* Assets.xcassets in Resources */,
-				1F6F27A62C0F6815B4761169 /* native-bridge.js in Resources */,
+				9D310DBC5B691B839B53B02E /* pockymoe-host.js in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		204D07672A25F74B91676559 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				E5E3C22F104AE21A42C5155F /* ActivityPolicy.swift in Sources */,
+				35D9A9DFB08B00EFCD65B348 /* LiveActivityAttributes.swift in Sources */,
+				99BBA5F2F9FC392476FEA35C /* PockymoeLiveActivity.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		22A42F8769E73D93CC7FE20B /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				C829676B20F6307B68F458D4 /* APIClient.swift in Sources */,
-				A39C7A1ADB44D858D4A41673 /* AppRoute.swift in Sources */,
-				77FD2B0E44B01BBE8FF17A74 /* Components.swift in Sources */,
-				534F5BC87D71F06C8B7C6E91 /* DeviceAccessViews.swift in Sources */,
-				9F2C5BADE73A3EBFBE906D62 /* EventWatcher.swift in Sources */,
-				6E5D47588FB12D78C3CE90BD /* Models.swift in Sources */,
-				3A23EBA385C41E209FD38C82 /* RemoteCodexApp.swift in Sources */,
-				83EA4DEC46FF2DD4706071C2 /* RootView.swift in Sources */,
-				B6B667CBEE8F850E50664E54 /* Screens.swift in Sources */,
-				30619D85A639E15267F80C8E /* SessionStore.swift in Sources */,
-				05CCA3E32E28E12558B4249B /* Theme.swift in Sources */,
-				3AD446CEDDCAB344691F851C /* ThreadWebView.swift in Sources */,
+				B1070108A7F0800A381E2AAD /* ActivityPolicy.swift in Sources */,
+				75E5220690D6D8DF49C4E2F5 /* LiveActivityAttributes.swift in Sources */,
+				1540DB8F3CC5DFE9A756A79D /* LiveActivityManager.swift in Sources */,
+				A782ADD590E7763C3EB388F9 /* MobileApp.swift in Sources */,
+				6FDD22B72356B49ABE18A4AA /* ShellController.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -303,6 +321,11 @@
 			isa = PBXTargetDependency;
 			target = C182733512020F08EF9A30A0 /* RemoteCodex */;
 			targetProxy = 2C4BAF851A3F7C23E9DB8BB0 /* PBXContainerItemProxy */;
+		};
+		7D078FD943682745FF741D5B /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = BCE1AEF055D5A18C5A0B7633 /* PockymoeLiveActivity */;
+			targetProxy = EF843780ECEBD0CBAC4DC455 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -367,7 +390,6 @@
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
-				PRODUCT_BUNDLE_IDENTIFIER = com.remotecodex.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
@@ -381,9 +403,6 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
-				CODE_SIGNING_ALLOWED = YES;
-				CODE_SIGNING_REQUIRED = NO;
-				CODE_SIGN_IDENTITY = "";
 				GENERATE_INFOPLIST_FILE = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -401,16 +420,16 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CODE_SIGN_ENTITLEMENTS = RemoteCodex/RemoteCodex.entitlements;
+				CODE_SIGN_ENTITLEMENTS = Shell/RemoteCodex.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = RemoteCodex/Info.plist;
+				INFOPLIST_FILE = "Shell/Info-Debug.plist";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.remotecodex.app;
-				PRODUCT_NAME = "Remote Codex";
+				PRODUCT_NAME = Pockymoe;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
@@ -420,17 +439,36 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CODE_SIGN_ENTITLEMENTS = RemoteCodex/RemoteCodex.entitlements;
+				CODE_SIGN_ENTITLEMENTS = Shell/RemoteCodex.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = RemoteCodex/Info.plist;
+				INFOPLIST_FILE = Shell/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.remotecodex.app;
-				PRODUCT_NAME = "Remote Codex";
+				PRODUCT_NAME = Pockymoe;
 				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		9B86E851FA89E8AE3773EDCA /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = LiveActivity/LiveActivity.entitlements;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = LiveActivity/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.remotecodex.app.liveactivity;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Release;
@@ -439,9 +477,6 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
-				CODE_SIGNING_ALLOWED = YES;
-				CODE_SIGNING_REQUIRED = NO;
-				CODE_SIGN_IDENTITY = "";
 				GENERATE_INFOPLIST_FILE = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -454,6 +489,25 @@
 				TEST_TARGET_NAME = RemoteCodex;
 			};
 			name = Release;
+		};
+		D9714E5B39D93A6105BAFA42 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = LiveActivity/LiveActivity.entitlements;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = LiveActivity/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.remotecodex.app.liveactivity;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
 		};
 		F8ACE7725E9B7C4F7781173C /* Release */ = {
 			isa = XCBuildConfiguration;
@@ -508,7 +562,6 @@
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
-				PRODUCT_BUNDLE_IDENTIFIER = com.remotecodex.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
 				SWIFT_COMPILATION_MODE = wholemodule;
@@ -521,6 +574,15 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		2F490ADF1AEF80E42AC7A76E /* Build configuration list for PBXNativeTarget "PockymoeLiveActivity" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D9714E5B39D93A6105BAFA42 /* Debug */,
+				9B86E851FA89E8AE3773EDCA /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
 		43B7D96EF49576B56A62793C /* Build configuration list for PBXNativeTarget "RemoteCodexUITests" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (

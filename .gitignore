@@ -27,3 +27,9 @@ xcuserdata/
 .xcode-version
 
 __pycache__/
+
+# Swift package test products and local build logs
+ios/.build/
+.local-*.log
+
+.scratch/

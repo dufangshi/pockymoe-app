@@ -1,0 +1,280 @@
+import ActivityKit
+import AuthenticationServices
+import UIKit
+import UniformTypeIdentifiers
+import UserNotifications
+import WebKit
+
+private final class MessageProxy: NSObject, WKScriptMessageHandler {
+    weak var owner: ShellController?
+    func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) { owner?.receive(message) }
+}
+
+final class NativeWebView: WKWebView {
+    override var inputAccessoryView: UIView? { nil }
+}
+
+@MainActor
+final class ShellController: UIViewController, WKNavigationDelegate, WKUIDelegate, ASWebAuthenticationPresentationContextProviding, UIDocumentPickerDelegate {
+    let origin: String
+    private var web: NativeWebView!
+    private let proxy = MessageProxy()
+    private let live = LiveActivityManager()
+    private var auth: ASWebAuthenticationSession?
+    private var saveReply: ((Any) -> Void)?
+    private var saveURL: URL?
+    private var commandReplies: [String: ([String: Any]) -> Void] = [:]
+    private var path = "/"
+    private var pendingPath: String?
+    private var dark: Bool?
+    private var offline: UIView?
+    private var ready = false
+    private var documentGeneration = UUID()
+    private var commandQueue: [[String: Any]] = []
+    private var routeObservation: NSKeyValueObservation?
+    static let systemBackground = UIColor { $0.userInterfaceStyle == .dark ? UIColor(red: 23/255, green: 23/255, blue: 26/255, alpha: 1) : UIColor(red: 250/255, green: 250/255, blue: 248/255, alpha: 1) }
+    override var preferredStatusBarStyle: UIStatusBarStyle { (dark ?? (traitCollection.userInterfaceStyle == .dark)) ? .lightContent : .darkContent }
+
+    init(origin: String) { self.origin = origin; super.init(nibName: nil, bundle: nil) }
+    required init?(coder: NSCoder) { fatalError("init(coder:) is unavailable") }
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        let background = UserDefaults.standard.string(forKey: "shell.background").flatMap(Self.color) ?? Self.systemBackground
+        view.backgroundColor = background
+        let configuration = WKWebViewConfiguration()
+        configuration.websiteDataStore = .default()
+        proxy.owner = self
+        configuration.userContentController.add(proxy, name: "remoteCodex")
+        if let url = Bundle.main.url(forResource: "pockymoe-host", withExtension: "js"), let source = try? String(contentsOf: url), let encoded = Self.json(origin) {
+            configuration.userContentController.addUserScript(WKUserScript(source: source.replacingOccurrences(of: "__POCKYMOE_ORIGIN__", with: encoded), injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        }
+        web = NativeWebView(frame: .zero, configuration: configuration)
+        web.isOpaque = false; web.backgroundColor = background; web.scrollView.backgroundColor = background
+        web.alpha = 0
+        web.navigationDelegate = self; web.uiDelegate = self
+        web.allowsLinkPreview = false
+        web.scrollView.bounces = false
+        web.scrollView.contentInsetAdjustmentBehavior = .never
+        web.inputAssistantItem.leadingBarButtonGroups = []; web.inputAssistantItem.trailingBarButtonGroups = []
+        web.accessibilityIdentifier = "productWebView"
+        web.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(web)
+        NSLayoutConstraint.activate([web.topAnchor.constraint(equalTo: view.topAnchor), web.bottomAnchor.constraint(equalTo: view.bottomAnchor), web.leadingAnchor.constraint(equalTo: view.leadingAnchor), web.trailingAnchor.constraint(equalTo: view.trailingAnchor)])
+        let edge = UIScreenEdgePanGestureRecognizer(target: self, action: #selector(backGesture(_:)))
+        edge.edges = .left; web.addGestureRecognizer(edge)
+        routeObservation = web.observe(\.url, options: [.new]) { [weak self] _, _ in
+            Task { @MainActor in self?.rememberRoute() }
+        }
+        live.onToken = { [weak self] token in self?.command(["type": "liveActivityToken", "token": token]) }
+        #if DEBUG
+        if let state = ProcessInfo.processInfo.environment["E2E_ACTIVITY_STATE"] { Task {
+            if UIApplication.shared.applicationState != .active {
+                for await _ in NotificationCenter.default.notifications(named: UIApplication.didBecomeActiveNotification) { break }
+            }
+            await live.drive(state)
+        } }
+        #endif
+    }
+    func navigate(_ route: String) {
+        guard route.hasPrefix("/"), !route.hasPrefix("//"), let url = URL(string: origin + route), trusted(url) else { return }
+        path = route
+        loadViewIfNeeded()
+        pendingPath = route
+        web.load(URLRequest(url: url))
+    }
+    func close() {
+        web?.configuration.userContentController.removeScriptMessageHandler(forName: "remoteCodex")
+        routeObservation = nil; auth?.cancel()
+    }
+    private func trusted(_ url: URL?) -> Bool {
+        guard let url, let base = URL(string: origin) else { return false }
+        return url.scheme == base.scheme && url.host == base.host && (url.port ?? (url.scheme == "http" ? 80 : 443)) == (base.port ?? (base.scheme == "http" ? 80 : 443)) && url.user == nil && url.password == nil
+    }
+    private func rememberRoute() {
+        guard trusted(web.url), let url = web.url else { return }
+        path = url.path + (url.query.map { "?" + $0 } ?? "") + (url.fragment.map { "#" + $0 } ?? "")
+        UserDefaults.standard.set(path, forKey: "shell.lastPath.\(origin)")
+        #if DEBUG
+        web.accessibilityValue = path
+        #endif
+    }
+    func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+        guard let url = action.request.url else { decisionHandler(.cancel); return }
+        if action.targetFrame?.isMainFrame == false { decisionHandler(.allow); return }
+        guard trusted(url) else {
+            decisionHandler(.cancel)
+            if action.navigationType == .linkActivated { external(url) }
+            return
+        }
+        decisionHandler(.allow)
+    }
+    func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for action: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
+        if let url = action.request.url { if trusted(url) { navigate(url.path + (url.query.map { "?" + $0 } ?? "")) } else { external(url) } }
+        return nil
+    }
+    func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+        ready = false; documentGeneration = UUID(); commandReplies.removeAll()
+    }
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { pendingPath = nil; rememberRoute() }
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) { showOffline(error) }
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { showOffline(error) }
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) { navigate(path) }
+    private func showOffline(_ error: Error) {
+        guard (error as NSError).code != NSURLErrorCancelled, offline == nil else { return }
+        web.alpha = 0
+        let label = UILabel(); label.text = "无法连接 Relay"; label.textColor = .label
+        let retry = UIButton(type: .system); retry.setTitle("重试", for: .normal); retry.accessibilityIdentifier = "retryConnection"
+        retry.heightAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
+        retry.addTarget(self, action: #selector(retryLoad), for: .touchUpInside)
+        let stack = UIStackView(arrangedSubviews: [label, retry]); stack.axis = .vertical; stack.spacing = 16
+        stack.translatesAutoresizingMaskIntoConstraints = false; view.addSubview(stack)
+        NSLayoutConstraint.activate([stack.centerXAnchor.constraint(equalTo: view.centerXAnchor), stack.centerYAnchor.constraint(equalTo: view.centerYAnchor)])
+        offline = stack
+    }
+    @objc private func retryLoad() { offline?.removeFromSuperview(); offline = nil; navigate(path) }
+    @objc private func backGesture(_ gesture: UIScreenEdgePanGestureRecognizer) {
+        let x = max(0, gesture.translation(in: web).x)
+        if gesture.state == .changed { web.transform = CGAffineTransform(translationX: min(view.bounds.width, x), y: 0) }
+        if [.ended, .cancelled, .failed].contains(gesture.state) {
+            UIView.animate(withDuration: 0.12) { self.web.transform = .identity }
+            if gesture.state == .ended && (x > view.bounds.width * 0.28 || gesture.velocity(in: web).x > 700) {
+                command(["type": "back"]) { _ in /* Web owns modal and route ordering, including the root. */ }
+            }
+        }
+    }
+    private func external(_ url: URL) {
+        guard ["https", "http", "mailto", "tel"].contains(url.scheme ?? ""), url.user == nil, url.password == nil else { return }
+        UIApplication.shared.open(url)
+    }
+    private func command(_ body: [String: Any], completion: (([String: Any]) -> Void)? = nil) {
+        var value = body; let id = UUID().uuidString; value["id"] = id
+        if let completion {
+            commandReplies[id] = completion
+            Task { try? await Task.sleep(for: .seconds(5)); commandReplies.removeValue(forKey: id)?(["ok": false]) }
+        }
+        if !ready { commandQueue.append(value); return }
+        evaluate("window.__pockymoeCommand(\(Self.json(value) ?? "{}"))")
+    }
+    private func evaluate(_ source: String) {
+        guard trusted(web.url) else { return }
+        web.evaluateJavaScript(source, completionHandler: nil)
+    }
+    func receive(_ message: WKScriptMessage) {
+        guard message.frameInfo.isMainFrame, trusted(message.frameInfo.request.url), trusted(web.url),
+              let body = message.body as? [String: Any], let method = body["method"] as? String else { return }
+        let args = body["args"] as? [Any] ?? []
+        let id = body["id"] as? String
+        // A reply belongs to the requesting document, never a later navigation.
+        let generation = documentGeneration
+        let reply: (Any) -> Void = { [weak self] value in
+            guard let self, let id, self.documentGeneration == generation else { return }
+            self.evaluate("window.__pockymoeReply(\(Self.json(id) ?? "null"),\(Self.json(value) ?? "null"))")
+        }
+        switch method {
+        case "firstFrame":
+            guard offline == nil else { return }
+            UIView.animate(withDuration: 0.12) { self.web.alpha = 1 }
+        case "ready":
+            ready = true
+            let queue = commandQueue; commandQueue = []
+            for value in queue { evaluate("window.__pockymoeCommand(\(Self.json(value) ?? "{}"))") }
+            live.resendToken()
+        case "capabilities":
+            reply(["surface": "mobile", "platform": "ios", "bridgeVersion": 2, "shellVersion": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0", "liveActivity": ActivityAuthorizationInfo().areActivitiesEnabled, "nativePush": true, "haptics": true])
+        case "activity.sync":
+            if let raw = args.first, let data = try? JSONSerialization.data(withJSONObject: raw), let snapshot = try? JSONDecoder().decode(ActivitySnapshot.self, from: data) { Task { await live.sync(snapshot) } }
+        case "commandResult":
+            if args.count == 2, let key = args[0] as? String, let result = args[1] as? [String: Any] { commandReplies.removeValue(forKey: key)?(result) }
+        case "window.openThread": if let path = args.first as? String { command(["type": "navigate", "path": path]) }
+        case "window.setTitle": title = args.first as? String
+        case "settings.get": reply(settings())
+        case "settings.set":
+            if let patch = args.first as? [String: Any] {
+                var values = settings()
+                // Keep the configured origin immutable to the page; never expose native session data.
+                for key in ["alertMode", "snoozeUntil"] { if let value = patch[key] { values[key] = value } }
+                UserDefaults.standard.set(values, forKey: "shell.pageSettings")
+            }
+            reply(settings())
+        case "badge.set":
+            if let count = args.first as? Int { UNUserNotificationCenter.current().setBadgeCount(max(0, count)) }
+        case "appearance.sync": if let appearance = args.first as? [String: Any] { syncAppearance(appearance) }
+        case "shell.openExternal": if let raw = args.first as? String, let url = URL(string: raw) { external(url) }
+        case "auth.openExternal":
+            guard let raw = args.first as? String, let url = URL(string: raw), trusted(url), auth == nil else { reply(NSNull()); return }
+            auth = ASWebAuthenticationSession(url: url, callbackURLScheme: "remotecodex") { [weak self] callback, _ in
+                Task { @MainActor in self?.auth = nil; reply(callback.map { ["callbackUrl": $0.absoluteString] } ?? NSNull() as Any) }
+            }
+            auth?.presentationContextProvider = self
+            if auth?.start() != true { auth = nil; reply(NSNull()) }
+        case "push.register":
+            Task {
+                guard let token = await NativePush.shared.register() else { reply(NSNull()); return }
+                #if DEBUG
+                let sandbox = true
+                #else
+                let sandbox = false
+                #endif
+                reply(["token": token, "sandbox": sandbox, "kind": "ios"])
+            }
+        case "haptics.play":
+            switch args.first as? String {
+            case "sent": UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            case "attention": UINotificationFeedbackGenerator().notificationOccurred(.success)
+            case "warning": UINotificationFeedbackGenerator().notificationOccurred(.warning)
+            default: break
+            }
+        case "files.saveAs":
+            guard args.count == 2, let name = args[0] as? String, let bytes = args[1] as? [UInt8], bytes.count <= 32 * 1024 * 1024, saveReply == nil else { reply(["saved": false]); return }
+            let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            do {
+                try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+                let filename = URL(fileURLWithPath: name).lastPathComponent
+                let url = directory.appendingPathComponent(filename.isEmpty ? "export" : filename)
+                try Data(bytes).write(to: url)
+                saveURL = directory; saveReply = reply
+                let picker = UIDocumentPickerViewController(forExporting: [url], asCopy: true)
+                picker.delegate = self; present(picker, animated: true)
+            } catch { reply(["saved": false]) }
+        default: break
+        }
+    }
+    private func settings() -> [String: Any] {
+        var value = UserDefaults.standard.dictionary(forKey: "shell.pageSettings") ?? [:]
+        value["webOrigin"] = origin; value["relayOrigin"] = origin
+        value["petVisible"] = false
+        return value
+    }
+    private func syncAppearance(_ appearance: [String: Any]) {
+        dark = (appearance["effective"] as? String) == "dark"
+        overrideUserInterfaceStyle = dark == true ? .dark : .light
+        setNeedsStatusBarAppearanceUpdate()
+        web.evaluateJavaScript("getComputedStyle(document.documentElement).getPropertyValue('--theme-bg').trim() || getComputedStyle(document.body).backgroundColor") { [weak self] value, _ in
+            guard let self, let raw = value as? String, let color = Self.color(raw) else { return }
+            self.view.backgroundColor = color; self.web.backgroundColor = color; self.web.scrollView.backgroundColor = color
+            UserDefaults.standard.set(raw, forKey: "shell.background")
+        }
+    }
+    func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor { view.window ?? ASPresentationAnchor() }
+    func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) { finishSave(false) }
+    func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) { finishSave(!urls.isEmpty) }
+    private func finishSave(_ saved: Bool) {
+        saveReply?(["saved": saved]); saveReply = nil
+        if let saveURL { try? FileManager.default.removeItem(at: saveURL) }; saveURL = nil
+    }
+    static func json(_ value: Any) -> String? {
+        guard let data = try? JSONSerialization.data(withJSONObject: value, options: [.fragmentsAllowed, .sortedKeys]) else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+    static func color(_ raw: String) -> UIColor? {
+        let value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if value.hasPrefix("#"), value.count == 7, let number = UInt(value.dropFirst(), radix: 16) {
+            return UIColor(red: CGFloat((number >> 16) & 255)/255, green: CGFloat((number >> 8) & 255)/255, blue: CGFloat(number & 255)/255, alpha: 1)
+        }
+        if value.hasPrefix("rgb"), let start = value.firstIndex(of: "("), let end = value.firstIndex(of: ")") {
+            let parts = value[value.index(after: start)..<end].split(separator: ",").compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }
+            if parts.count >= 3 { return UIColor(red: parts[0]/255, green: parts[1]/255, blue: parts[2]/255, alpha: 1) }
+        }
+        return nil
+    }
+}

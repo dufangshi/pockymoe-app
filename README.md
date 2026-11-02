@@ -34,6 +34,13 @@ Back navigation matches the web product header:
 - Account → previous screen
 - Guide / portal → Relay home
 
+## iOS thin shell
+
+See [iOS shell and ActivityKit](docs/ios-shell.md) and the approved
+[mobile design](docs/mobile-design.zh.md). The iOS target now uses the
+`window.pockymoeHost` contract; the older mobile notes below describe Android
+and the retired iOS implementation, not verification of the new shell.
+
 ## Login
 
 The first native-only step is the relay URL. After that, session, register, and password sign-in match the web portal. External OAuth is not yet supported end to end: provider pages open in the system browser, whose login cookies are separate from the app's WebView. Use password sign-in in this preview. A secure browser-to-app session handoff is still required before claiming OAuth parity. Passkey sign-in has not been validated in these native shells.

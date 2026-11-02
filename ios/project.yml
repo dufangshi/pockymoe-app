@@ -6,7 +6,6 @@ options:
   createIntermediateGroups: true
 settings:
   base:
-    PRODUCT_BUNDLE_IDENTIFIER: com.remotecodex.app
     IPHONEOS_DEPLOYMENT_TARGET: "17.0"
     SWIFT_VERSION: "5.9"
     TARGETED_DEVICE_FAMILY: "1,2"
@@ -23,54 +22,56 @@ targets:
     type: application
     platform: iOS
     sources:
-      - path: RemoteCodex
-      - path: ../web/native-bridge.js
+      - path: Shell
+        excludes: ["*.plist", "*.entitlements"]
+      - path: Shared
+      - path: ../web/pockymoe-host.js
         buildPhase: resources
+      - path: RemoteCodex/Resources
     settings:
       base:
-        INFOPLIST_FILE: RemoteCodex/Info.plist
+        INFOPLIST_FILE: Shell/Info.plist
         GENERATE_INFOPLIST_FILE: false
         PRODUCT_BUNDLE_IDENTIFIER: com.remotecodex.app
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
-        PRODUCT_NAME: Remote Codex
-    info:
-      path: RemoteCodex/Info.plist
-      properties:
-        CFBundleURLTypes:
-          - CFBundleURLName: com.remotecodex.app
-            CFBundleURLSchemes:
-              - remotecodex
-        NSAppTransportSecurity:
-          NSAllowsArbitraryLoads: true
-          NSAllowsArbitraryLoadsInWebContent: true
-          NSAllowsLocalNetworking: true
-        NSLocalNetworkUsageDescription: Remote Codex connects to your relay on the local network.
-        NSCameraUsageDescription: Take a photo to attach to your prompt.
-        NSPhotoLibraryUsageDescription: Select images to attach to your prompt.
-        WKAppBoundDomains: [remote.lnz-study.com, localhost, 127.0.0.1]
-        UILaunchScreen: {}
-        UIBackgroundModes:
-          - fetch
-          - processing
-        BGTaskSchedulerPermittedIdentifiers:
-          - com.remotecodex.app.watch
+        PRODUCT_NAME: Pockymoe
+      configs:
+        Debug:
+          INFOPLIST_FILE: Shell/Info-Debug.plist
     entitlements:
-      path: RemoteCodex/RemoteCodex.entitlements
+      path: Shell/RemoteCodex.entitlements
       properties:
         aps-environment: $(APS_ENVIRONMENT)
+        com.apple.security.application-groups: [group.com.remotecodex.app]
+    dependencies:
+      - target: PockymoeLiveActivity
+  PockymoeLiveActivity:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: LiveActivity
+        excludes: ["*.plist", "*.entitlements"]
+      - path: Shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.remotecodex.app.liveactivity
+        GENERATE_INFOPLIST_FILE: false
+        INFOPLIST_FILE: LiveActivity/Info.plist
+        SKIP_INSTALL: true
+        APPLICATION_EXTENSION_API_ONLY: true
+    entitlements:
+      path: LiveActivity/LiveActivity.entitlements
+      properties:
+        com.apple.security.application-groups: [group.com.remotecodex.app]
   RemoteCodexUITests:
     type: bundle.ui-testing
     platform: iOS
-    sources:
-      - path: RemoteCodexUITests
+    sources: [RemoteCodexUITests]
     settings:
       base:
         GENERATE_INFOPLIST_FILE: true
         PRODUCT_BUNDLE_IDENTIFIER: com.remotecodex.app.uitests
         TEST_TARGET_NAME: RemoteCodex
-        CODE_SIGNING_ALLOWED: "YES"
-        CODE_SIGNING_REQUIRED: "NO"
-        CODE_SIGN_IDENTITY: ""
     dependencies:
       - target: RemoteCodex
 schemes:
@@ -80,6 +81,5 @@ schemes:
         RemoteCodex: all
         RemoteCodexUITests: [test]
     test:
-      targets:
-        - RemoteCodexUITests
+      targets: [RemoteCodexUITests]
       gatherCoverageData: false
