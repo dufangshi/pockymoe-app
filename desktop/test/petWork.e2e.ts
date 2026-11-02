@@ -308,8 +308,14 @@ test('docked: an alert brings the head out, and it tucks back when the alert is 
 test('closing the panel leaves the main window where it was', async () => {
   const sprite = await pet('sprite');
   const act = (value: unknown): Promise<unknown> => sprite.evaluate(input => (window as unknown as { rcDesktop: { pet: { action(value: unknown): Promise<unknown> } } }).rcDesktop.pet.action(input), value);
-  const focused = (): Promise<boolean> => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().some(window => !window.webContents.getURL().includes('pet/index.html') && window.isFocused()));
-  await app.evaluate(({ BrowserWindow }) => { for (const window of BrowserWindow.getAllWindows()) if (window.isFocused()) window.blur(); });
+  const focused = (): Promise<boolean> => app.evaluate(() => globalThis.__pockymoeDesktopTest.windows.mainFocused());
+  // Windows may immediately refocus the only eligible visible window after blur.
+  // Give native focus a real destination while keeping the main window visible.
+  const keeper = await app.evaluate(async ({ BrowserWindow }) => {
+    const window = new BrowserWindow({ width: 300, height: 200, show: false, title: 'Focus fixture' });
+    await window.loadURL('about:blank'); window.show(); window.focus(); return window.id;
+  });
+  await expect.poll(() => app.evaluate(({ BrowserWindow }, id) => BrowserWindow.fromId(id)?.isFocused(), keeper)).toBe(true);
   await expect.poll(focused).toBe(false);
   await act({ type: 'toggleTray' });
   // What a real click can do on macOS: the app comes forward with its main window.
@@ -360,10 +366,17 @@ for (const surface of ['glass', 'sprite'] as const) test(`native close on ${surf
 });
 
 for (const surface of ['glass', 'sprite'] as const) test(`destroying ${surface} retires both pet windows`, async () => {
-  await app.evaluate(({ BrowserWindow }, surface) => {
-    BrowserWindow.getAllWindows().find(window => window.webContents.getURL().includes('pet/index.html') && !!window.getParentWindow() === (surface === 'glass'))!.destroy();
+  const ids = await app.evaluate(({ BrowserWindow }, surface) => {
+    const pets = BrowserWindow.getAllWindows().filter(window => window.webContents.getURL().includes('pet/index.html'));
+    const ids = pets.map(window => window.id);
+    pets.find(window => !!window.getParentWindow() === (surface === 'glass'))!.destroy();
+    return ids;
   }, surface);
-  await expect.poll(() => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().filter(window => window.webContents.getURL().includes('pet/index.html')).length)).toBe(0);
+  // A dying window can remain in getAllWindows with null webContents. Track the
+  // native IDs captured before destruction instead of dereferencing retired URLs.
+  await expect.poll(() => app.evaluate(({ BrowserWindow }, ids) => ids.every(id => {
+    const window = BrowserWindow.fromId(id); return !window || window.isDestroyed();
+  }), ids)).toBe(true);
   await page.evaluate(() => window.pockymoeHost!.window.openPreferences('pet'));
   await expect.poll(() => app.windows().some(page => page.url().includes('view=preferences'))).toBe(true);
   const prefs = app.windows().find(page => page.url().includes('view=preferences'))!;
