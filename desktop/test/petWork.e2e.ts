@@ -90,7 +90,14 @@ test('a bubble stays solid and is not redrawn while the pointer is on it', async
   await movePetUnderPointer();
   await expect(glass.locator('.controls')).toBeVisible();
   await glass.evaluate(() => document.fonts.ready);
-  await expect.poll(async () => (await glassBounds()).height === await glass.locator('#app').evaluate(root => Math.ceil(root.getBoundingClientRect().height))).toBe(true);
+  // Await the measurement IPC itself. Windows rounds logical window bounds to
+  // physical pixels (and enforces native minimums), so outer bounds are not a
+  // valid acknowledgement of an exact CSS height at fractional display scales.
+  const measured = await glass.evaluate(async () => {
+    const root = document.querySelector('#app')!.getBoundingClientRect();
+    return (window as unknown as { rcDesktop: { pet: { action(value: unknown): Promise<{ ok: boolean }> } } }).rcDesktop.pet.action({ type: 'surfaceMeasure', width: Math.ceil(root.width), height: Math.ceil(root.height) });
+  });
+  expect(measured.ok).toBe(true);
   await glass.evaluate(() => { const w = window as unknown as { rewrites: number }; w.rewrites = 0; new MutationObserver(records => { w.rewrites += records.length; }).observe(document.querySelector('#app')!, { childList: true, subtree: true }); });
   const heights: number[] = [];
   for (let i = 0; i < 20; i++) { heights.push((await glassBounds()).y); await glass.waitForTimeout(100); }
@@ -140,10 +147,14 @@ const openPreferences = async (): Promise<Page> => {
   await preferences.locator('[data-section="pet"]').click();
   // Discovery starts when this section mounts. Open its pickers only after their
   // data arrives; an open picker deliberately defers replacing its options.
-  await expect.poll(() => preferences.evaluate(async () => {
-    const state = await (window as unknown as { pockymoeDesktop: { getState(): Promise<import('../src/shared/local').LocalState> } }).pockymoeDesktop.getState();
-    return !!state.summary.muteTargets && (!state.settings.petVoiceSummary || state.summary.connections.length > 0);
-  })).toBe(true);
+  await preferences.evaluate(() => new Promise<void>(resolve => {
+    const bridge = (window as unknown as { pockymoeDesktop: import('../src/shared/local').LocalBridge }).pockymoeDesktop;
+    const ready = (state: import('../src/shared/local').LocalState): boolean => !!state.summary.muteTargets && (!state.settings.petVoiceSummary || state.summary.connections.length > 0);
+    // Await the data broadcasts produced by the UI's actual requests. A separate
+    // five-second polling deadline can expire before the query's own IPC deadline.
+    const stop = bridge.onState(state => { if (ready(state)) { stop(); resolve(); } });
+    void bridge.getState().then(state => { if (ready(state)) { stop(); resolve(); } });
+  }));
   return preferences;
 };
 test('summary: picks a saved upstream and its model, and reads what the model said', async () => {

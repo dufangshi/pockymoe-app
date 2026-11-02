@@ -47,7 +47,7 @@ targets:
         NSLocalNetworkUsageDescription: Remote Codex connects to your relay on the local network.
         NSCameraUsageDescription: Take a photo to attach to your prompt.
         NSPhotoLibraryUsageDescription: Select images to attach to your prompt.
-        WKAppBoundDomains: [remote.lnz-study.com, localhost, 127.0.0.1]
+        WKAppBoundDomains: [app.example.com, localhost, 127.0.0.1]
         UILaunchScreen: {}
         UIBackgroundModes:
           - fetch

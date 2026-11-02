@@ -397,7 +397,17 @@ for (const material of ['native', 'solid']) for (const pack of packs) for (const
     test.info().annotations.push({ type: 'scale', description: `${page.url()}: devicePixelRatio=${violations.devicePixelRatio}` });
     scales.push({ url: page.url(), devicePixelRatio: violations.devicePixelRatio });
     const label = page.url().includes('/pet/') ? await page.evaluate(() => `pet-${document.body.dataset.surface}`) : new URL(page.url()).searchParams.get('view') || 'main-fixture';
-    await page.screenshot({ path: join(evidence, `windows-${material}-${label}-${pack}-${theme}.png`), animations: 'disabled' });
+    // Some utility/child windows become hidden when another surface takes focus.
+    // Ask Electron to wake their compositor without showing/focusing them; CDP
+    // screenshots can otherwise wait forever for a frame from a hidden window.
+    await test.step(`capture ${label}`, async () => {
+      await page.evaluate(() => document.fonts.ready);
+      const png = await app.evaluate(async ({ BrowserWindow }, url) => {
+        const window = BrowserWindow.getAllWindows().find(window => window.webContents.getURL() === url)!;
+        return (await window.webContents.capturePage(undefined, { stayHidden: true, stayAwake: true })).toPNG().toString('base64');
+      }, page.url());
+      writeFileSync(join(evidence, `windows-${material}-${label}-${pack}-${theme}.png`), Buffer.from(png, 'base64'));
+    });
   }
   const displays = await app.evaluate(({ screen }) => screen.getAllDisplays().map(display => ({ bounds: display.bounds, workArea: display.workArea, scaleFactor: display.scaleFactor })));
   writeFileSync(join(evidence, `windows-${material}-scale-${pack}-${theme}.json`), JSON.stringify({ requested: process.env.POCKYMOE_DESKTOP_SCALE || 'system', scales, displays }, null, 2));
