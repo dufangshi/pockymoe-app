@@ -58,7 +58,7 @@ else {
     const notifications = new Notifications(hub, settings, manager, () => pet, () => {
       const w = [...manager.relay].find(w => w.isFocused()); return w ? focusedThreads.get(w.webContents.id) ?? null : null;
     });
-    const voice = new VoiceService(dataDir, settings, () => pet?.say(t('语音已就绪')));
+    const voice = new VoiceService(dataDir, settings, () => pet?.say(t('语音已就绪')), (command, timeoutMs) => manager.query(command as CommandInput, timeoutMs));
     const petDirectories = [app.isPackaged ? join(process.resourcesPath, 'pets') : join(app.getAppPath(), 'assets/pets'), join(dataDir, 'pets')];
     mkdirSync(petDirectories[1], { recursive: true });
     const petCatalog = new PetCatalog(petDirectories);
@@ -66,7 +66,7 @@ else {
     const petModules = import.meta.glob('../pet/controller.ts', { eager: true }) as Record<string, { createPetController(deps: PetControllerDeps): PetController }>;
     const petModule = Object.values(petModules)[0];
     if (petModule) {
-      try { pet = petModule.createPetController({ hub, settings, dispatch: command => manager.dispatch(command as CommandInput), openPreferences, speak: text => voice.speak(text), shouldSpeak: event => notifications.shouldSpeak(event), petDirectories, appearance: appearance.get, onAppearance: appearance.onChange }); }
+      try { pet = petModule.createPetController({ hub, settings, dispatch: command => manager.dispatch(command as CommandInput), openPreferences, speak: text => voice.speak(text), summarize: event => voice.summarize(event), shouldSpeak: event => notifications.shouldSpeak(event), petDirectories, appearance: appearance.get, onAppearance: appearance.onChange }); }
       catch { /* Shell remains usable if a pet pack cannot load. */ }
     }
     const tray = new DesktopTray(hub, settings, manager);
@@ -145,7 +145,7 @@ else {
       }
       return settings.set(next);
     }
-    const localState = (): LocalState => ({ locale: getLocale(), preferencesRequestId, preferencesSection, settings: settings.get(), appearance: appearance.get(), snapshot: hub.snapshot(), petAvailable: !!pet, petPacks: petCatalog.list(), version: app.getVersion(), voice: voice.status() });
+    const localState = (): LocalState => ({ locale: getLocale(), preferencesRequestId, preferencesSection, settings: settings.get(), appearance: appearance.get(), snapshot: hub.snapshot(), petAvailable: !!pet, petPacks: petCatalog.list(), version: app.getVersion(), voice: voice.status(), summary: voice.summaryStatus() });
     const broadcast = (): void => { for (const w of manager.local.keys()) if (!w.isDestroyed()) w.webContents.send(c.localState, localState()); };
     voice.onChange(broadcast);
     let nativeLocale = getLocale();
@@ -216,6 +216,14 @@ else {
             else if (action.command === 'cancel') voice.model.cancel();
             else if (action.command === 'remove') { voice.stopWorker(); voice.model.remove(); }
             break;
+          case 'voiceInstall': voice.install(); break;
+          case 'summaryKey': voice.setSummaryKey(typeof action.key === 'string' ? action.key : null); break;
+          case 'summaryConnections': await voice.refreshConnections(); break;
+          case 'summaryTest': {
+            if (!pet) throw new Error(t('桌宠模块尚未安装。'));
+            pet.play(await voice.preview(await voice.testSummary()));
+            break;
+          }
           case 'voiceKey': voice.setKey(typeof action.key === 'string' ? action.key : null); break;
           case 'voiceList': await voice.refreshVoices(); break;
           case 'voicePreview': {

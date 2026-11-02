@@ -2,13 +2,14 @@ import { t } from '../shared/i18n';
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { DesktopSettings, PageSettings, SettingsStoreLike } from '../shared/contract';
-import { DEFAULT_SPEAKER, LOCAL_SPEAKERS, REMOTE_PROVIDERS, SPEEDS, type RemoteProvider, type RemoteVoice } from '../shared/voice';
+import { DEFAULT_SPEAKER, LOCAL_SPEAKERS, REMOTE_PROVIDERS, SPEEDS, SUMMARY_LANGUAGES, type RemoteProvider, type RemoteVoice, type SummaryLanguage } from '../shared/voice';
 import { relayOrigin } from './security';
 import { parseExtra, voiceEndpoint } from './voice/remote';
+import { chatEndpoint } from './voice/summary';
 
 export const defaults: DesktopSettings = {
   webOrigin: 'https://app.lnz-study.com', relayOrigin: 'https://remote.lnz-study.com', alertMode: 'petFirst', petVisible: true,
-  petId: 'moe', petSize: 'M', petMini: false, petSound: true, petVoice: false, petVoiceProvider: 'local', petVoiceSpeaker: DEFAULT_SPEAKER, petVoiceSpeed: 1, petVoiceRemotes: {}, petEdgeHide: true, launchAtLogin: false,
+  petId: 'moe', petSize: 'M', petMini: false, petSound: true, petVoice: false, petVoiceProvider: 'local', petVoiceSpeaker: DEFAULT_SPEAKER, petVoiceSpeed: 1, petVoiceRemotes: {}, petVoiceSummary: false, petSummaryConnection: null, petSummaryCustom: { url: '', model: '' }, petSummaryLanguage: 'auto', petEdgeHide: true, launchAtLogin: false,
   quickWindowShortcut: 'Alt+Space', snoozeUntil: null
 };
 const RETIRED_PET_REPLACEMENT = 'frost';
@@ -18,7 +19,7 @@ export function writeJson(path: string, data: unknown): void {
   writeFileSync(`${path}.tmp`, JSON.stringify(data), { mode: 0o600 });
   renameSync(`${path}.tmp`, path);
 }
-const VOICE_SERVICE_KEYS = ['petVoiceProvider', 'petVoiceSpeaker', 'petVoiceSpeed', 'petVoiceRemotes'] as const;
+const VOICE_SERVICE_KEYS = ['petVoiceProvider', 'petVoiceSpeaker', 'petVoiceSpeed', 'petVoiceRemotes', 'petVoiceSummary', 'petSummaryConnection', 'petSummaryCustom', 'petSummaryLanguage'] as const;
 /** Settings as the Web page may see them. */
 export function pageSettings(settings: DesktopSettings): PageSettings {
   const visible = { ...settings } as Partial<DesktopSettings>;
@@ -45,6 +46,17 @@ function validateRemotes(value: unknown): DesktopSettings['petVoiceRemotes'] {
   }
   return out;
 }
+function validateSummaryConnection(value: unknown): DesktopSettings['petSummaryConnection'] {
+  if (value === null) return null;
+  const row = value as Record<string, unknown> | undefined;
+  if (!row || typeof row !== 'object' || (['deviceId', 'id', 'name', 'model'] as const).some(key => typeof row[key] !== 'string' || (row[key] as string).length > 300) || !row.deviceId || !row.id) throw new Error(t('语音服务设置无效'));
+  return { deviceId: row.deviceId as string, id: row.id as string, name: row.name as string, model: row.model as string };
+}
+function validateSummaryCustom(value: unknown): DesktopSettings['petSummaryCustom'] {
+  const row = value as { url?: unknown; model?: unknown } | undefined;
+  if (!row || typeof row !== 'object' || typeof row.model !== 'string' || row.model.length > 200) throw new Error(t('语音服务设置无效'));
+  try { return { url: chatEndpoint(row.url ?? ''), model: row.model }; } catch { throw new Error(t('服务地址无效')); }
+}
 export function validateSettings(patch: unknown): Partial<DesktopSettings> {
   if (!patch || typeof patch !== 'object' || Array.isArray(patch)) throw new Error(t('设置无效'));
   const out: Partial<DesktopSettings> = {};
@@ -60,7 +72,10 @@ export function validateSettings(patch: unknown): Partial<DesktopSettings> {
       case 'petVoiceSpeaker': if (!LOCAL_SPEAKERS.some(speaker => speaker.sid === value)) throw new Error(t('语音服务设置无效')); out.petVoiceSpeaker = value as number; break;
       case 'petVoiceSpeed': if (!SPEEDS.includes(value as number)) throw new Error(t('语音服务设置无效')); out.petVoiceSpeed = value as number; break;
       case 'petVoiceRemotes': out.petVoiceRemotes = validateRemotes(value); break;
-      case 'petVisible': case 'petMini': case 'petSound': case 'petVoice': case 'petEdgeHide': case 'launchAtLogin':
+      case 'petSummaryLanguage': if (!SUMMARY_LANGUAGES.includes(value as SummaryLanguage)) throw new Error(t('语音服务设置无效')); out.petSummaryLanguage = value as SummaryLanguage; break;
+      case 'petSummaryConnection': out.petSummaryConnection = validateSummaryConnection(value); break;
+      case 'petSummaryCustom': out.petSummaryCustom = validateSummaryCustom(value); break;
+      case 'petVisible': case 'petMini': case 'petSound': case 'petVoice': case 'petVoiceSummary': case 'petEdgeHide': case 'launchAtLogin':
         if (typeof value !== 'boolean') throw new Error(t('开关值无效')); out[key] = value; break;
       default: throw new Error(t('未知设置'));
     }

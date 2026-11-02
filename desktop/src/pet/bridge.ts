@@ -3,6 +3,7 @@ import type { ActivityItem, ActivityRecent, Appearance, DesktopSettings, HostCom
 import type { SpriteState } from './animation';
 import type { PetBubble } from './bubbles';
 import type { DockEdge, Rect } from './geometry';
+import type { ClipFormat, PetClip } from './packs';
 export interface PetViewState {
   appearance: Appearance;
   surface: 'sprite' | 'glass';
@@ -17,6 +18,11 @@ export interface PetViewState {
   items: ActivityItem[];
   targets: ActivityItem[];
   mood: SpriteState;
+  /** Changes on every reaction, so clicking again replays one that is already showing. */
+  moodEpoch: number;
+  /** Clicking the pet: the running threads above the controls. */
+  pinned: boolean;
+  clips: { format: ClipFormat; states: Partial<Record<SpriteState, PetClip[]>> } | null;
   bubble: PetBubble | null;
   settings: Pick<DesktopSettings, 'petSize' | 'petMini' | 'petSound' | 'petVoice' | 'petId'>;
   imageUrl: string;
@@ -55,6 +61,7 @@ export interface PetBridge {
   onState(listener: (state: PetViewState) => void): () => void;
   onCue(listener: (cue: PetCue) => void): () => void;
   onSpeech(listener: (audio: Uint8Array) => void): () => void;
+  clip(path: string): Promise<Uint8Array | null>;
   ready(): void;
   hitTest(interactive: boolean): void;
   action(action: PetAction): Promise<HostCommandResult>;

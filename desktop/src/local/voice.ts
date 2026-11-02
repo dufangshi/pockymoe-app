@@ -1,7 +1,7 @@
 import { t } from '../shared/i18n';
 import type { DesktopSettings } from '../shared/contract';
 import type { LocalAction, LocalState } from '../shared/local';
-import { LOCAL_SPEAKERS, MODEL_DOWNLOAD_MB, REMOTE_DEFAULTS, SPEEDS, type LocalSpeaker, type RemoteProvider, type RemoteVoice, type VoiceProvider } from '../shared/voice';
+import { LOCAL_SPEAKERS, LOCAL_SUMMARY_LANGUAGES, MODEL_DOWNLOAD_MB, REMOTE_DEFAULTS, SPEEDS, SUMMARY_LANGUAGES, type LocalSpeaker, type RemoteProvider, type RemoteVoice, type SummaryLanguage, type VoiceProvider } from '../shared/voice';
 import { mountSelect } from './select';
 
 const escapeHtml = (value: string): string => value.replace(/[&<>"']/g, char => `&#${char.charCodeAt(0)};`);
@@ -18,10 +18,10 @@ function modelRow(state: LocalState): string {
     : model.state === 'unsupported' ? t('此设备不支持本地模型，请选择在线服务。')
     : model.error === 'checksum' ? t('下载的文件校验失败，请重试。')
     : model.error ? t('下载失败，请检查网络后重试。')
-    : t('首次使用需下载 {size} MB。', { size: MODEL_DOWNLOAD_MB });
+    : t('下载 {size} MB 模型并打开语音，之后离线运行。', { size: MODEL_DOWNLOAD_MB });
   const button = model.state === 'ready' ? `<button id="voice-model" data-command="remove">${t('删除模型')}</button>`
     : model.state === 'downloading' ? `<button id="voice-model" data-command="cancel">${t('取消')}</button>`
-    : model.state === 'absent' ? `<button id="voice-model" data-command="download">${t('下载')}</button>` : '';
+    : model.state === 'absent' ? `<button id="voice-install" class="primary">${t(model.error ? '重试' : '一键安装')}</button>` : '';
   return `<div class="setting-row"><div><label>${t('本地模型')}</label><p id="voice-model-status">${describe}</p></div>${button}</div>`;
 }
 export function voiceSection(state: LocalState, picker: (id: string, label: string) => string): string {
@@ -42,7 +42,50 @@ export function voiceSection(state: LocalState, picker: (id: string, label: stri
     ${rows}
     <div class="setting-row"><label for="petVoiceSpeed">${t('语速')}</label>${picker('petVoiceSpeed', t('语速'))}</div>
     <div class="setting-row voice-preview"><p id="voice-error" class="inline-error" role="alert">${escapeHtml(state.voice.lastError ?? '')}</p><button id="voice-preview" ${!remote && state.voice.model.state !== 'ready' ? 'disabled' : ''}>${t('试听')}</button></div>
-    ${privacy}`;
+    ${privacy}
+    ${summaryRows(state, picker, field)}`;
+}
+const languageLabels = (): Record<SummaryLanguage, string> => ({ auto: t('跟随界面语言'), 'zh-CN': '中文', en: 'English', ja: '日本語', ko: '한국어', fr: 'Français', de: 'Deutsch', es: 'Español' });
+const connectionValue = (deviceId: string, id: string): string => `${deviceId}\n${id}`;
+type Field = (id: string, label: string, value: string, placeholder?: string, note?: string) => string;
+function summaryRows(state: LocalState, picker: (id: string, label: string) => string, field: Field): string {
+  const settings = state.settings, connection = settings.petSummaryConnection, summary = state.summary;
+  const toggle = `<div class="setting-row"><div><label for="petVoiceSummary">${t('朗读要点')}</label><p>${t('由模型总结这一轮做成了什么再读出来；关闭时只说“某线程完成了”。')}</p></div><input id="petVoiceSummary" class="switch" type="checkbox" ${settings.petVoiceSummary ? 'checked' : ''}/></div>`;
+  if (!settings.petVoiceSummary) return toggle;
+  const custom = connection ? field('summary-model', t('模型'), connection.model, state.summary.connections.find(row => row.id === connection.id)?.model ?? '') : `
+    ${field('summary-url', t('服务地址'), settings.petSummaryCustom.url, 'https://api.openai.com/v1', t('OpenAI 格式，填到 /v1 为止。'))}
+    <div class="setting-row voice-field"><div><label for="summary-key">API Key</label><p>${summary.keySet ? t('已保存在系统钥匙串。') : t('保存在系统钥匙串，只发送给这个地址。')}</p></div><div class="inline-controls"><input id="summary-key" type="password" placeholder="${summary.keySet ? '••••••••' : ''}" autocomplete="off"/>${summary.keySet ? `<button id="summary-key-clear">${t('清除')}</button>` : ''}</div></div>
+    ${field('summary-custom-model', t('模型'), settings.petSummaryCustom.model, 'gpt-4o-mini')}`;
+  return `${toggle}
+    <div class="setting-row"><div><label for="summary-source">${t('总结用的上游')}</label>${summary.connections.length ? '' : `<p>${t('没有读到设备上保存的上游，可以直接填地址。')}</p>`}</div>${picker('summary-source', t('总结用的上游'))}</div>
+    ${custom}
+    <div class="setting-row"><label for="petSummaryLanguage">${t('播报语言')}</label>${picker('petSummaryLanguage', t('播报语言'))}</div>
+    <div class="setting-row voice-preview"><p id="summary-result" class="${summary.lastError ? 'inline-error' : 'voice-sample'}" role="status">${escapeHtml(summary.lastError ?? summary.sample ?? '')}</p><button id="summary-test">${t('试一试')}</button></div>
+    <p class="voice-note">${t('这一轮的用户输入和 agent 回答会发送给所选上游。')}</p>`;
+}
+let connectionsRequested = false;
+function bindSummary(root: HTMLElement, state: LocalState, _cleanups: (() => void)[], save: (patch: Partial<DesktopSettings>) => Promise<unknown>, action: (value: LocalAction) => Promise<boolean>, mount: (id: string, options: { value: string; label: string }[], value: string, change: (value: string) => void) => void): void {
+  const settings = state.settings, summary = state.summary, connection = settings.petSummaryConnection;
+  if (!settings.petVoiceSummary) return;
+  if (!connectionsRequested) { connectionsRequested = true; void action({ type: 'summaryConnections' }); }
+  const rows = summary.connections.map(row => ({ value: connectionValue(row.deviceId, row.id), label: `${row.name} · ${row.deviceName}` }));
+  // A saved choice stays selectable while its device is offline.
+  if (connection && !summary.connections.some(row => row.id === connection.id && row.deviceId === connection.deviceId)) rows.unshift({ value: connectionValue(connection.deviceId, connection.id), label: connection.name || connection.id });
+  mount('summary-source', [...rows, { value: 'custom', label: t('自定义地址') }], connection ? connectionValue(connection.deviceId, connection.id) : 'custom', value => {
+    if (value === 'custom') { void save({ petSummaryConnection: null }); return; }
+    const row = summary.connections.find(candidate => connectionValue(candidate.deviceId, candidate.id) === value);
+    if (row) void save({ petSummaryConnection: { deviceId: row.deviceId, id: row.id, name: `${row.name} · ${row.deviceName}`, model: '' } });
+  });
+  const labels = languageLabels(), languages = settings.petVoiceProvider === 'local' ? LOCAL_SUMMARY_LANGUAGES : SUMMARY_LANGUAGES;
+  mount('petSummaryLanguage', languages.map(value => ({ value, label: labels[value] })), languages.includes(settings.petSummaryLanguage) ? settings.petSummaryLanguage : 'auto', value => { void save({ petSummaryLanguage: value as SummaryLanguage }); });
+  const text = (id: string): HTMLInputElement | null => root.querySelector<HTMLInputElement>(`#${id}`);
+  const model = text('summary-model'); if (model && connection) model.onchange = () => { void save({ petSummaryConnection: { ...connection, model: model.value.trim() } }); };
+  const url = text('summary-url'); if (url) url.onchange = () => { void save({ petSummaryCustom: { ...settings.petSummaryCustom, url: url.value } }); };
+  const customModel = text('summary-custom-model'); if (customModel) customModel.onchange = () => { void save({ petSummaryCustom: { ...settings.petSummaryCustom, model: customModel.value.trim() } }); };
+  const key = text('summary-key'); if (key) key.onchange = () => { if (key.value.trim()) void action({ type: 'summaryKey', key: key.value }); };
+  const clear = root.querySelector<HTMLButtonElement>('#summary-key-clear'); if (clear) clear.onclick = () => { void action({ type: 'summaryKey', key: null }); };
+  const test = root.querySelector<HTMLButtonElement>('#summary-test');
+  if (test) test.onclick = () => { test.disabled = true; test.textContent = t('总结中…'); void action({ type: 'summaryTest' }).finally(() => { if (test.isConnected) { test.disabled = false; test.textContent = t('试一试'); } }); };
 }
 export function updateVoiceProgress(root: HTMLElement, state: LocalState): void {
   const status = root.querySelector<HTMLElement>('#voice-model-status');
@@ -61,6 +104,8 @@ export function bindVoice(root: HTMLElement, state: LocalState, cleanups: (() =>
   const bindText = (id: string, name: keyof RemoteVoice): void => { const input = root.querySelector<HTMLInputElement | HTMLTextAreaElement>(`#${id}`); if (input) input.onchange = () => { update({ [name]: input.value }); }; };
   bindText('voice-url', 'url'); bindText('voice-model-name', 'model'); bindText('voice-name', 'voice'); bindText('voice-style', 'style'); bindText('voice-extra', 'extra');
   mount('voice-name-list', state.voice.voices.map(voice => ({ value: voice.id, label: voice.label })), remote?.voice ?? '', value => { update({ voice: value }); });
+  const install = trigger('voice-install'); if (install) install.onclick = () => { void action({ type: 'voiceInstall' }); };
+  bindSummary(root, state, cleanups, save, action, mount);
   const key = root.querySelector<HTMLInputElement>('#voice-key');
   if (key) key.onchange = () => { if (key.value.trim()) void action({ type: 'voiceKey', key: key.value }); };
   const clear = trigger('voice-key-clear'); if (clear) clear.onclick = () => { void action({ type: 'voiceKey', key: null }); };

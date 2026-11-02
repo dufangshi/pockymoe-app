@@ -8,7 +8,7 @@ import type { ActivityEvent, ActivityItem } from '../shared/contract';
 import { ANIMATIONS, frameAt, moodFor } from './animation';
 import { scrollGeometry } from './scroll';
 import { BUBBLE_MS, BubbleQueue } from './bubbles';
-import { clampRect, CONTROLS_CLEARANCE, defaultPosition, dockPosition, exposedRect, petLayout, restorePosition, surfaceLayout } from './geometry';
+import { clampRect, CONTROLS_CLEARANCE, defaultPosition, dockPosition, exposedRect, petLayout, restorePosition, surfaceLayout, surfaceSide } from './geometry';
 import { importPetPack, loadPetPack, MAX_PACK_BYTES, parseManifest, unpackPetZip, validateAtlas } from './packs';
 const item = (state: ActivityItem['state'], key = 'd:t'): ActivityItem => ({ key, deviceId: 'd', deviceName: 'Mac', workspaceId: 'w', workspaceLabel: 'Project', threadId: key, title: 'Build', state, since: new Date(0).toISOString(), unread: true });
 const event = (type: ActivityEvent['type'], key = 'd:t', id = key): ActivityEvent => ({ type, alertId: id, item: item(type === 'started' ? 'running' : type === 'resolved' ? 'idle' : type, key), at: new Date(0).toISOString() });
@@ -52,6 +52,13 @@ describe('bubble delivery', () => {
   });
 });
 describe('display and dock geometry', () => {
+  it('keeps a visible surface on its side when it grows, so hovering cannot flip it away', () => {
+    const area = { x: 0, y: 0, width: 1000, height: 800 }, sprite = { x: 400, y: 600, width: 118, height: 128 };
+    expect(surfaceSide(sprite, area, 36)).toBe('below');
+    expect(surfaceSide(sprite, area, 110)).toBe('above');
+    const grown = surfaceLayout(sprite, area, 258, 110, 'below');
+    expect(grown.y + grown.height).toBeLessThanOrEqual(800); expect(grown.y).toBeGreaterThan(sprite.y);
+  });
   it('keeps the control capsule under the sprite, also on the right and bottom edges', () => {
     const area = { x: 0, y: 0, width: 1000, height: 800 };
     const sprite = { x: 400, y: 300, width: 128, height: 140 };
@@ -149,6 +156,13 @@ describe('custom task scrollbar', () => {
 });
 
 describe('v3 atlas and fixed-window regressions', () => {
+  it('validates clip manifests and rejects paths outside the clips folder', () => {
+    const base = { id: 'p', displayName: 'P', description: '', spritesheetPath: 'spritesheet.webp' };
+    const manifest = (clips: unknown, clipFormat: unknown = { fps: 12, columns: 12, width: 240, height: 260 }): Buffer => Buffer.from(JSON.stringify({ ...base, remoteCodex: { clipFormat, clips } }));
+    expect(parseManifest(manifest({ running: [{ path: 'clips/work.webp', frames: 48 }] })).remoteCodex?.clips?.running?.[0]?.frames).toBe(48);
+    for (const bad of [{ running: [{ path: '../secret.webp', frames: 4 }] }, { running: [{ path: 'clips/a/b.webp', frames: 4 }] }, { running: [{ path: 'clips/a.png', frames: 4 }] }, { running: [{ path: 'clips/a.webp', frames: 0 }] }, { other: [{ path: 'clips/a.webp', frames: 4 }] }, { running: [] }]) expect(() => parseManifest(manifest(bad)), JSON.stringify(bad)).toThrow();
+    expect(() => parseManifest(manifest({ running: [{ path: 'clips/a.webp', frames: 4 }] }, { fps: 0, columns: 12, width: 240, height: 260 }))).toThrow();
+  });
   it('accepts the v2 layout of imported packs without adding look slots to animation loops', async () => {
     const pack = await loadPetPack(new URL('../../assets/pets/frost/', import.meta.url).pathname);
     const v2 = PNG.sync.write(new PNG({ width: 1536, height: 2288 })), manifest = { ...pack.manifest, spritesheetPath: 'spritesheet.png' as const, spriteVersionNumber: 2 };
