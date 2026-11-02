@@ -198,6 +198,7 @@ async function capture(app: ElectronApplication, page: Page, name: string, pack:
   await app.evaluate(({ BrowserWindow }, { url, size }) => BrowserWindow.getAllWindows().find(w => w.webContents.getURL() === url)!.setContentSize(size[0], size[1]), { url: page.url(), size: original });
 }
 for (const pack of packs) for (const theme of ['light', 'dark'] as const) test(`local windows appearance and origin discovery (${pack} ${theme})`, async () => {
+  test.setTimeout(60_000); // Capture native, phone and desktop surfaces before the live-timer check.
   const app = await launch(theme, true);
   const setup = await pageAt(app, 'view=relay');
   const appearance = appearanceFor(pack, theme);
@@ -205,9 +206,9 @@ for (const pack of packs) for (const theme of ['light', 'dark'] as const) test(`
   await expect(setup.locator('html')).toHaveAttribute('data-theme-preset', pack);
   await expect(setup.locator('html')).toHaveAttribute('data-theme-effective', theme);
   await expect(setup.getByRole('heading', { name: '连接 Pockymoe' })).toBeVisible();
-  await capture(app, setup, 'relay', pack, theme);
+  await capture(app, setup, 'relay', pack, theme, [380, 1440]);
   await setup.getByText('高级', { exact: true }).click();
-  await capture(app, setup, 'relay-advanced', pack, theme);
+  await capture(app, setup, 'relay-advanced', pack, theme, [380, 1440]);
   if (pack === 'classic' && theme === 'light') {
     await setup.getByLabel('网页地址', { exact: true }).fill(origin);
     await setup.getByLabel('Relay 地址', { exact: true }).fill(relayOriginValue);

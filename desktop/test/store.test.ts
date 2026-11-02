@@ -32,7 +32,23 @@ it('persists unchanged defaults without recursively publishing identical setting
     const path = join(dir, 'settings.json'), store = new SettingsStore(path); let changes = 0;
     store.onChange(next => { changes++; store.set({ petVisible: next.petVisible }); });
     store.set({ petVisible: true });
-    expect(new SettingsStore(path).firstRun).toBe(false); expect(changes).toBe(0);
+    expect(new SettingsStore(path).firstRun).toBe(true); expect(changes).toBe(0);
     store.set({ petVisible: false }); expect(changes).toBe(1);
+  } finally { rmSync(dir, { recursive: true }); }
+});
+
+it('requires setup for fresh and legacy addressless profiles, preserving saved origins', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'pockymoe-setup-'));
+  try {
+    const path = join(dir, 'settings.json');
+    expect(new SettingsStore(path).get()).toMatchObject({ webOrigin: '', relayOrigin: '' });
+    writeFileSync(path, JSON.stringify({ petVisible: false }));
+    const legacy = new SettingsStore(path);
+    expect(legacy.firstRun).toBe(true);
+    expect(legacy.get().petVisible).toBe(false);
+    legacy.set({ webOrigin: 'https://app.example.com', relayOrigin: 'https://relay.example.com' });
+    const restarted = new SettingsStore(path);
+    expect(restarted.firstRun).toBe(false);
+    expect(restarted.get()).toMatchObject({ webOrigin: 'https://app.example.com', relayOrigin: 'https://relay.example.com' });
   } finally { rmSync(dir, { recursive: true }); }
 });

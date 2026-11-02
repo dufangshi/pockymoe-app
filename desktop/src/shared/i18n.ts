@@ -1,6 +1,7 @@
 /** One source for app-owned desktop strings. Thread titles, summaries and names
  * are user content and are intentionally never translated. */
 export const english = {
+  "此版本不再提供默认地址。请填写你的 Pockymoe 地址以继续。": "This version no longer provides a default address. Enter your Pockymoe address to continue.",
   "关闭窗口后仍在通知区域中运行。": "Keep running in the notification area after closing a window.",
   "关闭窗口后仍在菜单栏中运行。": "Keep running in the menu bar after closing a window.",
   "Windows 仅在 Pockymoe 运行时提供提醒。": "Windows alerts are available only while Pockymoe is running.",

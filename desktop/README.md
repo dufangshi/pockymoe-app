@@ -19,9 +19,9 @@ POCKYMOE_DESKTOP_RELAY_ORIGIN=http://127.0.0.1:18900 pnpm dev
 ```
 
 The ports above are examples; this package never starts or restarts a Supervisor.
-Defaults are Web `https://app.lnz-study.com` and Relay
-`https://remote.lnz-study.com`. `POCKYMOE_DESKTOP_USER_DATA` selects an isolated
-app profile. Setting Web origin bypasses first run. HTTPS is required except on
+There is no default Web or Relay address. `https://app.example.com` is an
+example only. `POCKYMOE_DESKTOP_USER_DATA` selects an isolated app profile.
+Setting both Web and Relay origins bypasses setup. HTTPS is required except on
 loopback (`localhost`, `127.0.0.1`, `[::1]`).
 
 ## Install and use
@@ -33,9 +33,8 @@ QA command below are **not notarized** and are for local developer testing;
 normal distribution requires a Developer ID signature and notarization. Windows
 builds without an Authenticode certificate are unsigned.
 
-On first launch, enter your Pockymoe address. The normal hosted Web address is
-`https://app.lnz-study.com`; its Relay is `https://remote.lnz-study.com`. For a
-self-hosted installation, use **Advanced** to enter Web and Relay separately, or
+On first launch, enter your Pockymoe address, for example
+`https://app.example.com`. Use **Advanced** to enter Web and Relay separately, or
 use the same origin for both when the Relay also serves the UI. Sign in with your
 existing account; this client does not install or replace a device Supervisor.
 
@@ -71,8 +70,8 @@ changes. No new backend endpoint is required.
 The app is `Pockymoe` (`com.pockymoe.desktop`); `pockymoe://` is the primary
 protocol and `remotecodex://` is accepted for compatibility. Existing JSON
 settings under the old `Remote Codex` user-data directory are copied once if no
-Pockymoe settings exist. A v1 custom relay maps to both origins; the old production
-Relay default maps to the new production Web/Relay pair. Credentials/keys are
+Pockymoe settings exist. A v1 saved relay maps to both origins. Profiles without
+a saved address open setup; explicitly saved origins are preserved. Credentials/keys are
 never inspected or copied by this migration. The session partition name remains
 `persist:remote-codex` to avoid changing its persisted identity.
 
@@ -446,3 +445,25 @@ so an owner cannot reenter destruction of its child on Windows.
 Tray disposal removes pending window-ready callbacks and subscriptions; later
 window readiness or theme/activity changes cannot update a destroyed native tray.
 The shutdown regression delivers that late event after disposal before quitting.
+
+### Address setup and public-source guard
+
+There is no default Web or Relay address. A fresh profile, or an older
+`settings.json` without an address, opens the existing connection page with an
+empty input and `https://app.example.com` as its placeholder. The page explains
+that a default address is no longer provided. Saving a connection completes
+setup; later launches keep the stored origins (including previously explicit
+production origins). A relay-only profile uses its saved Relay origin for both
+fields. Settings remain in Electron's user-data `settings.json`; no credentials
+are migrated or inspected.
+
+Until a connection is configured, Web/sign-in windows redirect to local setup,
+automatic/manual update checks are deferred, and voice downloads/actions are
+blocked. Setup itself loads bundled assets and contacts the entered address only
+when Connect is pressed.
+
+`python ../scripts/check-production-address.py` scans all tracked files using a
+hash of the forbidden address fragment, reporting paths only. The Windows CI
+also extracts `app.asar` with `scripts/extract-asar.cjs` and the builder's locked asar library and scans the
+contents, unpacked native files and renderer/main output. Mobile sources are
+included in the source guard and must be cleaned by their respective owners.

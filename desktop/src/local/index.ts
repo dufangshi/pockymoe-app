@@ -58,8 +58,8 @@ function renderRelay(): void {
   root.innerHTML = `<div class="drag-zone"></div><div class="relay-content" data-scroll>
     <header class="connection-heading"><img class="app-icon" src="${appIcon}" alt=""/><h1>${t('连接 Pockymoe')}</h1></header>
     <form id="relay-form" novalidate><label for="origin">${t('Pockymoe 地址')}</label>
-      <div class="origin-field">${icon('link')}<input id="origin" type="url" required spellcheck="false" autocomplete="url" value="${escapeHtml(state.settings.webOrigin)}" placeholder="https://app.lnz-study.com"/></div>
-      <p class="hint">${t('填写网页或 Relay 地址，自动发现连接。')}</p>
+      <div class="origin-field">${icon('link')}<input id="origin" type="url" required spellcheck="false" autocomplete="url" value="${escapeHtml(state.settings.webOrigin)}" placeholder="https://app.example.com"/></div>
+      <p class="hint">${t('填写网页或 Relay 地址，自动发现连接。')}${!state.settings.webOrigin ? ` ${t('此版本不再提供默认地址。请填写你的 Pockymoe 地址以继续。')}` : ''}</p>
       <details id="advanced"><summary>${t('高级')}</summary><div class="advanced-fields"><label for="web-origin">${t('网页地址')}</label><input id="web-origin" type="url" spellcheck="false" value="${escapeHtml(state.settings.webOrigin)}"/><label for="relay-origin">${t('Relay 地址')}</label><input id="relay-origin" type="url" spellcheck="false" value="${escapeHtml(state.settings.relayOrigin)}"/><p class="hint">${t('分别指定网页与 API 地址；同源部署可填写相同地址。')}</p></div></details>
     </form></div><div class="connection-action"><button class="primary connect" type="submit" form="relay-form">${t('连接')} <span aria-hidden="true">→</span></button><p id="relay-error" class="inline-error" role="alert"></p></div>`;
   if (image) root.querySelector('.app-icon')!.replaceWith(image);

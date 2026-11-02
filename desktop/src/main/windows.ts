@@ -1,3 +1,4 @@
+import { hasConnection } from './store';
 import { pageChrome, readPageChrome } from './pageChrome';
 import { t } from '../shared/i18n';
 import { BrowserWindow, nativeTheme, screen, shell, type Rectangle } from 'electron';
@@ -72,6 +73,7 @@ export class Windows {
     return { x: area.x + Math.max(0, Math.round((area.width - 1240) / 2)), y: area.y + Math.max(0, Math.round((area.height - 820) / 2)), width: Math.min(1240, area.width), height: Math.min(820, area.height) };
   }
   createMain(path = '/'): BrowserWindow {
+    if (!hasConnection(this.settings.get())) return this.createLocal('relay');
     const w = new BrowserWindow({
       ...this.currentBounds(), minWidth: 900, minHeight: 600, show: false, title: 'Pockymoe',
       backgroundColor: process.platform === 'darwin' ? '#00000000' : this.palette().background,

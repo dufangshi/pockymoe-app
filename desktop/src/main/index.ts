@@ -1,3 +1,4 @@
+import { hasConnection } from './store';
 import { t, getLocale, setLocale } from '../shared/i18n';
 import { app, BrowserWindow, dialog, globalShortcut, ipcMain, nativeTheme, Notification, session, shell, type IpcMainEvent, type IpcMainInvokeEvent } from 'electron';
 import { localFileMatches } from './platform';
@@ -178,6 +179,7 @@ else {
         const w = guardLocal(e);
         if (!value || typeof value !== 'object') throw new Error(t('操作无效'));
         const action = value as LocalAction;
+        if (!hasConnection(settings.get()) && (action.type.startsWith('voice') || ['summaryConnections', 'summaryModels', 'summaryTest', 'muteTargets', 'external'].includes(action.type))) throw new Error(t('请输入有效的 Pockymoe 地址'));
         switch (action.type) {
           case 'settings': applySettings(action.patch); break;
           case 'connect': {
@@ -227,7 +229,7 @@ else {
             const safe = externalUrl(action.url); if (!safe) throw new Error(t('操作无效'));
             await shell.openExternal(safe); break;
           }
-          case 'checkUpdate': await checkUpdate(showMessageBox); break;
+          case 'checkUpdate': if (hasConnection(settings.get())) await checkUpdate(showMessageBox); break;
           case 'messageResponse':
             if (!messages.respond(w.id, action.id, action.response)) throw new Error(t('操作无效'));
             break;
@@ -288,7 +290,7 @@ else {
       }
     }
     for (const url of [...deepLinks, ...process.argv.filter(a => /^(pockymoe|remotecodex):/.test(a))]) openLink(url);
-    if (process.env.POCKYMOE_DESKTOP_E2E !== '1') { configureUpdates(showMessageBox); void registerApns(settings, manager); }
+    if (process.env.POCKYMOE_DESKTOP_E2E !== '1') { configureUpdates(showMessageBox, () => hasConnection(settings.get())); void registerApns(settings, manager); }
     app.on('activate', () => { if (manager.quitting) return; if (manager.relay.size) manager.focusMain(); else manager.createLocal('relay'); });
     app.on('before-quit', () => { manager.quitting = true; messages.dispose(); manager.dispose(); notifications.dispose(); voice.dispose(); pet?.dispose(); tray.dispose(); hub.dispose(); globalShortcut.unregisterAll(); });
     if (process.env.POCKYMOE_DESKTOP_E2E === '1') Object.assign(globalThis, { __pockymoeDesktopTest: { hub, settings, appearance, windows: manager, tray, notifications, capabilities, updater: autoUpdater, showMessageBox, messages } });

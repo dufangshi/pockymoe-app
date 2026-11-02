@@ -1,3 +1,4 @@
+import { hasConnection } from '../store';
 import { windowsVoiceAvailable } from '../platform';
 import { app, net, safeStorage, utilityProcess, type UtilityProcess } from 'electron';
 import { existsSync, rmSync } from 'node:fs';
@@ -50,11 +51,15 @@ export class VoiceService {
   private listeners = new Set<() => void>();
   private summaryState: SummaryStatus = { connections: [], models: [], modelsError: null, lastError: null, sample: null, muteTargets: null };
   constructor(dataDir: string, private settings: SettingsStoreLike, private ready: () => void, private query: PageQuery) {
+    const configuredFetch: typeof fetcher = (url, init) => {
+      if (!hasConnection(settings.get())) return Promise.reject(new Error(t('请输入有效的 Pockymoe 地址')));
+      return fetcher(url, init);
+    };
     let wasReady = false;
     this.keys = new VoiceKeys(join(dataDir, 'voice-keys.json'), safeStorage);
     // Keys saved by the old custom address have no use now, so they should not linger.
     rmSync(join(dataDir, 'summary-keys.json'), { force: true });
-    this.model = new LocalModel(join(dataDir, 'voice'), fetcher, () => {
+    this.model = new LocalModel(join(dataDir, 'voice'), configuredFetch, () => {
       const nowReady = this.model.state === 'ready';
       if (nowReady && !wasReady && settings.get().petVoice && settings.get().petVoiceProvider === 'local') this.ready();
       wasReady = nowReady; this.changed();
@@ -62,6 +67,7 @@ export class VoiceService {
     wasReady = this.model.state === 'ready';
     let previous = settings.get();
     settings.onChange(next => {
+      if (!hasConnection(next)) { previous = next; return; }
       if (next.petVoiceProvider !== previous.petVoiceProvider) this.lastError = null;
       if (next.petVoiceProvider !== previous.petVoiceProvider || this.remote(next)?.config.url !== this.remote(previous)?.config.url) void this.discover();
       if (next.petSummaryConnection?.id !== previous.petSummaryConnection?.id || next.petSummaryConnection?.deviceId !== previous.petSummaryConnection?.deviceId) { this.summaryState = { ...this.summaryState, sample: null, lastError: null }; void this.refreshModels(); }
@@ -71,7 +77,7 @@ export class VoiceService {
       if (next.petVoice && next.petVoiceProvider === 'local' && this.supported && this.model.state === 'absent' && !this.model.error) void this.model.download();
       previous = next; this.changed();
     });
-    if (settings.get().petVoice && settings.get().petVoiceProvider === 'local' && this.supported && this.model.state === 'absent') void this.model.download();
+    if (hasConnection(settings.get()) && settings.get().petVoice && settings.get().petVoiceProvider === 'local' && this.supported && this.model.state === 'absent') void this.model.download();
   }
   onChange(listener: () => void): () => void { this.listeners.add(listener); return () => this.listeners.delete(listener); }
   private changed(): void { for (const listener of this.listeners) listener(); }
