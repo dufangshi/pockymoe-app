@@ -12,7 +12,7 @@ declare global { interface Window { pockymoeHost?: PockymoeHost; commands: unkno
 let server: Server, origin: string, app: ElectronApplication, profile: string;
 const evidence = process.env.POCKYMOE_DESKTOP_EVIDENCE || join(tmpdir(), 'pockymoe-local-evidence');
 test.beforeAll(async () => {
-  server = createServer((_req, res) => { res.setHeader('Content-Type', 'text/html'); res.end(`<!doctype html><title>Isolated shell fixture</title><script>window.commands=[];window.pockymoeHost?.onCommand(command=>{window.commands.push(command);window.pockymoeHost.commandResult(command.id,{ok:true});});</script>`); });
+  server = createServer((req, res) => { if (req.url === '/healthz') { res.setHeader('Content-Type', 'application/json'); res.end('{"status":"ok"}'); return; } res.setHeader('Content-Type', 'text/html'); res.end(`<!doctype html><title>Pockymoe isolated shell fixture</title><script>window.commands=[];window.pockymoeHost?.onCommand(command=>{window.commands.push(command);window.pockymoeHost.commandResult(command.id,{ok:true});});</script>`); });
   await new Promise<void>(done => server.listen(0, '127.0.0.1', done));
   const address = server.address(); if (!address || typeof address === 'string') throw new Error('Fixture port missing'); origin = `http://127.0.0.1:${address.port}`;
   mkdirSync(evidence, { recursive: true });
@@ -23,12 +23,12 @@ test.beforeEach(async () => {
   if (test.info().title.startsWith('custom pickers')) {
     const directory = join(profile, 'pets', 'credit-fixture'); mkdirSync(directory, { recursive: true });
     writeFileSync(join(directory, 'pet.json'), JSON.stringify({ id: 'credit-fixture', displayName: 'Credit fixture', description: '', spritesheetPath: 'spritesheet.png', author: 'Fixture Artist', license: 'CC0', licenseUrl: 'https://example.test/license', sourceUrl: 'https://example.test/source' }));
-    copyFileSync('assets/pets/placeholder/spritesheet.png', join(directory, 'spritesheet.png'));
+    copyFileSync('test/fixtures/pets/placeholder/spritesheet.png', join(directory, 'spritesheet.png'));
   }
   if (test.info().title.startsWith('long pickers')) for (let index = 0; index < 12; index++) {
     const id = `extra-${index}`, directory = join(profile, 'pets', id); mkdirSync(directory, { recursive: true });
     writeFileSync(join(directory, 'pet.json'), JSON.stringify({ id, displayName: `Extra ${index}`, description: '', spritesheetPath: 'spritesheet.png' }));
-    copyFileSync('assets/pets/placeholder/spritesheet.png', join(directory, 'spritesheet.png'));
+    copyFileSync('test/fixtures/pets/placeholder/spritesheet.png', join(directory, 'spritesheet.png'));
   }
   const env: Record<string, string> = {};
   for (const key of ['PATH', 'HOME', 'TMPDIR', 'USER', 'LOGNAME', 'DISPLAY', 'SystemRoot', 'WINDIR', 'TEMP', 'TMP', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'ComSpec', 'PATHEXT']) if (process.env[key]) env[key] = process.env[key]!;
@@ -87,7 +87,7 @@ test('custom pickers support keyboard, pet thumbnails/credits and recent quick t
   await expect.poll(() => web.evaluate(() => window.commands)).toEqual(expect.arrayContaining([expect.objectContaining({ type: 'navigate', path: '/devices/old/threads/recent' })]));
   await app.evaluate(() => globalThis.__pockymoeDesktopTest.windows.createLocal('relay'));
   const setup = await pageAt('view=relay'); await setup.getByText('Advanced', { exact: true }).click();
-  await setup.getByLabel('Web address', { exact: true }).fill(origin); await setup.getByLabel('Relay address', { exact: true }).fill(origin);
+  await setup.getByLabel('Pockymoe address', { exact: true }).fill(origin); await setup.getByLabel('Relay address', { exact: true }).fill(origin);
   await setup.getByRole('button', { name: 'Connect', exact: true }).click();
   await expect.poll(() => app.windows().some(page => page.url().includes('view=relay'))).toBe(false);
 });

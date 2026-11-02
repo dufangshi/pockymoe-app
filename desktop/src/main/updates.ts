@@ -6,7 +6,12 @@ const { autoUpdater } = updater;
 export { autoUpdater };
 export type ShowMessage = (options: MessageBoxOptions) => Promise<MessageBoxReturnValue>;
 const nativeMessage: ShowMessage = options => dialog.showMessageBox(options);
-export function configureUpdates(showMessage: ShowMessage = nativeMessage): void {
+let canCheck = (): boolean => true;
+let configured = false;
+export function configureUpdates(showMessage: ShowMessage = nativeMessage, allowed = (): boolean => true): void {
+  canCheck = allowed;
+  if (configured) return;
+  configured = true;
   autoUpdater.setFeedURL({ provider: 'github', owner: 'dufangshi', repo: 'pockymoe-app' });
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = true;
@@ -19,9 +24,10 @@ export function configureUpdates(showMessage: ShowMessage = nativeMessage): void
     const answer = await showMessage({ type: 'info', title: t('更新已就绪'), message: t('退出时会自动安装更新。'), buttons: [t('现在重启'), t('稍后')], cancelId: 1 });
     if (answer.response === 0) autoUpdater.quitAndInstall();
   });
-  if (app.isPackaged) void autoUpdater.checkForUpdates().catch(() => undefined);
+  if (app.isPackaged && canCheck()) void autoUpdater.checkForUpdates().catch(() => undefined);
 }
 export async function checkUpdate(showMessage: ShowMessage = nativeMessage): Promise<void> {
+  if (!canCheck()) return;
   if (!app.isPackaged) { await showMessage({ title: 'Pockymoe', message: t('开发版本不检查更新'), detail: t('安装打包版本后可从 GitHub Releases 获取更新。'), buttons: [t('好')] }); return; }
   const tell = (message: string, detail: string): Promise<unknown> => showMessage({ title: 'Pockymoe', message, detail, buttons: [t('好')] });
   try {

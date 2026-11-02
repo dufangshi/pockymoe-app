@@ -1,6 +1,6 @@
 import { t } from '../shared/i18n';
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { dirname, join } from 'node:path';
 import type { DesktopSettings, PageSettings, SettingsStoreLike } from '../shared/contract';
 import { DEFAULT_SPEAKER, LOCAL_SPEAKERS, REMOTE_PROVIDERS, SPEEDS, SUMMARY_LANGUAGES, type RemoteProvider, type RemoteVoice, type SummaryLanguage } from '../shared/voice';
 import { MAX_MUTE_RULES, type MuteRule } from '../shared/mutes';
@@ -8,11 +8,10 @@ import { relayOrigin } from './security';
 import { parseExtra, voiceEndpoint } from './voice/remote';
 
 export const defaults: DesktopSettings = {
-  webOrigin: 'https://app.lnz-study.com', relayOrigin: 'https://remote.lnz-study.com', alertMode: 'petFirst', petVisible: true,
+  webOrigin: '', relayOrigin: '', alertMode: 'petFirst', petVisible: true,
   petId: 'moe', petSize: 'M', petMini: false, petSound: true, petVoice: false, petVoiceProvider: 'local', petVoiceSpeaker: DEFAULT_SPEAKER, petVoiceSpeed: 1, petVoiceRemotes: {}, petVoiceSummary: false, petSummaryConnection: null, petSummaryLanguage: 'auto', petMutes: [], petMuteAlerts: false, petEdgeHide: true, launchAtLogin: false,
   quickWindowShortcut: 'Alt+Space', snoozeUntil: null
 };
-const RETIRED_PET_REPLACEMENT = 'frost';
 export function readJson(path: string): unknown { try { return JSON.parse(readFileSync(path, 'utf8')); } catch { return null; } }
 export function writeJson(path: string, data: unknown): void {
   mkdirSync(dirname(path), { recursive: true });
@@ -65,7 +64,7 @@ export function validateSettings(patch: unknown): Partial<DesktopSettings> {
   const out: Partial<DesktopSettings> = {};
   for (const [key, value] of Object.entries(patch)) {
     switch (key) {
-      case 'webOrigin': case 'relayOrigin': out[key] = relayOrigin(value); break;
+      case 'webOrigin': case 'relayOrigin': out[key] = value === '' ? '' : relayOrigin(value); break;
       case 'alertMode': if (!['petFirst', 'system', 'both'].includes(String(value))) throw new Error(t('提醒方式无效')); out.alertMode = value as DesktopSettings['alertMode']; break;
       case 'petSize': if (!['S', 'M', 'L'].includes(String(value))) throw new Error(t('宠物大小无效')); out.petSize = value as DesktopSettings['petSize']; break;
       case 'petId': if (typeof value !== 'string' || !/^[\w.-]{1,100}$/.test(value)) throw new Error(t('宠物标识无效')); out.petId = value; break;
@@ -85,22 +84,31 @@ export function validateSettings(patch: unknown): Partial<DesktopSettings> {
   }
   return out;
 }
+export function hasConnection(settings: Pick<DesktopSettings, 'webOrigin' | 'relayOrigin'>): boolean {
+  return !!settings.webOrigin && !!settings.relayOrigin;
+}
 export class SettingsStore implements SettingsStoreLike {
   private value: DesktopSettings;
   private listeners = new Set<(settings: DesktopSettings) => void>();
   readonly firstRun: boolean;
+  readonly legacyRelay: string | null;
   constructor(private path: string, overrides: Partial<Pick<DesktopSettings, 'webOrigin' | 'relayOrigin'>> = {}) {
     const stored = readJson(path) as Partial<DesktopSettings> | null;
-    if (stored?.relayOrigin && !stored.webOrigin) stored.webOrigin = stored.relayOrigin === defaults.relayOrigin ? defaults.webOrigin : stored.relayOrigin;
-    this.firstRun = !stored && !overrides.webOrigin;
+    this.legacyRelay = stored?.relayOrigin && stored.webOrigin === undefined && !overrides.webOrigin ? stored.relayOrigin : null;
     // Sound used to be off and nearly inaudible; settings saved before petVoice existed get the new default.
     if (stored && stored.petVoice === undefined) stored.petSound = true;
     // The pack it named was replaced by an original one under a new id.
     // Summaries used to take their own address; upstreams now come only from Settings.
     if (stored) delete (stored as Record<string, unknown>).petSummaryCustom;
-    if (stored?.petId === 'gpt-dragon') stored.petId = RETIRED_PET_REPLACEMENT;
+    // Imported packs are user-owned, even when reusing a retired built-in id.
+    const petId = stored?.petId;
+    if (stored && (petId === 'frost' || petId === 'gpt-dragon')) {
+      const imported = readJson(join(dirname(path), 'pets', petId, 'pet.json')) as { id?: string } | null;
+      if (imported?.id !== petId) stored.petId = 'moe';
+    }
     try { this.value = { ...defaults, ...validateSettings(stored || {}) }; } catch { this.value = { ...defaults }; }
     this.value = { ...this.value, ...validateSettings(overrides) };
+    this.firstRun = !hasConnection(this.value);
   }
   get(): DesktopSettings { return { ...this.value }; }
   set(patch: Partial<DesktopSettings>): DesktopSettings {

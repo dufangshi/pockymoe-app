@@ -49,7 +49,7 @@ While signed in, the app reads the relay's durable account completion feed. It n
 
 For iOS production pushes, configure `REMOTE_CODEX_APNS_KEY_PATH` (a protected `.p8` file), `REMOTE_CODEX_APNS_KEY_ID`, `REMOTE_CODEX_APNS_TEAM_ID`, and `REMOTE_CODEX_APNS_TOPIC` (the signed bundle identifier) on the relay. Enable Push Notifications for the app's signing profile. Debug uses Apple's sandbox, Release uses production. Tokens register through the authenticated `/relay/account/notifications/native` endpoint and deliveries are revoked with the account session. Push payloads contain routing identifiers and generic completion copy, not decrypted prompts or responses.
 
-iOS uses real Service Workers through `WKAppBoundDomains`. This build allows `remote.lnz-study.com`, `localhost` and `127.0.0.1`. For another relay, add its host to `ios/project.yml` and regenerate the project. Native file exports currently have a 32 MB limit and show an error above it.
+iOS uses real Service Workers through `WKAppBoundDomains`. For a deployment such as `app.example.com`, add the required hosts to `ios/project.yml` and regenerate the project. Keep the generated allowlist aligned with your deployment. Native file exports currently have a 32 MB limit and show an error above it.
 
 ## Requirements
 

@@ -4,9 +4,11 @@ const { readdirSync, rmSync, existsSync } = require('node:fs');
 const { join } = require('node:path');
 const { Arch } = require('electron-builder');
 const { verifyWindowsPackage } = require('./verify-windows-package.cjs');
+const { verifyBundledPets } = require('./verify-bundled-pets.cjs');
 
 exports.default = async function afterPack({ appOutDir, arch, electronPlatformName, packager }) {
   const resources = electronPlatformName === 'darwin' ? join(appOutDir, `${packager.appInfo.productFilename}.app`, 'Contents', 'Resources') : join(appOutDir, 'resources');
+  verifyBundledPets(resources);
   const modules = join(resources, 'app.asar.unpacked', 'node_modules');
   if (!existsSync(modules)) throw new Error('The speech addon was not unpacked');
   const keep = `sherpa-onnx-${electronPlatformName === 'win32' ? 'win' : electronPlatformName}-${Arch[arch]}`;
