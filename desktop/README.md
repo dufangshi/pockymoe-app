@@ -398,9 +398,3 @@ The pet cancels its native-window polling on `before-quit` and ignores already
 destroyed sprite/glass windows. This prevents a timer from raising an uncaught
 native-object error while Electron is closing the app. Empty quick-window reply
 placeholders also refresh when the interface language changes.
-The pinned Playwright 1.64.1 Electron driver has a small pnpm patch: its startup
-handshake schedules its call only after the injected loader function exists.
-Packaged executablePath launches inject no loader and skip that handshake;
-development launches keep the scheduled nonblocking call. Without this, a launch can return behind Playwright's not-ready shim;
-waiting longer in a test does not start the app. Frozen installs apply the patch.
-This is independent of the product's destroyed-glass timer fix.
