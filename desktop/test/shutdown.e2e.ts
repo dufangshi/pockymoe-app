@@ -20,11 +20,15 @@ test('quit cannot reopen a main window through a late activation event', async (
     await expect.poll(() => app.evaluate(() => '__pockymoeDesktopTest' in globalThis)).toBe(true);
     await expect.poll(() => app.windows().filter(page => page.url().includes('/pet/')).length).toBe(2);
     for (const page of app.windows().filter(page => page.url().includes('/pet/'))) await page.waitForLoadState('domcontentloaded');
+    for (const page of app.windows().filter(page => page.url().includes('/pet/'))) await expect.poll(() => page.evaluate(() => document.body.dataset.surface || '')).toMatch(/^(sprite|glass)$/);
     await app.evaluate(async ({ BrowserWindow }) => {
       const glass = BrowserWindow.getAllWindows().find(window => window.webContents.getURL().includes('/pet/') && window.getParentWindow());
       if (!glass) throw new Error('Pet glass window missing');
-      glass.destroy();
-      // The pet's 100ms proximity timer must tolerate OS destruction before quit.
+      const send = glass.webContents.send.bind(glass.webContents);
+      glass.webContents.send = (...args) => { send(...args); if (args[0] === 'rcDesktop:pet:state') glass.destroy(); };
+      globalThis.__pockymoeDesktopTest.settings.set({ petEdgeHide: false });
+      if (!glass.isDestroyed()) throw new Error('The state-update teardown was not triggered');
+      // Destruction happens inside state delivery, after emit's entry guard.
       await new Promise(resolve => setTimeout(resolve, 250));
     });
     await app.evaluate(({ app }, proof) => {

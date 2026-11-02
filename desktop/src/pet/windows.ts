@@ -12,3 +12,8 @@ export function glassOptions(platform: string, release = '', forceSolid = false)
     ...(platform === 'darwin' ? { type: 'panel', vibrancy: 'hud', visualEffectState: 'active' } : {}),
     ...(platform === 'win32' ? acrylic ? { backgroundMaterial: 'acrylic' } : { hasShadow: false } : {}) };
 }
+
+/** Native handles can disappear during a reentrant Windows state update. */
+export function windowWasDestroyed(error: unknown): boolean {
+  return error instanceof Error && error.message === 'Object has been destroyed';
+}

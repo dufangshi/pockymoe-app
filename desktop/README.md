@@ -413,3 +413,10 @@ Windows main-window caption colours resolve the configured page's actual
 Only flat validated RGB colours reach the native API; utility windows retain
 their local palettes, and Mac behaviour is unchanged. Failed page reads keep
 the existing fallback. Native captures precede Web audit assertions.
+
+Pet state delivery rechecks native liveness after IPC and retires polling when
+either native pet window closes. Only Electron's exact destroyed-object error
+is treated as a retired handle; other exceptions still fail. The quit regression
+destroys glass during state delivery, after the entry guard, to cover reentrancy.
+Windows key automation temporarily joins input queues when required to focus
+the exact HWND, detaches them immediately, and verifies the target before typing.
