@@ -48,7 +48,7 @@ export class DesktopTray {
     this.tray.setToolTip('Pockymoe');
     if (process.platform === 'win32') app.on('browser-window-created', this.windowCreated);
     if (process.platform === 'win32') this.tray.on('click', () => this.tray.popUpContextMenu());
-    this.tray.on('double-click', () => windows.focusMain());
+    if (process.platform !== 'win32') this.tray.on('double-click', () => windows.focusMain());
     hub.onSnapshot(() => this.update()); settings.onChange(() => this.update());
     nativeTheme.on('updated', () => this.update());
     this.update();

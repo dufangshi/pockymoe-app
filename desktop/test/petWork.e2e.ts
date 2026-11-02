@@ -58,6 +58,7 @@ test.beforeEach(async () => {
   page = app.windows().find(window => window.url().startsWith(origin))!;
   await page.waitForLoadState('domcontentloaded');
   await expect.poll(() => page.evaluate(() => !!window.pockymoeHost)).toBe(true);
+  await page.evaluate(() => window.pockymoeHost!.capabilities());
 });
 test.afterEach(async () => { await app?.close(); rmSync(profile, { recursive: true, force: true }); });
 const pet = async (surface: 'sprite' | 'glass'): Promise<Page> => {
@@ -65,8 +66,10 @@ const pet = async (surface: 'sprite' | 'glass'): Promise<Page> => {
   throw new Error(`No ${surface} window`);
 };
 const settings = (patch: Partial<DesktopSettings>): Promise<void> => app.evaluate((_e, value) => (globalThis as unknown as { __pockymoeDesktopTest: Testing }).__pockymoeDesktopTest.settings.set(value), patch);
-const sync = (items: ActivityItem[]): Promise<void> => page.evaluate(value => window.pockymoeHost!.activity.sync(value), snapshot(items));
-const baseline = (): Promise<void> => page.evaluate(value => window.pockymoeHost!.activity.sync(value), snapshot([], { generatedAt: '2026-11-01T05:59:00.000Z', syncedDeviceIds: ['mac', 'pc'] }));
+// The next action comes from a different renderer. Await a same-frame IPC roundtrip
+// so it cannot overtake a fire-and-forget activity update under runner load.
+const sync = (items: ActivityItem[]): Promise<void> => page.evaluate(async value => { window.pockymoeHost!.activity.sync(value); await window.pockymoeHost!.capabilities(); }, snapshot(items));
+const baseline = (): Promise<void> => page.evaluate(async value => { window.pockymoeHost!.activity.sync(value); await window.pockymoeHost!.capabilities(); }, snapshot([], { generatedAt: '2026-11-01T05:59:00.000Z', syncedDeviceIds: ['mac', 'pc'] }));
 const finish = async (): Promise<void> => { await baseline(); await sync([item()]); await sync([item({ state: 'completed', unread: true })]); };
 const movePetUnderPointer = (): Promise<void> => app.evaluate(({ BrowserWindow, screen }) => {
   const sprite = BrowserWindow.getAllWindows().find(window => window.webContents.getURL().includes('pet/index.html') && !window.getParentWindow())!;
