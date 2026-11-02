@@ -1,11 +1,15 @@
 import { t } from '../shared/i18n';
-import { app, dialog, type MessageBoxOptions, type MessageBoxReturnValue } from 'electron';
+import { app, dialog, shell, type MessageBoxOptions, type MessageBoxReturnValue } from 'electron';
 import updater from 'electron-updater';
 import { isNoDesktopRelease } from './updateErrors';
 const { autoUpdater } = updater;
 export { autoUpdater };
 export type ShowMessage = (options: MessageBoxOptions) => Promise<MessageBoxReturnValue>;
 const nativeMessage: ShowMessage = options => dialog.showMessageBox(options);
+const RELEASES_URL = 'https://github.com/dufangshi/pockymoe-app/releases/latest';
+// Mac builds are ad-hoc signed, and Squirrel.Mac refuses an update without a stable signing
+// identity, so an in-place update would fail silently. Send people to the download instead.
+export const installsInPlace = (platform: NodeJS.Platform = process.platform): boolean => platform !== 'darwin';
 let canCheck = (): boolean => true;
 let configured = false;
 export function configureUpdates(showMessage: ShowMessage = nativeMessage, allowed = (): boolean => true): void {
@@ -17,8 +21,11 @@ export function configureUpdates(showMessage: ShowMessage = nativeMessage, allow
   autoUpdater.autoInstallOnAppQuit = true;
   autoUpdater.on('error', () => { /* Offline checks must not interrupt work. */ });
   autoUpdater.on('update-available', async info => {
-    const answer = await showMessage({ type: 'info', title: t('Pockymoe 有更新'), message: t('版本 {version} 已可下载', { version: info.version }), buttons: [t('下载更新'), t('稍后')], cancelId: 1 });
-    if (answer.response === 0) void autoUpdater.downloadUpdate().catch(() => undefined);
+    const inPlace = installsInPlace();
+    const answer = await showMessage({ type: 'info', title: t('Pockymoe 有更新'), message: t('版本 {version} 已可下载', { version: info.version }), buttons: [t(inPlace ? '下载更新' : '前往下载'), t('稍后')], cancelId: 1 });
+    if (answer.response !== 0) return;
+    if (inPlace) void autoUpdater.downloadUpdate().catch(() => undefined);
+    else void shell.openExternal(RELEASES_URL);
   });
   autoUpdater.on('update-downloaded', async () => {
     const answer = await showMessage({ type: 'info', title: t('更新已就绪'), message: t('退出时会自动安装更新。'), buttons: [t('现在重启'), t('稍后')], cancelId: 1 });
