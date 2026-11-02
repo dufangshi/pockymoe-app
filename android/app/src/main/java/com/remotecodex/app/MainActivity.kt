@@ -224,33 +224,80 @@ class MainActivity : ComponentActivity() {
                 }
             )
         } else {
+            val stored = store.connection
+            if (stored.needsConfirmation)
+                layout.addView(
+                    TextView(this).apply {
+                        text =
+                            shellText(
+                                this@MainActivity,
+                                "请确认服务地址；网页与 Relay 不同时，请展开高级分别填写。",
+                                "Confirm the service address. If Web and Relay differ, enter the Relay address under Advanced.",
+                            )
+                        setTextColor(textColor)
+                    }
+                )
             val input =
                 EditText(this).apply {
-                    setText("https://app.lnz-study.com")
-                    contentDescription = shellText(this@MainActivity, "Relay 地址", "Relay address")
+                    setText(stored.webOrigin)
+                    hint = "https://app.example.com"
+                    contentDescription = shellText(this@MainActivity, "服务地址", "Service address")
                     setTextColor(textColor)
                     inputType = 17
                 }
             layout.addView(input)
+            val relay =
+                EditText(this).apply {
+                    setText(stored.relayOrigin.takeIf { it != stored.webOrigin }.orEmpty())
+                    hint =
+                        shellText(
+                            this@MainActivity,
+                            "留空时使用服务地址",
+                            "Use the service address when blank",
+                        )
+                    contentDescription = shellText(this@MainActivity, "Relay 地址", "Relay address")
+                    setTextColor(textColor)
+                    inputType = 17
+                    visibility = View.GONE
+                }
+            layout.addView(
+                Button(this).apply {
+                    text = shellText(this@MainActivity, "高级", "Advanced")
+                    contentDescription = text
+                    isAllCaps = false
+                    setOnClickListener {
+                        relay.visibility =
+                            if (relay.visibility == View.GONE) View.VISIBLE else View.GONE
+                    }
+                }
+            )
+            layout.addView(relay)
             layout.addView(
                 Button(this).apply {
                     text = shellText(this@MainActivity, "连接", "Connect")
+                    contentDescription = text
+                    isAllCaps = false
                     setOnClickListener {
                         val address =
                             com.remotecodex.app.data.normalizeRelayUrl(input.text.toString())
-                        if (!validOrigin(address)) {
+                        val relayAddress =
+                            com.remotecodex.app.data.normalizeRelayUrl(relay.text.toString())
+                        if (
+                            !validOrigin(address) ||
+                                (relayAddress.isNotBlank() && !validOrigin(relayAddress))
+                        ) {
                             input.error =
                                 shellText(
                                     this@MainActivity,
-                                    "请输入 HTTPS Relay 地址",
-                                    "Enter an HTTPS Relay address",
+                                    "请输入有效的 HTTPS 服务和 Relay 地址",
+                                    "Enter valid HTTPS service and Relay addresses",
                                 )
                             return@setOnClickListener
                         }
                         AgentEventService.stop(this@MainActivity)
                         Notifications.clear(this@MainActivity)
                         store.token = ""
-                        val pair = ShellOrigins.forAddress(address)
+                        val pair = ShellOrigins.forAddress(address, relayAddress)
                         store.relayUrl = pair.relayOrigin
                         store.webOrigin =
                             if (BuildConfig.DEBUG) debugWebOrigin ?: pair.webOrigin
@@ -296,12 +343,11 @@ class MainActivity : ComponentActivity() {
 
     @SuppressLint("SetJavaScriptEnabled")
     private fun openWeb(state: Bundle?) {
-        origin = store.webOrigin
+        origin = com.remotecodex.app.data.normalizeRelayUrl(store.webOrigin)
         if (!validOrigin(origin) || !validOrigin(store.relayUrl)) {
             AgentEventService.stop(this)
             Notifications.clear(this)
             store.token = ""
-            store.relayUrl = ""
             localPage(false)
             return
         }
@@ -353,8 +399,34 @@ class MainActivity : ComponentActivity() {
                     assets.open("pockymoe-host.js").bufferedReader().use { it.readText() },
                     setOf(origin),
                 )
+                if (
+                    BuildConfig.DEBUG &&
+                        androidx.webkit.WebViewFeature.isFeatureSupported(
+                            androidx.webkit.WebViewFeature.SERVICE_WORKER_BASIC_USAGE
+                        )
+                ) {
+                    androidx.webkit.ServiceWorkerControllerCompat.getInstance()
+                        .setServiceWorkerClient(
+                            object : androidx.webkit.ServiceWorkerClientCompat() {
+                                override fun shouldInterceptRequest(
+                                    request: WebResourceRequest
+                                ): android.webkit.WebResourceResponse? {
+                                    HostDiagnostics.network(request.url.toString())
+                                    return null
+                                }
+                            }
+                        )
+                }
                 webViewClient =
                     object : WebViewClient() {
+                        override fun shouldInterceptRequest(
+                            view: WebView,
+                            request: WebResourceRequest,
+                        ): android.webkit.WebResourceResponse? {
+                            HostDiagnostics.network(request.url.toString())
+                            return null
+                        }
+
                         override fun onPageStarted(
                             view: WebView,
                             url: String,

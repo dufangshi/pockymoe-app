@@ -2,11 +2,13 @@
 
 The Android entry point is one remote WebView. The application ID remains
 `com.remotecodex.app` (`.debug` for development), and the label is Pockymoe.
-The only local pages are Relay connection and offline/retry. The public Web/API
-pair matches desktop (`app.lnz-study.com` / `remote.lnz-study.com`); stored legacy
-public Relay URLs migrate to this pair. A self-hosted address uses that origin
-for both services. Product navigation,
-authentication, account settings, devices, workspaces and threads belong to Web.
+The only local pages are connection and offline/retry. No service address is
+shipped. First launch asks for a service address with `https://app.example.com`
+as a placeholder, plus an Advanced field for a separate Relay address. A blank
+Relay field uses the entered service address. Stored explicit Web/Relay pairs
+are kept exactly. A legacy single stored address is prefilled and asks once for
+confirmation before network loading, since no host-specific mapping is inferred.
+Product navigation, authentication, account settings, devices, workspaces and threads belong to Web.
 The design authority is `docs/mobile-design.zh.md` on the mobile integration
 branch; the Android branch does not own that document.
 
@@ -159,9 +161,9 @@ The helper defaults to the mobile-host integration checkout and prefers its
 current `pockymoe` binary over a legacy build and uses
 Node 22+ plus the control-plane Web dependency `hash-wasm` to generate a disposable
 modern Argon2id/AES-GCM account fixture. Native instrumentation fills the native connection page and signs in through
-the actual Web form, with no injected login token. In split mode, the DEBUG-only
-`e2eWebUrl` intent selects the separate Web source while the connection field
-continues to configure the Relay. The helper pins a copy of the supplied generated Web dist in the disposable
+the actual Web form, with no injected login token. Fresh-install and full-flow
+tests enter the Web service and separate Relay through the visible connection
+fields. The helper pins a copy of the supplied generated Web dist in the disposable
 backend directory before starting it, so parallel rebuilds cannot change the
 assets under a running test. `.local/review-web-build.json` records the source
 commit and index digest. The helper clears inherited
@@ -205,3 +207,10 @@ Allowed states: `running`, `needsInput`, `failed`, `interrupted`, `completed`, `
 The debug override holds these states despite page refreshes; `clear` releases it. Release
 intents cannot enable this hook. Production Google/GitHub sign-in and physical
 Android Live Update promotion still require separate real-device validation.
+
+Fresh-install E2E asserts that empty storage shows the native connection page
+without a WebView or app HTTP requests, then enters the isolated local Web and
+Relay origins through the visible fields. DEBUG-only instrumentation records
+origin names (never paths, query strings, headers or tokens) for WebView,
+service-worker and native workbench requests. The test rejects destinations
+outside the entered origins; it does not monitor unrelated emulator OS traffic.

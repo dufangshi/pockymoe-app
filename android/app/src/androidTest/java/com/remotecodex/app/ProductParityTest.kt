@@ -281,11 +281,94 @@ class ProductParityTest {
         }
     }
 
+    private fun enterConnection(env: E2eEnv) {
+        val address = device.findObject(androidx.test.uiautomator.By.desc("Service address"))
+        var value = ""
+        var hint = ""
+        scenario.onActivity { activity ->
+            fun input(view: View): android.widget.EditText? {
+                if (view is android.widget.EditText) return view
+                if (view is ViewGroup)
+                    for (i in 0 until view.childCount) input(view.getChildAt(i))?.let {
+                        return it
+                    }
+                return null
+            }
+            val field = input(activity.window.decorView)!!
+            hint = field.hint.toString()
+            value = field.text.toString()
+        }
+        assertEquals("no default service", "", value)
+        assertEquals("https://app.example.com", hint)
+        address.text = env.webUrl
+        device.findObject(androidx.test.uiautomator.By.desc("Advanced")).click()
+        device.findObject(androidx.test.uiautomator.By.desc("Relay address")).text = env.appRelayUrl
+        shot("connection")
+        device.findObject(androidx.test.uiautomator.By.desc("Connect")).click()
+    }
+
+    @Test
+    fun freshInstallConnectsOnlyToEnteredService() {
+        val env = E2eEnv.load()
+        for (name in
+            listOf(
+                "remote_codex",
+                "mobile_shell",
+                "notification_cursor",
+                "account_activity",
+            )) context.getSharedPreferences(name, Context.MODE_PRIVATE).edit().clear().commit()
+        HostDiagnostics.reset()
+        scenario =
+            ActivityScenario.launch(
+                Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+        scenario.use {
+            assertTrue(
+                device.wait(
+                    androidx.test.uiautomator.Until.hasObject(
+                        androidx.test.uiautomator.By.desc("Service address")
+                    ),
+                    10_000,
+                )
+            )
+            scenario.onActivity {
+                assertNull("no WebView before configuration", find(it.window.decorView))
+            }
+            assertTrue(
+                "no network before configuration",
+                HostDiagnostics.networkOrigins().isEmpty(),
+            )
+            shot("fresh-install-empty")
+            enterConnection(env)
+            eventually("local service connected") { js("!!window.pockymoeHost") == "true" }
+            eventually("local page painted") { HostDiagnostics.appearance != null }
+            Thread.sleep(1500)
+            fun origin(url: String): String {
+                val u = android.net.Uri.parse(url)
+                return "${u.scheme}://${u.host}:${u.port.takeIf { it >= 0 } ?: if (u.scheme == "https") 443 else 80}"
+            }
+            val allowed = setOf(origin(env.webUrl), origin(env.appRelayUrl))
+            val observed = HostDiagnostics.networkOrigins()
+            assertTrue("observed local requests", observed.isNotEmpty())
+            assertTrue(
+                "all app HTTP requests target entered origins",
+                observed.all { it in allowed },
+            )
+            File(context.getExternalFilesDir(null), "fresh-install-evidence.json")
+                .writeText(
+                    JSONObject()
+                        .put("allowedOrigins", org.json.JSONArray(allowed.toList()))
+                        .put("observedOrigins", org.json.JSONArray(observed.toList()))
+                        .toString(2)
+                )
+            shot("fresh-install-connected")
+        }
+    }
+
     @Test
     fun thinShellAndLiveUpdates() {
         val env = E2eEnv.load()
         HostDiagnostics.reset()
-        File(context.getExternalFilesDir(null), "screenshots").listFiles()?.forEach { it.delete() }
         for (name in
             listOf(
                 "remote_codex",
@@ -295,7 +378,6 @@ class ProductParityTest {
             )) context.getSharedPreferences(name, Context.MODE_PRIVATE).edit().clear().commit()
         val intent =
             Intent(context, MainActivity::class.java).apply {
-                if (env.webUrl != env.appRelayUrl) putExtra(MainActivity.EXTRA_WEB_URL, env.webUrl)
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
         val cookiesCleared = CountDownLatch(1)
@@ -315,17 +397,7 @@ class ProductParityTest {
                     10_000,
                 ),
             )
-            val address =
-                device.findObject(
-                    androidx.test.uiautomator.By.clazz(android.widget.EditText::class.java.name)
-                )
-            address.text = env.appRelayUrl
-            shot("connection")
-            device
-                .findObject(
-                    androidx.test.uiautomator.By.clazz(android.widget.Button::class.java.name)
-                )
-                .click()
+            enterConnection(env)
             eventually("host available") { js("!!window.pockymoeHost") == "true" }
             eventually("first Web frame visible") {
                 var visible = false
@@ -630,7 +702,28 @@ class ProductParityTest {
                 "0",
                 js("String(history.state?.idx ?? 0)"),
             )
+            // A reloaded composer can reopen the IME. Android consumes back for
+            // that before dispatching the shell's root-navigation command.
+            fun imeVisible(): Boolean {
+                var visible = false
+                scenario.onActivity {
+                    visible =
+                        androidx.core.view.ViewCompat.getRootWindowInsets(it.window.decorView)
+                            ?.isVisible(androidx.core.view.WindowInsetsCompat.Type.ime()) == true
+                }
+                return visible
+            }
+            if (imeVisible()) device.pressBack()
+            eventually("root keyboard dismissed") { !imeVisible() }
+            assertEquals(
+                "root has no visible overlay",
+                "false",
+                js(
+                    "Array.from(document.querySelectorAll('[role=menu],[role=dialog],[role=alertdialog]')).some(e=>e.getClientRects().length && !e.closest('[hidden],[inert]'))"
+                ),
+            )
             js("window.rootBackMarker='retained'")
+            shot("root-back-ready")
             gestureBack()
             eventually("root back returns to launcher") {
                 !com.remotecodex.app.notify.RemoteCodexForeground.isForeground

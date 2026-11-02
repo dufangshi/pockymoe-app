@@ -8,21 +8,23 @@ class SessionStore(context: Context) {
         context.applicationContext.getSharedPreferences("remote_codex", Context.MODE_PRIVATE)
 
     var relayUrl: String
-        get() = ShellOrigins.forAddress(prefs.getString(KEY_URL, "").orEmpty()).relayOrigin
+        get() = prefs.getString(KEY_URL, null) ?: prefs.getString("web_origin", "").orEmpty()
         set(value) = prefs.edit().putString(KEY_URL, normalizeRelayUrl(value)).apply()
 
     var webOrigin: String
-        get() =
-            prefs.getString("web_origin", null)
-                ?: ShellOrigins.forAddress(prefs.getString(KEY_URL, "").orEmpty()).webOrigin
+        get() = prefs.getString("web_origin", null) ?: relayUrl
         set(value) = prefs.edit().putString("web_origin", normalizeRelayUrl(value)).apply()
 
     var token: String
         get() = prefs.getString(KEY_TOKEN, "").orEmpty()
         set(value) = prefs.edit().putString(KEY_TOKEN, value).apply()
 
+    val connection: StoredConnection
+        get() =
+            ShellOrigins.stored(prefs.getString("web_origin", null), prefs.getString(KEY_URL, null))
+
     val hasRelayUrl: Boolean
-        get() = relayUrl.isNotBlank()
+        get() = connection.configured
 
     val isSignedIn: Boolean
         get() = token.isNotBlank()

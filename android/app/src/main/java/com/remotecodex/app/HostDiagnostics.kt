@@ -13,6 +13,7 @@ internal object HostDiagnostics {
 
     data class Item(val threadId: String, val title: String, val state: String)
 
+    private val destinations = mutableSetOf<String>()
     private val feedback = mutableListOf<String>()
     @Volatile
     var appearance: Appearance? = null
@@ -29,10 +30,22 @@ internal object HostDiagnostics {
     @Synchronized
     fun reset() {
         feedback.clear()
+        destinations.clear()
         appearance = null
         items = emptyList()
         activityCalls = 0
     }
+
+    @Synchronized
+    fun network(url: String) {
+        if (!BuildConfig.DEBUG) return
+        val uri = android.net.Uri.parse(url)
+        if (uri.scheme != "http" && uri.scheme != "https") return
+        val port = uri.port.takeIf { it >= 0 } ?: if (uri.scheme == "https") 443 else 80
+        if (destinations.size < 64) destinations.add("${uri.scheme}://${uri.host}:$port")
+    }
+
+    @Synchronized fun networkOrigins() = destinations.toSet()
 
     @Synchronized fun haptics() = feedback.toList()
 

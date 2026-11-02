@@ -24,9 +24,10 @@ class ApiClient(private val store: SessionStore) {
         withContext(Dispatchers.IO) {
             val request =
                 Request.Builder()
-                    .url(store.relayUrl + "/relay/account/workbench")
+                    .url(store.relayUrl.trimEnd('/') + "/relay/account/workbench")
                     .header("Authorization", "Bearer ${store.token}")
                     .build()
+            com.remotecodex.app.HostDiagnostics.network(request.url.toString())
             http.newCall(request).execute().use { response ->
                 if (!response.isSuccessful)
                     throw IOException("Relay workbench returned HTTP ${response.code}")

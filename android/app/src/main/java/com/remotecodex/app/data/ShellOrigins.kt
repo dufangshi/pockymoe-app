@@ -1,18 +1,28 @@
 package com.remotecodex.app.data
 
-/** Same public origin pair as desktop; self-hosted relays serve their own Web UI. */
+/** Connection addresses are supplied by the owner, never inferred from a shipped host table. */
 data class ShellOrigins(val webOrigin: String, val relayOrigin: String) {
     companion object {
-        const val PUBLIC_WEB = "https://app.lnz-study.com"
-        const val PUBLIC_RELAY = "https://remote.lnz-study.com"
-
-        fun forAddress(address: String): ShellOrigins {
-            val value = normalizeRelayUrl(address)
-            return if (
-                value in setOf(PUBLIC_WEB, PUBLIC_RELAY, "https://remote-codex.lnz-study.com")
-            )
-                ShellOrigins(PUBLIC_WEB, PUBLIC_RELAY)
-            else ShellOrigins(value, value)
+        fun forAddress(serviceAddress: String, relayAddress: String = ""): ShellOrigins {
+            val web = normalizeRelayUrl(serviceAddress)
+            return ShellOrigins(web, normalizeRelayUrl(relayAddress).ifBlank { web })
         }
+
+        /** Preserve persisted strings exactly. Legacy single-address installs confirm once. */
+        fun stored(web: String?, relay: String?): StoredConnection =
+            StoredConnection(
+                web ?: relay.orEmpty(),
+                relay ?: web.orEmpty(),
+                (web == null || relay == null) && (!web.isNullOrBlank() || !relay.isNullOrBlank()),
+            )
     }
+}
+
+data class StoredConnection(
+    val webOrigin: String,
+    val relayOrigin: String,
+    val needsConfirmation: Boolean,
+) {
+    val configured: Boolean
+        get() = webOrigin.isNotBlank() && relayOrigin.isNotBlank() && !needsConfirmation
 }

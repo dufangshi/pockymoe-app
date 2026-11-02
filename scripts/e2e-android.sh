@@ -14,7 +14,7 @@ ENV_FILE="$ROOT/.local/e2e-env.json"
 ARTIFACTS="$ROOT/.local/android-e2e"
 mkdir -p "$ARTIFACTS" "$ANDROID_AVD_HOME" "$ANDROID_USER_HOME"
 rm -rf "$ARTIFACTS/screenshots"
-rm -f "$ARTIFACTS/instrumentation.log" "$ARTIFACTS/system-theme-test.log" "$ARTIFACTS/light-prepare-test.log" "$ARTIFACTS/cold-first-dark.mp4" "$ARTIFACTS/cold-first-launch.mp4" "$ARTIFACTS/cold-web-dark.mp4" "$ARTIFACTS/cold-web-light.mp4"
+rm -f "$ARTIFACTS/fresh-install-test.log" "$ARTIFACTS/fresh-install-evidence.json" "$ARTIFACTS/instrumentation.log" "$ARTIFACTS/system-theme-test.log" "$ARTIFACTS/light-prepare-test.log" "$ARTIFACTS/cold-first-dark.mp4" "$ARTIFACTS/cold-first-launch.mp4" "$ARTIFACTS/cold-web-dark.mp4" "$ARTIFACTS/cold-web-light.mp4"
 [[ -f "$ENV_FILE" ]] || { echo 'Start scripts/e2e-backend.sh on isolated ports first.' >&2; exit 1; }
 RELAY_PORT="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["relayPort"])' "$ENV_FILE")"
 [[ "$RELAY_PORT" != 45679 ]] || exit 1
@@ -41,6 +41,7 @@ cleanup() {
     adb -s "$SERIAL" logcat -d -s PockymoeStartup:I '*:S' > "$ARTIFACTS/startup-layers.log" 2>/dev/null || true
     adb -s "$SERIAL" logcat -d -s PockymoeE2E:I '*:S' > "$ARTIFACTS/live-updates.log" 2>/dev/null || true
     adb -s "$SERIAL" shell appops get com.remotecodex.app.debug > "$ARTIFACTS/notification-appops.txt" 2>/dev/null || true
+    adb -s "$SERIAL" pull /sdcard/Android/data/com.remotecodex.app.debug/files/fresh-install-evidence.json "$ARTIFACTS/" >/dev/null 2>&1 || true
     adb -s "$SERIAL" pull /sdcard/Android/data/com.remotecodex.app.debug/files/integration-evidence.json "$ARTIFACTS/" >/dev/null 2>&1 || true
     adb -s "$SERIAL" pull /sdcard/Android/data/com.remotecodex.app.debug/files/screenshots "$ARTIFACTS/" >/dev/null 2>&1 || true
     adb -s "$SERIAL" shell run-as com.remotecodex.app.debug rm -f files/e2e-env.json >/dev/null 2>&1 || true
@@ -130,6 +131,8 @@ adb -s "$SERIAL" shell appops get com.remotecodex.app.debug > "$ARTIFACTS/notifi
 # Fixture credentials travel as a local file, never command-line values or console output.
 adb -s "$SERIAL" shell run-as com.remotecodex.app.debug mkdir -p files
 adb -s "$SERIAL" shell "run-as com.remotecodex.app.debug sh -c 'cat > files/e2e-env.json'" < "$ENV_FILE"
+adb -s "$SERIAL" shell am instrument -w -r -e class 'com.remotecodex.app.ProductParityTest#freshInstallConnectsOnlyToEnteredService' -e envFile /data/user/0/com.remotecodex.app.debug/files/e2e-env.json com.remotecodex.app.debug.test/androidx.test.runner.AndroidJUnitRunner | tee "$ARTIFACTS/fresh-install-test.log"
+rg -q 'OK \([0-9]+ tests?\)' "$ARTIFACTS/fresh-install-test.log"
 adb -s "$SERIAL" shell am instrument -w -r -e class 'com.remotecodex.app.ProductParityTest#thinShellAndLiveUpdates' -e envFile /data/user/0/com.remotecodex.app.debug/files/e2e-env.json com.remotecodex.app.debug.test/androidx.test.runner.AndroidJUnitRunner | tee "$ARTIFACTS/instrumentation.log"
 rg -q 'OK \([0-9]+ tests?\)' "$ARTIFACTS/instrumentation.log"
 adb -s "$SERIAL" shell settings put global animator_duration_scale 1
