@@ -130,3 +130,42 @@ or restyled by this task; theme/layout acceptance belongs to the desktop UI engi
 
 Evidence: `.local/desktop-evidence/fixture/` (dev-mode browser evidence in `dev/`).
 Logs remain under each run's `.local/e2e-desktop.*/relay`, `web`, `device-1..3`.
+
+## Windows / pinned public release
+
+The Bash wrapper is optional: run `python scripts/desktop-fixture/backend.py` with
+identical commands in PowerShell. Windows lifecycle tracking uses PID + creation
+FILETIME; cleanup only terminates a recorded matching process tree. Lifecycle
+commands use a file lock. No installed Supervisor is discovered or controlled.
+`rebuild-web`'s atomic directory exchange remains Mac/Linux-only.
+
+From a fresh app clone (Node 24, pnpm 10, Python 3.9+):
+
+```powershell
+cd desktop
+pnpm install --frozen-lockfile
+pnpm exec playwright install chromium
+cd ..
+python scripts/desktop-fixture/prepare-release.py
+$runtime = Join-Path (Get-Location) .local/desktop-runtime-v0.13.44
+$env:DESKTOP_E2E_BIN = Join-Path $runtime remote-codex-win32-x64-msvc-cli.exe
+$env:DESKTOP_E2E_WEB_DIST = Join-Path $runtime web
+$env:DESKTOP_E2E_RELEASE_WEB = '1'
+python scripts/desktop-fixture/backend.py start
+cd desktop
+$env:POCKYMOE_REAL_WEB = '1'
+pnpm exec playwright test test/realWeb.e2e.ts --project=electron
+cd ..
+python scripts/desktop-fixture/backend.py stop
+```
+
+The preparation downloads only v0.13.44 public release assets and checks each
+against its SHA256SUMS. The release zip is unmodified runtime Web, not a Pages
+build with a compiled cross-origin relay URL. `DESKTOP_E2E_RELEASE_WEB=1` therefore
+uses the release runtime's real `POCKYMOE_RELAY_WEB_DIST_DIR` hosting, with Web and
+API on the isolated relay port. It still creates three isolated supervisors,
+real local account/vault, seeded histories, approvals and running threads.
+The default Mac separate-origin mode remains unchanged. Existing split-origin
+Electron tests independently cover the host bridge's origin isolation.
+Credentials in `.local/e2e-desktop-env.json` are private test inputs: do not print
+that file, trace authentication or include raw auth errors in reports.

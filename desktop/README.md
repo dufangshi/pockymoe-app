@@ -369,3 +369,18 @@ with the matching local ID require a signed macOS build. Electron has no portabl
 public DND/Focus query: system notifications respect OS Focus, while the pet
 currently uses focused-thread, idle and snooze signals. The packaged QA build is development-signed locally; no publish, release or
 deployment is performed by these checks.
+
+### Real Windows Web acceptance
+
+The real main/conversation, map and devices captures are independent tests in
+`test/realWeb.e2e.ts`. Enable `POCKYMOE_REAL_WEB=1` after starting the isolated
+v0.13.44 release fixture using the fresh-clone PowerShell instructions in
+[scripts/desktop-fixture/README.md](../scripts/desktop-fixture/README.md#windows--pinned-public-release).
+They sign into the disposable account and choose themes through the real Web
+Settings. They do not use placeholder pages, injected theme CSS or production.
+The Windows CI starts/stops that fixture and runs English/Chinese locale
+assumptions, plus native and solid local surface matrices. Optional voice/clip
+cases skip before launching Electron, so a missing input does not leave an
+unready app for teardown. Windows shortcuts use native SendKeys after focusing
+the app; Mac tests invoke the built menu command without requiring OS automation
+permissions. The separate menu test includes Electron's role default accelerators.

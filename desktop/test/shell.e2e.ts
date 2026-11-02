@@ -120,7 +120,7 @@ test('split origins bridge, activity delivery, tray and quick-window command rou
   expect(await page.evaluate(() => window.pockymoeHost!.capabilities())).toMatchObject({ surface: 'desktop', bridgeVersion: 2, features: { multiWindow: true, quickWindow: true } });
   await expect.poll(() => page.evaluate(() => (window as unknown as { frameResults: unknown }).frameResults)).toEqual({ sameFrameBridge: false, otherBridge: false });
   await app.evaluate(() => globalThis.__pockymoeDesktopTest.windows.focusMain());
-  await expect.poll(() => app.evaluate(() => globalThis.__pockymoeDesktopTest.windows.main().isFocused())).toBe(true);
+  if (process.platform === 'win32') await expect.poll(() => app.evaluate(() => globalThis.__pockymoeDesktopTest.windows.main().isFocused())).toBe(true);
   await primaryKey(app, 'k');
   await expect.poll(() => page.evaluate(() => (window as unknown as { searchKeys: number }).searchKeys)).toBe(1);
   await app.evaluate(() => { globalThis.__pockymoeDesktopTest.settings.set({ petVisible: false }); globalThis.__pockymoeDesktopTest.windows.focusMain(); });

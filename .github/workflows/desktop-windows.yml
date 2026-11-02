@@ -14,11 +14,18 @@ jobs:
       fail-fast: false
       matrix:
         scale: ['1', '1.5']
+        locale: ['en-US', 'zh-CN']
     defaults:
       run:
         working-directory: desktop
         shell: pwsh
     env:
+      POCKYMOE_TEST_SYSTEM_LOCALE: ${{ matrix.locale }}
+      POCKYMOE_REAL_WEB: '1'
+      PYTHONUTF8: '1'
+      DESKTOP_E2E_RELEASE_WEB: '1'
+      DESKTOP_E2E_BIN: ${{ github.workspace }}/.local/desktop-runtime-v0.13.44/remote-codex-win32-x64-msvc-cli.exe
+      DESKTOP_E2E_WEB_DIST: ${{ github.workspace }}/.local/desktop-runtime-v0.13.44/web
       POCKYMOE_DESKTOP_SCALE: ${{ matrix.scale }}
       POCKYMOE_DESKTOP_EVIDENCE: ${{ github.workspace }}/desktop/evidence/scale-${{ matrix.scale }}
       POCKYMOE_PACKAGED_EXECUTABLE: ${{ github.workspace }}/desktop/release/win-unpacked/Pockymoe.exe
@@ -51,13 +58,27 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           pnpm exec electron-builder --win --x64 --dir --publish never 2>&1 | Tee-Object "$env:POCKYMOE_DESKTOP_EVIDENCE/package.log"
           exit $LASTEXITCODE
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Start isolated real runtime and release Web
+        run: |
+          pnpm exec playwright install chromium
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python ../scripts/desktop-fixture/prepare-release.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python ../scripts/desktop-fixture/backend.py start 2>&1 | Tee-Object "$env:POCKYMOE_DESKTOP_EVIDENCE/backend.log"
+          exit $LASTEXITCODE
       - name: Electron suites and Windows surface matrix
         run: |
           pnpm exec playwright test --project=electron --reporter=list 2>&1 | Tee-Object "$env:POCKYMOE_DESKTOP_EVIDENCE/electron.log"
           exit $LASTEXITCODE
+      - name: Stop only the recorded disposable backend
+        if: always()
+        run: python ../scripts/desktop-fixture/backend.py stop
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: desktop-windows-x64-scale-${{ matrix.scale }}
+          name: desktop-windows-x64-scale-${{ matrix.scale }}-${{ matrix.locale }}
           path: desktop/evidence/
           if-no-files-found: warn

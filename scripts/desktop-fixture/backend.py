@@ -3,7 +3,6 @@
 import argparse
 import concurrent.futures
 import ctypes
-import fcntl
 import hashlib
 import json
 import os
@@ -17,6 +16,7 @@ import tempfile
 import time
 import urllib.error
 import urllib.request
+from processes import identity, alive, stop_process, lock_file
 
 ROOT = Path(__file__).resolve().parents[2]
 LOCAL = ROOT / ".local"
@@ -35,7 +35,7 @@ class FixtureError(Exception):
 
 def write_json(path, data):
     temporary = path.with_suffix(".tmp")
-    with temporary.open("w") as output:
+    with temporary.open("w", encoding="utf-8") as output:
         os.chmod(temporary, 0o600)
         json.dump(data, output, ensure_ascii=False, indent=2)
         output.write("\n")
@@ -45,7 +45,7 @@ def write_json(path, data):
 def read_state():
     if not STATE.exists():
         raise FixtureError("No recorded desktop fixture. Run start first.")
-    state = json.loads(STATE.read_text())
+    state = json.loads(STATE.read_text(encoding="utf-8"))
     path = Path(state["dataDir"]).resolve()
     if path.parent != LOCAL.resolve() or not path.name.startswith("e2e-desktop."):
         raise FixtureError("Refusing state outside this fixture's .local/e2e-desktop.*/")
@@ -88,36 +88,6 @@ def retry(check, label, deadline):
     raise FixtureError(f"Timed out waiting for {label}. Inspect logs in the recorded dataDir.")
 
 
-def identity(pid):
-    # PID + birth time survives launcher execs (macOS Python changes executable)
-    # while refusing a recycled PID. Each launch also owns a fresh session group.
-    result = subprocess.run(["ps", "-p", str(pid), "-o", "lstart=", "-o", "stat="],
-                            text=True, capture_output=True, check=False)
-    parts = result.stdout.strip().rsplit(None, 1)
-    return parts[0].strip() if result.returncode == 0 and len(parts) == 2 and not parts[1].startswith("Z") else ""
-
-
-def alive(process):
-    return bool(process and process.get("identity") and
-                identity(process["pid"]) == process["identity"])
-
-
-def stop_process(process):
-    if not alive(process):
-        return
-    def send(signum):
-        if os.getpgid(process["pid"]) == process["pid"]:
-            os.killpg(process["pid"], signum)
-        else:
-            os.kill(process["pid"], signum)
-    send(signal.SIGTERM)
-    deadline = time.monotonic() + 3
-    while alive(process) and time.monotonic() < deadline:
-        time.sleep(0.04)
-    if alive(process):
-        send(signal.SIGKILL)
-
-
 def clean_environment():
     # Strip inherited thread identities and supervisor paths before constructing
     # any process environment. Also clear legacy aliases used in local mode.
@@ -143,7 +113,8 @@ def launch(state, command, directory, extra, arguments=None, cwd=None):
     with (directory / "process.log").open("ab") as log:
         child = subprocess.Popen(arguments or [state["binary"], command], cwd=cwd or directory,
                                  env=env, stdin=subprocess.DEVNULL, stdout=log,
-                                 stderr=log, start_new_session=True)
+                                 stderr=log, start_new_session=sys.platform != "win32",
+                                 creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0)
     birth = retry(lambda: identity(child.pid), command + " process", time.monotonic() + 1)
     return {"pid": child.pid, "identity": birth}
 
@@ -194,7 +165,7 @@ def build_static_web(codex, relay_origin, output):
     began = time.monotonic()
     # Same static mode/artifacts as pages-deploy.yml, isolated outDir so another
     # engineer's apps/supervisor-web/dist is never overwritten by this fixture.
-    with (output / "build.log").open("w") as log:
+    with (output / "build.log").open("w", encoding="utf-8") as log:
         result = subprocess.run(["pnpm", "--filter", "@pockymoe/supervisor-web", "build:static", "--outDir", str(output)],
                                 cwd=codex, env=env, stdout=log, stderr=log, check=False)
     if result.returncode:
@@ -341,7 +312,7 @@ def start(dev_web=False):
     if STATE.exists():
         previous = read_state()
         if previous.get("fixtureVersion") == 2 and previous.get("ready") and alive(previous.get("relayProcess")):
-            if previous["webMode"] != ("dev" if dev_web else "static"):
+            if previous["webMode"] != ("dev" if dev_web else "release" if os.environ.get("DESKTOP_E2E_RELEASE_WEB") == "1" else "static"):
                 raise FixtureError("Web mode differs from running fixture; stop before changing --dev-web.")
             # Preserve intentionally offline devices on an idempotent start.
             for device in previous["devices"]:
@@ -361,15 +332,18 @@ def start(dev_web=False):
     port = int(os.environ.get("DESKTOP_E2E_RELAY_PORT", "18890"))
     first = int(os.environ.get("DESKTOP_E2E_SUPERVISOR_PORT", "18891"))
     web_port = int(os.environ.get("DESKTOP_E2E_WEB_PORT", "18894"))
-    assert_free([port, web_port, first, first + 1, first + 2])
+    release_web = os.environ.get("DESKTOP_E2E_RELEASE_WEB") == "1"
+    if release_web and (dev_web or not os.environ.get("DESKTOP_E2E_WEB_DIST")):
+        raise FixtureError("Release Web requires DESKTOP_E2E_WEB_DIST and cannot use --dev-web.")
+    assert_free([port, *([] if release_web else [web_port]), first, first + 1, first + 2])
     web, build_seconds = prepare_web(codex, f"http://127.0.0.1:{port}", dev_web)
     started = time.monotonic()
     data = Path(tempfile.mkdtemp(prefix="e2e-desktop.", dir=LOCAL))
     os.chmod(data, 0o700)
     ENV.unlink(missing_ok=True)
     from seed import iso_now, seed_device, backdate_device
-    state = {"fixtureVersion": 2, "webRoot": str(codex), "webOrigin": f"http://127.0.0.1:{web_port}",
-             "webPort": web_port, "webMode": "dev" if dev_web else "static", "webBuildSeconds": build_seconds,
+    state = {"fixtureVersion": 2, "webRoot": str(codex), "webOrigin": f"http://127.0.0.1:{port if release_web else web_port}",
+             "webPort": port if release_web else web_port, "webMode": "release" if release_web else "dev" if dev_web else "static", "webBuildSeconds": build_seconds,
              "webDist": str(web) if web else None, "testAccount": {"username": USERNAME, "password": PASSWORD},
              "binary": str(binary), "dataDir": str(data), "relayOrigin": f"http://127.0.0.1:{port}",
              "relayPort": port, "devices": [], "seededAt": iso_now(), "ready": False}
@@ -380,14 +354,15 @@ def start(dev_web=False):
             "POCKYMOE_WEB_ORIGIN": state["webOrigin"],
             "POCKYMOE_RELAY_REGISTRATION_ENABLED": "true",
             "POCKYMOE_PUBLIC_BASE_URL": state["relayOrigin"],
+            **({"POCKYMOE_RELAY_WEB_DIST_DIR": web} if release_web else {}),
         })
         write_json(STATE, state)
         retry(lambda: request(state["relayOrigin"], "/healthz"), "relay health", started + 15)
-        state["webProcess"] = launch_web(state)
+        state["webProcess"] = state["relayProcess"] if release_web else launch_web(state)
         write_json(STATE, state)
         retry(lambda: web_healthy(state), "separate web origin", started + 15)
         browser_command(state, "bootstrap")
-        provision = json.loads((data / "account.json").read_text())
+        provision = json.loads((data / "account.json").read_text(encoding="utf-8"))
         state["accountToken"] = provision["token"]
         state["accountId"] = provision["accountId"]
         for index, name in enumerate(NAMES, 1):
@@ -486,8 +461,8 @@ def main():
     LOCAL.mkdir(exist_ok=True)
     os.umask(0o077)
     # Serialize lifecycle/control commands across independent test runners.
-    with (LOCAL / "e2e-desktop.lock").open("a") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
+    with (LOCAL / "e2e-desktop.lock").open("a+") as lock:
+        lock_file(lock)
         if args.command in ("start", "serve"):
             state = start(args.dev_web)
         elif args.command == "status":
@@ -502,7 +477,7 @@ def main():
         elif args.command == "env":
             if not ENV.exists():
                 raise FixtureError("No environment file. Run start first.")
-            print(ENV.read_text(), end="")
+            print(ENV.read_text(encoding="utf-8"), end="")
         elif args.command in ("start-device", "stop-device"):
             state = read_state()
             device = get_device(state, int(args.arguments[0]))
@@ -550,7 +525,6 @@ def main():
                      "request-input": "input", "start-turn": "start"}[args.command]
             trigger(state, device, args.arguments[1], event)
             print(f"{args.command} delivered on device {device['index']}.")
-        fcntl.flock(lock, fcntl.LOCK_UN)
     if args.command == "serve":
         def shutdown(_signum, _frame):
             raise KeyboardInterrupt
@@ -562,8 +536,8 @@ def main():
         except KeyboardInterrupt:
             pass
         finally:
-            with (LOCAL / "e2e-desktop.lock").open("a") as lock:
-                fcntl.flock(lock, fcntl.LOCK_EX)
+            with (LOCAL / "e2e-desktop.lock").open("a+") as lock:
+                lock_file(lock)
                 current = read_state()
                 if current["dataDir"] == state["dataDir"]:
                     stop(current)

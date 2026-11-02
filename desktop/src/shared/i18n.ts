@@ -219,7 +219,6 @@ export const english = {
   "更改…": "Change…",
   "启动": "Startup",
   "登录时启动": "Launch at login",
-  "关闭窗口后仍在菜单栏或托盘中运行。": "Keep running in the menu bar or tray after closing a window.",
   "提醒方式": "Alert delivery",
   "当前正在查看的线程不会打扰你。": "The thread you are viewing will not interrupt you.",
   "桌宠优先": "Pet first",
