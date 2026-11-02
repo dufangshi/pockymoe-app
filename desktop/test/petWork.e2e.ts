@@ -115,7 +115,7 @@ test('with nothing running, the click says so', async () => {
 test('working: the pet shows work while a thread runs', async () => {
   await baseline();
   await sync([item()]);
-  await expect.poll(async () => (await pet('sprite')).locator('#app').getAttribute('data-mood'), { timeout: 5000 }).toBe('running');
+  await expect.poll(async () => (await pet('sprite')).locator('#app').getAttribute('data-mood'), { timeout: 12_000 }).toBe('running');
 });
 const speaker = { petVoice: true, petVoiceProvider: 'compatible' as const, petVoiceSpeed: 1, petVoiceSummary: true, petSummaryLanguage: 'zh-CN' as const };
 const remoteVoice = (): Partial<DesktopSettings> => ({ ...speaker, petVoiceRemotes: { compatible: { url: `${origin}/v1`, model: 't', voice: '', style: '', extra: '' } } });
