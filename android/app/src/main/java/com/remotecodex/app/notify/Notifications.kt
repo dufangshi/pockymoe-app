@@ -269,7 +269,6 @@ object Notifications {
         }
         val s = summary
         val copy = NotificationCopy(shellLocale(context))
-        val text = copy.summary(s.state, s.count)
         val displayedItems =
             if (s.items.isNotEmpty()) s.items
             else if (s.state == "completed")
@@ -296,17 +295,25 @@ object Notifications {
                 intent,
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
-        val rows =
-            displayedItems.take(3).joinToString("\n") {
-                listOf(copy.threadTitle(it.title), it.deviceName, it.workspaceLabel)
-                    .filter(String::isNotBlank)
-                    .joinToString(" · ")
-            } + if (displayedItems.size > 3) "\n" + copy.more(displayedItems.size - 3) else ""
-        val body = if (genericBody.isBlank()) text else copy.genericBody(first?.state ?: s.state)
+        val state =
+            if (s.state == "idle" && genericBody.isNotBlank()) first?.state ?: "idle" else s.state
+        val count = if (s.state == "idle" && state != "idle") 1 else s.count
+        val otherRunning =
+            (displayedItems.count { it.state == "running" } - if (state == "running") 1 else 0)
+                .coerceAtLeast(0)
+        val lines =
+            copy.lines(
+                state,
+                count,
+                first?.title,
+                first?.deviceName.orEmpty(),
+                first?.workspaceLabel.orEmpty(),
+                otherRunning,
+            )
         val builder =
             Notification.Builder(context, CHANNEL_AGENT)
                 .setSmallIcon(
-                    when (s.state) {
+                    when (state) {
                         "needsInput" -> com.remotecodex.app.R.drawable.status_waiting
                         "failed" -> com.remotecodex.app.R.drawable.status_failed
                         "interrupted" -> com.remotecodex.app.R.drawable.status_interrupted
@@ -315,30 +322,28 @@ object Notifications {
                         else -> com.remotecodex.app.R.drawable.status_running
                     }
                 )
-                .setContentTitle(middleTitle(copy.headline(s.state, s.count, first?.title), 96))
-                .setContentText(if (rows.isBlank()) body else rows.replace('\n', ' '))
-                .setSubText(text)
+                .setContentTitle(middleTitle(lines.title))
+                .setContentText(lines.text)
                 .setContentIntent(pending)
                 .setOngoing(true)
                 .setOnlyAlertOnce(true)
                 .setCategory(Notification.CATEGORY_PROGRESS)
-                .setStyle(
-                    Notification.BigTextStyle()
-                        .bigText(listOf(rows, body).filter(String::isNotBlank).joinToString("\n"))
-                )
+                .setStyle(Notification.BigTextStyle().bigText(lines.expandedText))
         if (s.state == "running") builder.setWhen(s.since).setUsesChronometer(true)
         if (Build.VERSION.SDK_INT >= 36 && s.state != "idle") {
             // There is no measurable percentage. Only running uses an indeterminate
             // framework progress style; other states retain the bar-free BigTextStyle,
             // which also has promotable characteristics on supported Android versions.
             if (s.state == "running")
-                builder.setStyle(
-                    Notification.ProgressStyle()
-                        .setStyledByProgress(false)
-                        .setProgressIndeterminate(true)
-                        .setProgressSegments(emptyList())
-                        .setProgressPoints(emptyList())
-                )
+                builder
+                    .setContentText(lines.expandedText)
+                    .setStyle(
+                        Notification.ProgressStyle()
+                            .setStyledByProgress(false)
+                            .setProgressIndeterminate(true)
+                            .setProgressSegments(emptyList())
+                            .setProgressPoints(emptyList())
+                    )
             builder
                 .setColor(
                     when (s.state) {

@@ -81,12 +81,15 @@ then removes the promoted state; the unpromoted watcher remains while the
 foreground service receives events. Android's foreground-service time limit,
 force-stop or denied notification permission can prevent delivery.
 
-`NotificationCopy` resolves state wording, singular/plural forms and generic
-bodies from the current page locale at render time (English and Chinese). The
-headline includes the state and a page-supplied title; only missing titles use
-“线程运行中” / “Thread running”. Locale-only appearance updates repaint the
-existing notification. Completed work retains its cached page title even after
-read items leave the active snapshot.
+`NotificationCopy` resolves the three display lines from the current page locale
+at render time (English and Chinese). The title is the page-owned thread title,
+or “线程运行中” / “Thread running” only when missing. The text is device · workspace.
+The expanded final line is the state: running alone, other running conversations,
+waiting, failure (plus other running conversations), or interruption. Zero other
+threads are never announced. Completion uses the completed-count phrase as its
+title and has no second state copy. No subtext repeats these facts. Running keeps
+its framework chronometer beside the title. Capsule labels/counts are unchanged.
+Locale-only appearance changes repaint the existing notification.
 
 The testable `AccountActivity` class owns grouping, priority, earliest timer,
 account isolation, completion counting and retention, independent of Android.
@@ -160,7 +163,8 @@ helper refuses occupied ports and the managed Supervisor port. The Android scrip
 `emulator-5580` (override `ANDROID_EMULATOR_PORT` for a free port), targets that
 serial for every adb command, and shuts it down on exit. It refuses an existing
 instance at that port, never uses `cardverify_aosp35_root`, and never restarts a
-shared adb server. Fixture credentials travel in a private file, not arguments.
+shared adb server. It may dismiss only a System UI or Quickstep boot ANR before
+testing; an app ANR is never dismissed by this recovery. Fixture credentials travel in a private file, not arguments.
 
 Instrumentation results, native integration observations and screenshots are
 pulled into `.local/android-e2e/`. `ProductParityTest` asserts mobile capabilities,

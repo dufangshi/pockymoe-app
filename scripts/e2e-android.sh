@@ -62,14 +62,14 @@ adb -s "$SERIAL" shell settings put global transition_animation_scale 0
 adb -s "$SERIAL" shell settings put global animator_duration_scale 0
 adb -s "$SERIAL" shell settings put system screen_off_timeout 2147483647
 adb -s "$SERIAL" shell cmd overlay enable --user current com.android.internal.systemui.navbar.gestural
-# AOSP's first System UI startup can time out during package optimisation.
-# Dismiss only that boot dialog, before launching the application under test.
+# Recover only known AOSP boot dialogs, before measuring or testing the app.
+dismiss_boot_anr() {
 adb -s "$SERIAL" shell uiautomator dump /sdcard/pockymoe-boot.xml >/dev/null
 adb -s "$SERIAL" pull /sdcard/pockymoe-boot.xml "$ARTIFACTS/boot-ui.xml" >/dev/null 2>&1
 BOOT_CLOSE="$(python3 - "$ARTIFACTS/boot-ui.xml" <<'PYBOOT'
 import sys, xml.etree.ElementTree as ET, re
 root=ET.parse(sys.argv[1]).getroot()
-if any("System UI isn't responding" in n.get('text', '') for n in root.iter()):
+if any(any(label in n.get('text', '') for label in ["System UI isn't responding", "Quickstep isn't responding"]) for n in root.iter()):
     for n in root.iter():
         if n.get('resource-id') == 'android:id/aerr_close':
             a,b,c,d=map(int,re.findall(r'\d+',n.get('bounds')))
@@ -79,9 +79,13 @@ PYBOOT
 )"
 if [[ -n "$BOOT_CLOSE" ]]; then
   adb -s "$SERIAL" shell input tap $BOOT_CLOSE
-  echo 'Dismissed AOSP System UI startup ANR before launching app.'
+  echo 'Dismissed AOSP System UI/Quickstep startup ANR before launching app.'
   sleep 2
+  return 0
 fi
+return 1
+}
+dismiss_boot_anr || true
 adb -s "$SERIAL" reverse "tcp:$RELAY_PORT" "tcp:$RELAY_PORT"
 WEB_PORT="$(python3 -c 'import json,sys,urllib.parse; d=json.load(open(sys.argv[1])); print(urllib.parse.urlparse(d.get("webUrl",d["relayUrl"])).port)' "$ENV_FILE")"
 if [[ "$WEB_PORT" != "$RELAY_PORT" ]]; then adb -s "$SERIAL" reverse "tcp:$WEB_PORT" "tcp:$WEB_PORT"; fi
@@ -104,6 +108,7 @@ record_cold() {
 # recording below covers a force-stopped, configured WebView with saved dark paint.
 adb -s "$SERIAL" shell pm clear com.remotecodex.app.debug >/dev/null
 record_cold cold-first-launch
+if dismiss_boot_anr; then record_cold cold-first-launch; fi
 
 # Grant the test app's user-controlled Live Update access on this disposable device.
 adb -s "$SERIAL" shell appops set com.remotecodex.app.debug POST_PROMOTED_NOTIFICATIONS allow > "$ARTIFACTS/promotion-permission.log" 2>&1 || true
@@ -116,3 +121,4 @@ adb -s "$SERIAL" shell "run-as com.remotecodex.app.debug sh -c 'cat > files/e2e-
 adb -s "$SERIAL" shell am instrument -w -r -e class com.remotecodex.app.ProductParityTest -e envFile /data/user/0/com.remotecodex.app.debug/files/e2e-env.json com.remotecodex.app.debug.test/androidx.test.runner.AndroidJUnitRunner | tee "$ARTIFACTS/instrumentation.log"
 rg -q 'OK \([0-9]+ tests?\)' "$ARTIFACTS/instrumentation.log"
 record_cold cold-web-dark
+if dismiss_boot_anr; then record_cold cold-web-dark; fi

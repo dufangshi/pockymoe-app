@@ -364,14 +364,12 @@ class ProductParityTest {
                 "durable background event",
                 device.wait(
                     androidx.test.uiautomator.Until.hasObject(
-                        androidx.test.uiautomator.By.textContains("Agent run finished")
+                        androidx.test.uiautomator.By.textContains("thread completed")
                     ),
                     45_000,
                 ),
             )
-            device
-                .findObject(androidx.test.uiautomator.By.textContains("Agent run finished"))
-                .click()
+            device.findObject(androidx.test.uiautomator.By.textContains("thread completed")).click()
             device.executeShellCommand("cmd statusbar collapse")
             js(
                 "window.pockymoeHost.window.openThread('/devices/${env.deviceId}/threads/${created.id}')"
@@ -477,17 +475,13 @@ class ProductParityTest {
                         it.state == "needsInput"
                 }
             }
-            eventually("real waiting notification title") {
-                notice()
-                    .extras
-                    .getString(Notification.EXTRA_TITLE)
-                    .orEmpty()
-                    .contains(created.title) &&
+            eventually("real waiting notification lines") {
+                notice().extras.getString(Notification.EXTRA_TITLE).orEmpty() == created.title &&
                     notice()
                         .extras
-                        .getString(Notification.EXTRA_TITLE)
+                        .getString(Notification.EXTRA_BIG_TEXT)
                         .orEmpty()
-                        .contains("waiting for you")
+                        .endsWith("Waiting for you")
             }
             device.openNotification()
             shot("real-activity-waiting")
@@ -709,11 +703,37 @@ class ProductParityTest {
                             .getString(Notification.EXTRA_TITLE)
                             .orEmpty()
                     val expected = com.remotecodex.app.notify.NotificationCopy(notificationLocale)
-                    assertEquals(
-                        "localized state headline",
-                        expected.headline(state, if (state == "idle") 0 else 1, created.title),
-                        title,
+                    val lines =
+                        expected.lines(
+                            state,
+                            if (state == "idle") 0 else 1,
+                            created.title,
+                            if (state == "idle") "" else "e2e-phone",
+                            if (state == "idle") "" else "mobile-ws",
+                            0,
+                        )
+                    assertEquals("title has one fact", lines.title, title)
+                    val extras = notice.single().notification.extras
+                    assertTrue(
+                        "no duplicate subtext",
+                        extras.getCharSequence(Notification.EXTRA_SUB_TEXT).isNullOrEmpty(),
                     )
+                    assertEquals(
+                        "metadata and expanded state",
+                        if (state == "running") lines.expandedText else lines.text,
+                        extras.getCharSequence(Notification.EXTRA_TEXT).toString(),
+                    )
+                    if (state != "running")
+                        assertEquals(
+                            "expanded third line appears once",
+                            lines.expandedText,
+                            extras.getCharSequence(Notification.EXTRA_BIG_TEXT).toString(),
+                        )
+                    if (state == "running")
+                        assertTrue(
+                            "elapsed time stays by title",
+                            extras.getBoolean(Notification.EXTRA_SHOW_CHRONOMETER),
+                        )
                     val style =
                         Notification.Builder.recoverBuilder(context, notice.single().notification)
                             .style
