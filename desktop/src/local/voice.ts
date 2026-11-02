@@ -59,10 +59,11 @@ function summaryRows(state: LocalState, picker: (id: string, label: string) => s
   const settings = state.settings, connection = settings.petSummaryConnection, summary = state.summary;
   const toggle = `<div class="setting-row"><div><label for="petVoiceSummary">${t('朗读要点')}</label><p>${t('由模型总结这一轮做成了什么再读出来；关闭时只说“某线程完成了”。')}</p></div><input id="petVoiceSummary" class="switch" type="checkbox" ${settings.petVoiceSummary ? 'checked' : ''}/></div>`;
   if (!settings.petVoiceSummary) return toggle;
-  const defaultModel = summary.connections.find(row => row.id === connection?.id && row.deviceId === connection?.deviceId)?.model ?? '';
+  const selected = summary.connections.find(row => row.id === connection?.id && row.deviceId === connection?.deviceId);
+  const defaultModel = selected?.model ?? '';
   return `${toggle}
-    <div class="setting-row"><div><label for="summary-source">${t('上游')}</label><p>${summary.connections.length ? t('在设置的“上游”页添加和测试。') : t('还没有读到上游，请先在设置的“上游”页添加。')}</p></div><div class="inline-controls"><button type="button" id="summary-source" aria-label="${t('上游')}"></button><button id="open-upstreams" class="${summary.connections.length ? '' : 'primary'}">${t('管理上游')}</button></div></div>
-    ${connection ? `<div class="setting-row voice-field"><div><label for="summary-model">${t('模型')}</label></div>${summary.models.length ? picker('summary-model', t('模型')) : `<input id="summary-model" type="text" value="${escapeHtml(connection.model)}" placeholder="${escapeHtml(defaultModel)}" spellcheck="false" autocomplete="off"/>`}</div>` : ''}
+    <div class="setting-row"><div><label for="summary-source">${t('上游')}</label>${selected?.needsUpdate ? `<p class="inline-error">${escapeHtml(t('{device} 的 Supervisor 是 {version}，要更新到 0.13.43 或更新版本才能总结。', { device: selected.deviceName, version: selected.supervisorVersion ?? '' }))}</p>` : `<p>${summary.connections.length ? t('在设置的“上游”页添加和测试。') : t('还没有读到上游，请先在设置的“上游”页添加。')}</p>`}</div><div class="inline-controls"><button type="button" id="summary-source" aria-label="${t('上游')}"></button><button id="open-upstreams" class="${summary.connections.length ? '' : 'primary'}">${t('管理上游')}</button></div></div>
+    ${connection ? `<div class="setting-row voice-field"><div><label for="summary-model">${t('模型')}</label>${summary.modelsError ? `<p class="inline-error">${escapeHtml(summary.modelsError)} ${t('可以手动填写。')}</p>` : ''}</div>${summary.models.length ? picker('summary-model', t('模型')) : `<input id="summary-model" type="text" value="${escapeHtml(connection.model)}" placeholder="${escapeHtml(defaultModel)}" spellcheck="false" autocomplete="off"/>`}</div>` : ''}
     <div class="setting-row"><label for="petSummaryLanguage">${t('播报语言')}</label>${picker('petSummaryLanguage', t('播报语言'))}</div>
     <div class="setting-row voice-preview"><p id="summary-result" class="${summary.lastError ? 'inline-error' : 'voice-sample'}" role="status">${escapeHtml(summary.lastError ?? summary.sample ?? '')}</p><button id="summary-test" ${connection ? '' : 'disabled'}>${t('试一试')}</button></div>
     <p class="voice-note">${t('这一轮的用户输入和 agent 回答会发送给所选上游。')}</p>`;
@@ -74,7 +75,8 @@ function bindSummary(root: HTMLElement, state: LocalState, save: (patch: Partial
   if (!settings.petVoiceSummary) return;
   // Coming back from Settings with a new upstream should just show it.
   if (!upstreamsWatched) { upstreamsWatched = true; refreshUpstreams(action); window.addEventListener('focus', () => refreshUpstreams(action)); }
-  const rows = summary.connections.map(row => ({ value: connectionValue(row.deviceId, row.id), label: `${row.name} · ${row.deviceName}` }));
+  // Upstreams that can run now come first; the rest say what they are waiting for.
+  const rows = [...summary.connections].sort((a, b) => Number(a.needsUpdate ?? false) - Number(b.needsUpdate ?? false)).map(row => ({ value: connectionValue(row.deviceId, row.id), label: `${row.name} · ${row.deviceName}${row.needsUpdate ? ` · ${t('需更新')}` : ''}` }));
   // A saved choice stays selectable while its device is offline.
   if (connection && !summary.connections.some(row => row.id === connection.id && row.deviceId === connection.deviceId)) rows.unshift({ value: connectionValue(connection.deviceId, connection.id), label: connection.name || connection.id });
   mount('summary-source', connection ? rows : [{ value: '', label: t('请选择') }, ...rows], connection ? connectionValue(connection.deviceId, connection.id) : '', value => {
@@ -95,6 +97,8 @@ function bindSummary(root: HTMLElement, state: LocalState, save: (patch: Partial
   if (test) test.onclick = () => { test.disabled = true; test.textContent = t('总结中…'); void action({ type: 'summaryTest' }).finally(() => { if (test.isConnected) { test.disabled = false; test.textContent = t('试一试'); } }); };
 }
 export function updateVoiceProgress(root: HTMLElement, state: LocalState): void {
+  const note = root.querySelector<HTMLElement>('#voice-discovery');
+  if (note) { note.textContent = discoveryNote(state); note.classList.toggle('inline-error', state.voice.discovery.state === 'failed'); }
   const status = root.querySelector<HTMLElement>('#voice-model-status');
   if (status && state.voice.model.state === 'downloading') status.textContent = progressText(state);
 }

@@ -1,6 +1,7 @@
 import { t } from '../shared/i18n';
 import { app, dialog } from 'electron';
 import updater from 'electron-updater';
+import { isNoDesktopRelease } from './updateErrors';
 const { autoUpdater } = updater;
 export function configureUpdates(): void {
   autoUpdater.setFeedURL({ provider: 'github', owner: 'dufangshi', repo: 'pockymoe-app' });
@@ -19,5 +20,13 @@ export function configureUpdates(): void {
 }
 export async function checkUpdate(): Promise<void> {
   if (!app.isPackaged) { await dialog.showMessageBox({ title: 'Pockymoe', message: t('开发版本不检查更新'), detail: t('安装打包版本后可从 GitHub Releases 获取更新。'), buttons: [t('好')] }); return; }
-  await autoUpdater.checkForUpdates();
+  const tell = (message: string, detail: string): Promise<unknown> => dialog.showMessageBox({ title: 'Pockymoe', message, detail, buttons: [t('好')] });
+  try {
+    const result = await autoUpdater.checkForUpdates();
+    // When there is one, the update-available handler asks.
+    if (!result?.isUpdateAvailable) await tell(t('已是最新版本'), t('当前版本 {version}', { version: app.getVersion() }));
+  } catch (error) {
+    if (isNoDesktopRelease(error instanceof Error ? error.message : String(error))) await tell(t('已是最新版本'), t('当前版本 {version}。还没有更新的桌面版发布。', { version: app.getVersion() }));
+    else await tell(t('暂时无法检查更新'), t('请检查网络后重试。'));
+  }
 }

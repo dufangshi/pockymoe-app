@@ -43,7 +43,7 @@ export class VoiceService {
   private lastError: string | null = null;
   private supported = addonAvailable();
   private listeners = new Set<() => void>();
-  private summaryState: SummaryStatus = { connections: [], models: [], lastError: null, sample: null };
+  private summaryState: SummaryStatus = { connections: [], models: [], modelsError: null, lastError: null, sample: null };
   constructor(dataDir: string, private settings: SettingsStoreLike, private ready: () => void, private query: PageQuery) {
     let wasReady = false;
     this.keys = new VoiceKeys(join(dataDir, 'voice-keys.json'), safeStorage);
@@ -59,7 +59,9 @@ export class VoiceService {
     settings.onChange(next => {
       if (next.petVoiceProvider !== previous.petVoiceProvider) this.lastError = null;
       if (next.petVoiceProvider !== previous.petVoiceProvider || this.remote(next)?.config.url !== this.remote(previous)?.config.url) void this.discover();
-      if (next.petSummaryConnection?.id !== previous.petSummaryConnection?.id || next.petSummaryConnection?.deviceId !== previous.petSummaryConnection?.deviceId) void this.refreshModels();
+      if (next.petSummaryConnection?.id !== previous.petSummaryConnection?.id || next.petSummaryConnection?.deviceId !== previous.petSummaryConnection?.deviceId) { this.summaryState = { ...this.summaryState, sample: null, lastError: null }; void this.refreshModels(); }
+      // What the last attempt said was about the old choice.
+      else if (next.petSummaryConnection?.model !== previous.petSummaryConnection?.model) this.summaryState = { ...this.summaryState, sample: null, lastError: null };
       // Turning voice on is the consent to fetch the model; the setting says how big it is.
       if (next.petVoice && next.petVoiceProvider === 'local' && this.supported && this.model.state === 'absent' && !this.model.error) void this.model.download();
       previous = next; this.changed();
@@ -92,10 +94,10 @@ export class VoiceService {
   /** The same probe Settings uses. A failure leaves the list empty; the field still takes a typed name. */
   async refreshModels(): Promise<void> {
     const connection = this.settings.get().petSummaryConnection;
-    if (!connection) { if (this.summaryState.models.length) this.setSummaryState({ models: [] }); return; }
+    if (!connection) { if (this.summaryState.models.length || this.summaryState.modelsError) this.setSummaryState({ models: [], modelsError: null }); return; }
     const result = await this.query({ type: 'connectionModels', deviceId: connection.deviceId, connectionId: connection.id }, COMPLETE_TIMEOUT_MS);
-    const rows = result.ok && Array.isArray(result.data) ? result.data as { id: string; name: string }[] : [];
-    this.setSummaryState({ models: rows.map(row => ({ id: row.id, label: row.name })) });
+    if (!result.ok || !Array.isArray(result.data)) { this.setSummaryState({ models: [], modelsError: result.error ?? t('页面还没有更新，请重新打开主窗口。') }); return; }
+    this.setSummaryState({ models: (result.data as { id: string; name: string }[]).map(row => ({ id: row.id, label: row.name })), modelsError: null });
   }
   private summarizer(): Summarizer {
     const settings = this.settings.get(), connection = settings.petSummaryConnection;
@@ -104,6 +106,7 @@ export class VoiceService {
       complete: async prompt => {
         const result = await this.query({ type: 'completeWithConnection', deviceId: connection.deviceId, connectionId: connection.id, model: connection.model, system: prompt.system, user: prompt.user }, COMPLETE_TIMEOUT_MS);
         const text = (result.data as { text?: unknown } | undefined)?.text;
+        if (result.code === 'supervisorTooOld') throw new Error(t('{upstream}：这台设备的 Supervisor 要更新到 0.13.43 或更新版本才能总结。可以更新它，或换一台已更新设备上的上游。', { upstream: connection.name || connection.id }));
         if (!result.ok || typeof text !== 'string') throw new Error(result.error || t('上游没有返回文字'));
         return text;
       },

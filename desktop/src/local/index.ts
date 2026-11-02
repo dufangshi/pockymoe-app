@@ -142,6 +142,15 @@ function renderAbout(): void {
   root.innerHTML = `<div class="drag-zone"></div><img class="app-icon" src="${appIcon}" alt=""/><h1>Pockymoe</h1><p>${t('版本 {version}', { version: escapeHtml(state.version) })}</p><section><h2>${t('宠物署名')}</h2>${state.petPacks.filter(pack => pack.author).map(pack => `<p><strong>${escapeHtml(pack.name)}</strong> · ${escapeHtml(pack.author!)}${pack.license ? ` · <button class="text-link" data-external="${escapeHtml(pack.licenseUrl!)}">${escapeHtml(pack.license)}</button>` : ''}${pack.source ? ` · <button class="text-link" data-external="${escapeHtml(pack.source)}">${t('来源')}</button>` : ''}</p>`).join('')}</section>`;
   root.querySelectorAll<HTMLButtonElement>('[data-external]').forEach(button => { button.onclick = () => { void action({ type: 'external', url: button.dataset.external! }); }; });
 }
+// A render replaces the page, which would close a list someone has open. It can wait until they choose.
+let renderWaiting = false;
+function renderWhenClosed(): void {
+  if (!document.querySelector('.custom-select[aria-expanded="true"]')) { renderWaiting = false; renderPreferences(); return; }
+  if (renderWaiting) return;
+  renderWaiting = true;
+  const check = (): void => { if (document.querySelector('.custom-select[aria-expanded="true"]')) setTimeout(check, 150); else { renderWaiting = false; renderPreferences(); } };
+  setTimeout(check, 150);
+}
 async function save(patch: Partial<DesktopSettings>): Promise<void> { if (await action({ type: 'settings', patch })) toast(t('已保存')); else { state = await localBridge().getState(); renderPreferences(); } }
 async function init(): Promise<void> {
   state = await localBridge().getState();
@@ -159,11 +168,12 @@ async function init(): Promise<void> {
     const sectionChanged = next.preferencesRequestId !== state.preferencesRequestId;
     if (sectionChanged) section = next.preferencesSection;
     // Download progress updates its own text; a full render would close an open picker every percent.
-    const voiceShape = (value: LocalState) => ({ ...value.voice, model: { ...value.voice.model, progress: 0 }, summary: value.summary });
+    // Reading a service's lists updates its note in place; only different lists need a new page.
+    const voiceShape = (value: LocalState) => ({ ...value.voice, model: { ...value.voice.model, progress: 0 }, discovery: null, summary: value.summary });
     const changed = localeChanged || sectionChanged || JSON.stringify([state.settings, state.petPacks, state.petAvailable, voiceShape(state)]) !== JSON.stringify([next.settings, next.petPacks, next.petAvailable, voiceShape(next)]);
     state = next;
     if (view === 'preferences') updateVoiceProgress(root, next);
-    if (view === 'preferences' && changed) renderPreferences();
+    if (view === 'preferences' && changed) renderWhenClosed();
     if (view === 'relay' && localeChanged) renderRelay();
     if (view === 'about' && changed) renderAbout();
     if (localeChanged && lastToast && document.querySelector('#toast.visible')) toast(localizeMessage(lastToast.message), lastToast.error);
