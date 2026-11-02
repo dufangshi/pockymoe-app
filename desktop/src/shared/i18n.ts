@@ -120,6 +120,7 @@ export const english = {
   "合成中…": "Generating…",
   "{count} 个子线程": "{count} child threads",
   "活动面板": "Activity panel",
+  "前往下载": "Go to download",
   "一切就绪": "All caught up",
   "回复 {title}…": "Reply to {title}…",
   "发送中…": "Sending…",
