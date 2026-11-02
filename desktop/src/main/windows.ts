@@ -205,7 +205,7 @@ export class Windows {
     if (!pending || pending.sender !== sender) return;
     clearTimeout(pending.timer); this.waiters.delete(id);
     const r = result as HostCommandResult;
-    pending.resolve({ ok: r.ok, error: typeof r.error === 'string' ? r.error.slice(0, 500) : undefined, ...(r.code === 'needsThread' ? { code: r.code } : {}), ...(r.data !== undefined ? { data: r.data } : {}) });
+    pending.resolve({ ok: r.ok, error: typeof r.error === 'string' ? r.error.slice(0, 500) : undefined, ...(r.code === 'needsThread' || r.code === 'supervisorTooOld' ? { code: r.code } : {}), ...(r.data !== undefined ? { data: r.data } : {}) });
   }
   openDeepLink(url: string): void { const path = deepLinkPath(url); if (path) void this.dispatch({ type: 'navigate', path }); }
   dispose(): void { clearTimeout(this.positionTimer); for (const p of this.waiters.values()) { clearTimeout(p.timer); p.resolve({ ok: false, error: t('应用正在退出') }); } }

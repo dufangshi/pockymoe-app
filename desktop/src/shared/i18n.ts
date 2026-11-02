@@ -1,6 +1,15 @@
 /** One source for app-owned desktop strings. Thread titles, summaries and names
  * are user content and are intentionally never translated. */
 export const english = {
+  "{upstream}：这台设备的 Supervisor 要更新到 0.13.43 或更新版本才能总结。可以更新它，或换一台已更新设备上的上游。": "{upstream}: this device's Supervisor needs 0.13.43 or newer for summaries. Update it, or choose an upstream on an updated device.",
+  "{device} 的 Supervisor 是 {version}，要更新到 0.13.43 或更新版本才能总结。": "{device} runs Supervisor {version}. Summaries need 0.13.43 or newer.",
+  "需更新": "needs update",
+  "已是最新版本": "You're up to date",
+  "当前版本 {version}": "Version {version}",
+  "当前版本 {version}。还没有更新的桌面版发布。": "Version {version}. No newer desktop release has been published.",
+  "暂时无法检查更新": "Can't check for updates right now",
+  "请检查网络后重试。": "Check your network and try again.",
+  "页面还没有更新，请重新打开主窗口。": "The page is out of date. Reopen the main window.",
   "正在读取服务的模型…": "Reading the service's models…",
   "服务需要 API Key，填好后会自动读取。": "This service needs an API key. Models load once it is set.",
   "可以手动填写。": "You can type one instead.",

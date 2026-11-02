@@ -20,7 +20,9 @@ function wav(): Buffer {
   return b;
 }
 const FIXTURE = `<!doctype html><meta charset="utf-8"><title>Fixture</title><script>window.commands=[];window.pockymoeHost?.onCommand(command=>{window.commands.push(command);
-  const data=command.type==='turnText'?{request:'修一下登录白屏',answer:'白屏已修好，原因是回调读取了未加载的用户信息。'}:command.type==='listConnections'?[{deviceId:'mac',deviceName:'MacBook',id:'c1',name:'Main',protocol:'openai_chat',model:'small'}]:command.type==='connectionModels'?[{id:'small',name:'Small model'},{id:'large',name:'Large model'}]:command.type==='completeWithConnection'?{text:'连接总结：白屏修好了。'}:undefined;
+  const data=command.type==='turnText'?{request:'修一下登录白屏',answer:'白屏已修好，原因是回调读取了未加载的用户信息。'}:command.type==='listConnections'?[{deviceId:'old',deviceName:'wsl',id:'c2',name:'Older',protocol:'openai_chat',model:'small',supervisorVersion:'0.13.41',needsUpdate:true},{deviceId:'mac',deviceName:'MacBook',id:'c1',name:'Main',protocol:'openai_chat',model:'small',supervisorVersion:'0.13.43',needsUpdate:false}]:command.type==='connectionModels'?[{id:'small',name:'Small model'},{id:'large',name:'Large model'}]:command.type==='completeWithConnection'?{text:'连接总结：白屏修好了。'}:undefined;
+  if(command.type==='connectionModels'&&window.failModels){window.pockymoeHost.commandResult(command.id,{ok:false,error:'upstream refused'});return;}
+  if(command.type==='completeWithConnection'&&command.connectionId==='c2'){window.pockymoeHost.commandResult(command.id,{ok:false,code:'supervisorTooOld',error:'x'});return;}
   window.pockymoeHost.commandResult(command.id,{ok:true,...(data?{data}:{})});});</script>`;
 test.beforeAll(async () => {
   server = createServer((req, res) => {
@@ -146,6 +148,40 @@ test('summary: picks a saved upstream and its model, and reads what the model sa
   expect(command.system).toContain('Simplified Chinese');
   expect(command.user).toContain('修一下登录白屏'); expect(command.user).toContain('回调读取了未加载的用户信息');
   expect(await page.evaluate(() => (window.commands as { type: string }[]).some(entry => entry.type === 'turnText'))).toBe(true);
+});
+test('summary: an open list stays open when the window regains focus, and failures are explained', async () => {
+  await settings(remoteVoice());
+  const preferences = await openPreferences();
+  await preferences.locator('#summary-source').click();
+  const listbox = preferences.getByRole('listbox');
+  await expect(listbox).toBeVisible();
+  for (let i = 0; i < 3; i++) { await preferences.evaluate(() => window.dispatchEvent(new Event('focus'))); await preferences.waitForTimeout(200); }
+  await expect(listbox).toBeVisible();
+  await preferences.getByRole('option', { name: 'Main · MacBook' }).click();
+  await expect(preferences.locator('button#summary-model')).toBeVisible();
+  // The fixture page stops answering with models: it says why, and the field can be typed in.
+  await page.evaluate(() => { (window as unknown as { failModels: boolean }).failModels = true; });
+  await preferences.evaluate(() => window.dispatchEvent(new Event('focus')));
+  await expect(preferences.locator('input#summary-model')).toBeVisible();
+  await expect(preferences.locator('.voice-field:has(#summary-model) .inline-error')).toContainText('upstream refused');
+});
+test('summary: marks and explains an upstream on a device that needs updating', async () => {
+  await settings(remoteVoice());
+  const preferences = await openPreferences();
+  await preferences.locator('#summary-source').click();
+  const options = await preferences.getByRole('option').allTextContents();
+  expect(options.findIndex(text => text.includes('Main · MacBook'))).toBeLessThan(options.findIndex(text => text.includes('Older · wsl · needs update')));
+  await preferences.getByRole('option', { name: 'Older · wsl · needs update' }).click();
+  await expect(preferences.locator('.setting-row:has(#summary-source) .inline-error')).toContainText('wsl runs Supervisor 0.13.41');
+  await page.waitForTimeout(2700);
+  speech = [];
+  await finish();
+  await expect.poll(() => speech).toEqual(['修复登录状态同步 finished']);
+  await expect(preferences.locator('#summary-result')).toContainText("this device's Supervisor needs 0.13.43");
+  // Choosing another upstream clears what the last attempt said about the old one.
+  await preferences.locator('#summary-source').click();
+  await preferences.getByRole('option', { name: 'Main · MacBook' }).click();
+  await expect(preferences.locator('#summary-result')).toHaveText('');
 });
 test('summary: falls back to saying it finished when nothing is selected, and has no address field', async () => {
   await settings(remoteVoice());
