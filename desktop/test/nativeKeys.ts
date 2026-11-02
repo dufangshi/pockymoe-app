@@ -37,7 +37,7 @@ public static class PockymoeTestWindow {
     finally { if (second) AttachThreadInput(current, owner, false); if (first) AttachThreadInput(current, foreground, false); }
   }
 }
-'@; $target = [IntPtr]::new([Int64]::Parse('${handle}')); if (-not [PockymoeTestWindow]::Focus($target)) { throw 'Test main window is not foreground' }; $keys = New-Object -ComObject WScript.Shell; $keys.SendKeys('^${key}')`;
+'@; $target = [IntPtr]::new([Int64]::Parse('${handle}')); if ((-not [PockymoeTestWindow]::Focus($target)) -or ([PockymoeTestWindow]::GetForegroundWindow() -ne $target)) { throw 'Test main window is not foreground' }; $keys = New-Object -ComObject WScript.Shell; $keys.SendKeys('^${key}')`;
 
     await run(join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'), ['-NoProfile', '-NonInteractive', '-Command', script], { windowsHide: true });
   } else if (process.platform === 'darwin') {
