@@ -376,8 +376,8 @@ deployment is performed by these checks.
 
 The real main/conversation, map and devices captures are independent tests in
 `test/realWeb.e2e.ts`. Enable `POCKYMOE_REAL_WEB=1` after starting the isolated
-v0.13.44 release fixture using the fresh-clone PowerShell instructions in
-[scripts/desktop-fixture/README.md](../scripts/desktop-fixture/README.md#windows--pinned-public-release).
+v0.13.44 runtime plus pinned public-source Web fixture using the fresh-clone PowerShell instructions in
+[scripts/desktop-fixture/README.md](../scripts/desktop-fixture/README.md#windows--pinned-public-sources-and-release-runtime).
 They sign into the disposable account and choose themes through the real Web
 Settings. They do not use placeholder pages, injected theme CSS or production.
 The Windows CI starts/stops that fixture and runs English/Chinese locale

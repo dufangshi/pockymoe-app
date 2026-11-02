@@ -1,10 +1,9 @@
-"""Download and verify the public pinned runtime/Web assets into this clone only."""
+"""Download and verify the public pinned runtime binary into this clone only."""
 import hashlib
 import os
 from pathlib import Path
 import platform
 import urllib.request
-import zipfile
 
 ROOT = Path(__file__).resolve().parents[2]
 TARGET = ROOT / ".local" / "desktop-runtime-v0.13.44"
@@ -21,7 +20,7 @@ def prepare():
         raise RuntimeError("Supply DESKTOP_E2E_BIN explicitly on other test platforms")
     sums = urllib.request.urlopen(ORIGIN + "SHA256SUMS", timeout=60).read().decode()
     expected = {line.split()[-1].lstrip("*"): line.split()[0] for line in sums.splitlines() if line.strip()}
-    for name in [binary, "remote-codex-web.zip"]:
+    for name in [binary]:
         destination = TARGET / name
         if not destination.exists() or hashlib.sha256(destination.read_bytes()).hexdigest() != expected[name]:
             partial = destination.with_suffix(".partial")
@@ -33,13 +32,7 @@ def prepare():
                 raise RuntimeError("Public release checksum mismatch: " + name)
             partial.replace(destination)
     (TARGET / binary).chmod(0o700)
-    web = TARGET / "web"
-    with zipfile.ZipFile(TARGET / "remote-codex-web.zip") as archive:
-        for entry in archive.infolist():
-            if not (web / entry.filename).resolve().is_relative_to(web.resolve()):
-                raise RuntimeError("Unsafe release archive path")
-        archive.extractall(web)
-    print("Verified public v0.13.44 runtime and Web assets under " + str(TARGET))
+    print("Verified public v0.13.44 runtime binary under " + str(TARGET))
 
 
 if __name__ == "__main__":

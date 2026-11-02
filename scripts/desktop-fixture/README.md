@@ -131,7 +131,7 @@ or restyled by this task; theme/layout acceptance belongs to the desktop UI engi
 Evidence: `.local/desktop-evidence/fixture/` (dev-mode browser evidence in `dev/`).
 Logs remain under each run's `.local/e2e-desktop.*/relay`, `web`, `device-1..3`.
 
-## Windows / pinned public release
+## Windows / pinned public sources and release runtime
 
 The Bash wrapper is optional: run `python scripts/desktop-fixture/backend.py` with
 identical commands in PowerShell. Windows lifecycle tracking uses PID + creation
@@ -139,7 +139,7 @@ FILETIME; cleanup only terminates a recorded matching process tree. Lifecycle
 commands use a file lock. No installed Supervisor is discovered or controlled.
 `rebuild-web`'s atomic directory exchange remains Mac/Linux-only.
 
-From a fresh app clone (Node 24, pnpm 10, Python 3.9+):
+From a fresh app clone (Git, Node 24, pnpm 10, Python 3.9+):
 
 ```powershell
 cd desktop
@@ -148,9 +148,12 @@ pnpm exec playwright install chromium
 cd ..
 $env:PYTHONUTF8 = '1'
 python scripts/desktop-fixture/prepare-release.py
+if ($LASTEXITCODE -ne 0) { throw "Runtime preparation failed" }
+python scripts/desktop-fixture/prepare-web.py
+if ($LASTEXITCODE -ne 0) { throw "Pinned Web build failed" }
 $runtime = Join-Path (Get-Location) .local/desktop-runtime-v0.13.44
 $env:DESKTOP_E2E_BIN = Join-Path $runtime remote-codex-win32-x64-msvc-cli.exe
-$env:DESKTOP_E2E_WEB_DIST = Join-Path $runtime web
+$env:DESKTOP_E2E_WEB_DIST = Join-Path (Get-Location) .local/desktop-web-source/pockymoe/apps/supervisor-web/dist
 $env:DESKTOP_E2E_RELEASE_WEB = '1'
 python scripts/desktop-fixture/backend.py start
 cd desktop
@@ -160,11 +163,21 @@ cd ..
 python scripts/desktop-fixture/backend.py stop
 ```
 
-The preparation downloads only v0.13.44 public release assets and checks each
-against its SHA256SUMS. The release zip is unmodified runtime Web, not a Pages
-build with a compiled cross-origin relay URL. `DESKTOP_E2E_RELEASE_WEB=1` therefore
-uses the release runtime's real `POCKYMOE_RELAY_WEB_DIST_DIR` hosting, with Web and
-API on the isolated relay port. It still creates three isolated supervisors,
+Runtime preparation downloads the v0.13.44 binary and checks its SHA256SUMS.
+Web preparation fetches public Pockymoe commit
+`aafec59058e29d4248605dea30d4ff2e17c29ad8` and shared UI commit
+`7e7f38deb9f0257f78704a7797403a76d72f0ec6` into the ignored clone-local
+`.local/desktop-web-source/` directory. It verifies `thread-ui.sha`, installs with
+frozen lockfiles, builds the shared UI, then builds only the supervisor Web.
+It refuses to overwrite tracked source edits, rebuilds on each invocation, and
+writes safe source/build provenance to `.local/desktop-web-source/provenance.json`.
+The old v0.13.44 Web zip contains the Mac-only map tooltip; it is deliberately
+not used by Windows acceptance. No other checkout is read or modified.
+
+This is the normal runtime Web build, with relative assets, not a Pages build
+with a compiled cross-origin relay URL. `DESKTOP_E2E_RELEASE_WEB=1` selects the
+v0.13.44 runtime's real `POCKYMOE_RELAY_WEB_DIST_DIR` hosting (the variable names
+the hosting mode, not the Web source revision), with Web and API on the isolated relay port. It still creates three isolated supervisors,
 real local account/vault, seeded histories, approvals and running threads.
 The default Mac separate-origin mode remains unchanged. Existing split-origin
 Electron tests independently cover the host bridge's origin isolation.
