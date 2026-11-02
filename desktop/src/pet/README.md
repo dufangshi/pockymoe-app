@@ -105,3 +105,14 @@ adult figure needs more height than a chibi to read at the same size. In a pose 
 `width`, `height` and `sizeScale` set the sheet layout and cell, `wind` adds hair and veil drift,
 `effects` keeps separate marks such as a floating light, and a beat's `face` paints only the face
 of another pose, so a blink doesn't redraw every strand of hair.
+
+A clip in `remoteCodex.clips` can carry `role: 'intro'` or `'outro'`, playing once on entering or
+leaving its state, outside the cycle, so a pose held throughout a state is reached and left by real
+motion. `ClipSequencer` (`clipSequence.ts`) picks what plays next. A pack's clips should start and
+end on the state's resting pose: a change of state hurries the current clip to its nearer end within
+600ms rather than cutting away mid-movement. The optional `resting` clips are not a state: with
+nothing running, each idle clip that ends has an 8% chance of leading into them for one to four
+minutes, and she gets up when the time is over or anything happens.
+
+`build_pose_clips.py` scales every pose so its head matches the first pose's and tweens between
+drawings along the optical flow, which needs `opencv-python-headless`.

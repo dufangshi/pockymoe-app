@@ -9,9 +9,9 @@ const MAX_MANIFEST_BYTES = 16 * 1024;
 export interface SleepingStrip { path: 'sleeping.webp' | 'sleeping.png'; frames: number; durationsMs: number[] }
 export interface PetManifest { id: string; displayName: string; description: string; spritesheetPath: 'spritesheet.png' | 'spritesheet.webp'; spriteVersionNumber?: number; author?: string; license?: string; sourceUrl?: string; licenseUrl?: string; remoteCodex?: { sleeping?: SleepingStrip; frameScale?: number ; /** A slender figure needs more height than a chibi to read at the same size. */ sizeScale?: number; clipFormat?: ClipFormat; clips?: Partial<Record<ClipState, PetClip[]>> } }
 /** One animation drawn from a sheet of frames in `clipFormat`, for art too rich for the atlas's 8 frames a row. */
-export interface PetClip { path: string; frames: number }
+export interface PetClip { path: string; frames: number; /** Plays once on entering or leaving its state, outside the cycle. */ role?: 'intro' | 'outro' }
 export interface ClipFormat { fps: number; columns: number; width: number; height: number }
-export const CLIP_STATES = ['idle', 'running', 'waiting', 'waving', 'jumping', 'poked', 'failed', 'review', 'sleeping', 'dragging', 'landing'] as const;
+export const CLIP_STATES = ['idle', 'running', 'waiting', 'waving', 'jumping', 'poked', 'failed', 'review', 'sleeping', 'dragging', 'landing', 'resting'] as const;
 export type ClipState = typeof CLIP_STATES[number];
 export const MAX_CLIPS_BYTES = 160 * 1024 * 1024;
 const MAX_ZIP_BYTES = MAX_CLIPS_BYTES + 2 * MAX_PACK_BYTES;
@@ -50,9 +50,9 @@ export function parseManifest(data: Buffer): PetManifest {
     if (!format || !whole(format.fps, 60) || !whole(format.columns, 32) || !whole(format.width, 512) || !whole(format.height, 512)) fail('invalid remoteCodex.clipFormat');
     if (!clips || typeof clips !== 'object') fail('invalid remoteCodex.clips');
     for (const [state, list] of Object.entries(clips))
-      if (!CLIP_STATES.includes(state as ClipState) || !Array.isArray(list) || !list.length || list.length > 16 || list.some(clip => !/^clips\/[a-z0-9_-]{1,40}\.webp$/.test(clip?.path) || !whole(clip.frames, 512))) fail('invalid remoteCodex.clips');
+      if (!CLIP_STATES.includes(state as ClipState) || !Array.isArray(list) || !list.length || list.length > 16 || list.some(clip => !/^clips\/[a-z0-9_-]{1,40}\.webp$/.test(clip?.path) || !whole(clip.frames, 512) || ![undefined, 'intro', 'outro'].includes(clip.role)) || !list.some(clip => !clip.role) || list.filter(clip => clip.role === 'intro').length > 1 || list.filter(clip => clip.role === 'outro').length > 1) fail('invalid remoteCodex.clips');
     remoteCodex.clipFormat = { fps: format.fps, columns: format.columns, width: format.width, height: format.height };
-    remoteCodex.clips = Object.fromEntries(Object.entries(clips).map(([state, list]) => [state, list.map(clip => ({ path: clip.path, frames: clip.frames }))]));
+    remoteCodex.clips = Object.fromEntries(Object.entries(clips).map(([state, list]) => [state, list.map(clip => ({ path: clip.path, frames: clip.frames, ...(clip.role ? { role: clip.role } : {}) }))]));
   }
   const metadata: Pick<PetManifest, 'author' | 'license' | 'sourceUrl' | 'licenseUrl'> = {};
   for (const key of ['author', 'license', 'sourceUrl', 'licenseUrl'] as const) {

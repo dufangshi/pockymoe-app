@@ -39,7 +39,7 @@ export function createPetController(deps: PetControllerDeps): PetController {
   let lastSprite = '', lastGlass = '', readySprite = false, readyGlass = false, glassDismissed = false;
   let moodEpoch = 0;
   // How long a reaction holds: a pack's own clip decides, since its art can run for seconds.
-  const reactionMs = (mood: ClipState): number => {
+  const reactionMs = (mood: Exclude<ClipState, 'resting'>): number => {
     const clips = pack?.manifest.remoteCodex?.clips?.[mood], format = pack?.manifest.remoteCodex?.clipFormat;
     if (clips?.length && format) return Math.max(...clips.map(clip => clip.frames)) / format.fps * 1000;
     return ANIMATIONS[mood].durations.reduce((a: number, b: number) => a + b, 0) * (pack?.manifest.remoteCodex?.frameScale ?? 1);
