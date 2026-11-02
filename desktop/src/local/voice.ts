@@ -10,6 +10,14 @@ const providerLabels = (): Record<VoiceProvider, string> => ({ local: t('本地�
 const remoteOf = (settings: DesktopSettings): RemoteVoice | null => settings.petVoiceProvider === 'local' ? null : settings.petVoiceRemotes[settings.petVoiceProvider] ?? REMOTE_DEFAULTS[settings.petVoiceProvider];
 const progressText = (state: LocalState): string => t('正在下载 {percent}%', { percent: Math.round(state.voice.model.progress * 100) });
 
+function discoveryNote(state: LocalState): string {
+  const { discovery, models } = state.voice;
+  if (discovery.state === 'loading') return t('正在读取服务的模型…');
+  if (discovery.state === 'failed') return discovery.error === 'HTTP 401' || /^HTTP 40[13]/.test(discovery.error ?? '') ? t('服务需要 API Key，填好后会自动读取。') : `${discovery.error ?? ''} ${t('可以手动填写。')}`;
+  if (discovery.state === 'done' && !models.length) return t('服务没有列出模型，可以手动填写。');
+  if (discovery.state === 'idle') return t('填好地址后自动读取。');
+  return '';
+}
 function modelRow(state: LocalState): string {
   const { model } = state.voice;
   const describe = model.state === 'ready' ? t('模型已就绪，在这台电脑上离线运行。')
@@ -31,8 +39,8 @@ export function voiceSection(state: LocalState, picker: (id: string, label: stri
   const rows = remote ? `
     ${field('voice-url', t('服务地址'), remote.url, provider === 'compatible' ? 'http://127.0.0.1:8091/v1' : REMOTE_DEFAULTS[provider].url, provider === 'compatible' ? t('如 vLLM-Omni，填到 /v1 为止。') : '')}
     <div class="setting-row voice-field"><div><label for="voice-key">API Key</label><p>${state.voice.keySet ? t('已保存在系统钥匙串。') : provider === 'compatible' ? t('服务没有鉴权时留空。') : t('保存在系统钥匙串，只发送给这个地址。')}</p></div><div class="inline-controls"><input id="voice-key" type="password" placeholder="${state.voice.keySet ? '••••••••' : ''}" autocomplete="off"/>${state.voice.keySet ? `<button id="voice-key-clear">${t('清除')}</button>` : ''}</div></div>
-    ${field('voice-model-name', t('模型'), remote.model, provider === 'compatible' ? 'BreezeBlue/Breeze-TTS-2' : REMOTE_DEFAULTS[provider].model)}
-    <div class="setting-row voice-field"><div><label for="voice-name">${t('音色')}</label></div><div class="inline-controls"><input id="voice-name" type="text" value="${escapeHtml(remote.voice)}" spellcheck="false" autocomplete="off"/>${state.voice.voices.length ? `<button type="button" id="voice-name-list" aria-label="${t('选择音色')}"></button>` : `<button id="voice-list">${t('获取')}</button>`}</div></div>
+    <div class="setting-row voice-field"><div><label for="voice-model-name">${t('模型')}</label><p id="voice-discovery" class="${state.voice.discovery.state === 'failed' ? 'inline-error' : ''}">${escapeHtml(discoveryNote(state))}</p></div><div class="inline-controls">${state.voice.models.length ? picker('voice-model-name', t('模型')) : `<input id="voice-model-name" type="text" value="${escapeHtml(remote.model)}" spellcheck="false" autocomplete="off"/>`}<button id="voice-refresh" class="voice-refresh" title="${t('重新读取')}" aria-label="${t('重新读取')}">↻</button></div></div>
+    <div class="setting-row voice-field"><div><label for="voice-name">${t('音色')}</label></div>${state.voice.voices.length ? picker('voice-name', t('音色')) : `<input id="voice-name" type="text" value="${escapeHtml(remote.voice)}" spellcheck="false" autocomplete="off"/>`}</div>
     ${provider === 'elevenlabs' ? '' : field('voice-style', t('风格描述'), remote.style, t('温柔、自然的年轻女声'), t('部分模型用它决定音色。'))}
     <details class="voice-advanced"${remote.extra ? ' open' : ''}><summary>${t('额外参数')}</summary><p>${t('并入请求的 JSON，例如固定音色用的 seed 或 ref_audio。')}</p><textarea id="voice-extra" rows="3" spellcheck="false" placeholder='{"seed": 42}'>${escapeHtml(remote.extra)}</textarea></details>
   ` : `${modelRow(state)}<div class="setting-row"><label for="petVoiceSpeaker">${t('音色')}</label>${picker('petVoiceSpeaker', t('音色'))}</div>`;
@@ -54,13 +62,13 @@ function summaryRows(state: LocalState, picker: (id: string, label: string) => s
   const defaultModel = summary.connections.find(row => row.id === connection?.id && row.deviceId === connection?.deviceId)?.model ?? '';
   return `${toggle}
     <div class="setting-row"><div><label for="summary-source">${t('上游')}</label><p>${summary.connections.length ? t('在设置的“上游”页添加和测试。') : t('还没有读到上游，请先在设置的“上游”页添加。')}</p></div><div class="inline-controls"><button type="button" id="summary-source" aria-label="${t('上游')}"></button><button id="open-upstreams" class="${summary.connections.length ? '' : 'primary'}">${t('管理上游')}</button></div></div>
-    ${connection ? `<div class="setting-row voice-field"><div><label for="summary-model">${t('模型')}</label></div><div class="inline-controls"><input id="summary-model" type="text" value="${escapeHtml(connection.model)}" placeholder="${escapeHtml(defaultModel)}" spellcheck="false" autocomplete="off"/>${summary.models.length ? `<button type="button" id="summary-model-list" aria-label="${t('选择模型')}"></button>` : ''}</div></div>` : ''}
+    ${connection ? `<div class="setting-row voice-field"><div><label for="summary-model">${t('模型')}</label></div>${summary.models.length ? picker('summary-model', t('模型')) : `<input id="summary-model" type="text" value="${escapeHtml(connection.model)}" placeholder="${escapeHtml(defaultModel)}" spellcheck="false" autocomplete="off"/>`}</div>` : ''}
     <div class="setting-row"><label for="petSummaryLanguage">${t('播报语言')}</label>${picker('petSummaryLanguage', t('播报语言'))}</div>
     <div class="setting-row voice-preview"><p id="summary-result" class="${summary.lastError ? 'inline-error' : 'voice-sample'}" role="status">${escapeHtml(summary.lastError ?? summary.sample ?? '')}</p><button id="summary-test" ${connection ? '' : 'disabled'}>${t('试一试')}</button></div>
     <p class="voice-note">${t('这一轮的用户输入和 agent 回答会发送给所选上游。')}</p>`;
 }
 const refreshUpstreams = (action: (value: LocalAction) => Promise<boolean>): void => { void action({ type: 'summaryConnections' }); };
-let upstreamsWatched = false;
+let upstreamsWatched = false, discoveryAsked = false;
 function bindSummary(root: HTMLElement, state: LocalState, save: (patch: Partial<DesktopSettings>) => Promise<unknown>, action: (value: LocalAction) => Promise<boolean>, mount: (id: string, options: { value: string; label: string }[], value: string, change: (value: string) => void) => void): void {
   const settings = state.settings, summary = state.summary, connection = settings.petSummaryConnection;
   if (!settings.petVoiceSummary) return;
@@ -76,9 +84,13 @@ function bindSummary(root: HTMLElement, state: LocalState, save: (patch: Partial
   const manage = root.querySelector<HTMLButtonElement>('#open-upstreams'); if (manage) manage.onclick = () => { void action({ type: 'openUpstreams' }); };
   const labels = languageLabels(), languages = settings.petVoiceProvider === 'local' ? LOCAL_SUMMARY_LANGUAGES : SUMMARY_LANGUAGES;
   mount('petSummaryLanguage', languages.map(value => ({ value, label: labels[value] })), languages.includes(settings.petSummaryLanguage) ? settings.petSummaryLanguage : 'auto', value => { void save({ petSummaryLanguage: value as SummaryLanguage }); });
-  const model = root.querySelector<HTMLInputElement>('#summary-model');
+  const model = root.querySelector<HTMLInputElement>('input#summary-model');
   if (model && connection) model.onchange = () => { void save({ petSummaryConnection: { ...connection, model: model.value.trim() } }); };
-  if (connection) mount('summary-model-list', summary.models.map(row => ({ value: row.id, label: row.label })), connection.model, value => { void save({ petSummaryConnection: { ...connection, model: value } }); });
+  if (connection && root.querySelector('button#summary-model')) {
+    const fallback = summary.connections.find(row => row.id === connection.id && row.deviceId === connection.deviceId)?.model ?? '';
+    const listed = summary.models.map(row => ({ value: row.id, label: row.label }));
+    mount('summary-model', [{ value: '', label: fallback ? t('默认 · {model}', { model: fallback }) : t('默认') }, ...(connection.model && !listed.some(row => row.value === connection.model) ? [{ value: connection.model, label: connection.model }] : []), ...listed], connection.model, value => { void save({ petSummaryConnection: { ...connection, model: value } }); });
+  }
   const test = root.querySelector<HTMLButtonElement>('#summary-test');
   if (test) test.onclick = () => { test.disabled = true; test.textContent = t('总结中…'); void action({ type: 'summaryTest' }).finally(() => { if (test.isConnected) { test.disabled = false; test.textContent = t('试一试'); } }); };
 }
@@ -96,16 +108,19 @@ export function bindVoice(root: HTMLElement, state: LocalState, cleanups: (() =>
   mount('petVoiceSpeed', SPEEDS.map(speed => ({ value: String(speed), label: `${speed}×` })), String(settings.petVoiceSpeed), value => { void save({ petVoiceSpeed: Number(value) }); });
   const remote = remoteOf(settings);
   const update = (patch: Partial<RemoteVoice>): void => { if (provider !== 'local') void save({ petVoiceRemotes: { ...settings.petVoiceRemotes, [provider]: { ...remote!, ...patch } } }); };
-  const bindText = (id: string, name: keyof RemoteVoice): void => { const input = root.querySelector<HTMLInputElement | HTMLTextAreaElement>(`#${id}`); if (input) input.onchange = () => { update({ [name]: input.value }); }; };
+  const bindText = (id: string, name: keyof RemoteVoice): void => { const input = root.querySelector<HTMLInputElement | HTMLTextAreaElement>(`#${id}`); if (input instanceof HTMLButtonElement) return; if (input) input.onchange = () => { update({ [name]: input.value }); }; };
+  // What was chosen stays listed even if the service stops offering it.
+  const offered = (list: { id: string; label: string }[], value: string, blank?: string): { value: string; label: string }[] => [...(blank !== undefined ? [{ value: '', label: blank }] : []), ...(value && !list.some(row => row.id === value) ? [{ value, label: value }] : []), ...list.map(row => ({ value: row.id, label: row.label }))];
+  if (remote && root.querySelector('button#voice-model-name')) mount('voice-model-name', offered(state.voice.models, remote.model), remote.model, value => { update({ model: value }); });
+  if (remote && root.querySelector('button#voice-name')) mount('voice-name', offered(state.voice.voices, remote.voice, provider === 'elevenlabs' ? undefined : t('默认')), remote.voice, value => { update({ voice: value }); });
+  if (remote && !discoveryAsked) { discoveryAsked = true; void action({ type: 'voiceDiscover' }); window.addEventListener('focus', () => { void action({ type: 'voiceDiscover' }); }); }
+  const refresh = trigger('voice-refresh'); if (refresh) refresh.onclick = () => { void action({ type: 'voiceDiscover' }); };
   bindText('voice-url', 'url'); bindText('voice-model-name', 'model'); bindText('voice-name', 'voice'); bindText('voice-style', 'style'); bindText('voice-extra', 'extra');
-  mount('voice-name-list', state.voice.voices.map(voice => ({ value: voice.id, label: voice.label })), remote?.voice ?? '', value => { update({ voice: value }); });
   const install = trigger('voice-install'); if (install) install.onclick = () => { void action({ type: 'voiceInstall' }); };
   bindSummary(root, state, save, action, mount);
   const key = root.querySelector<HTMLInputElement>('#voice-key');
   if (key) key.onchange = () => { if (key.value.trim()) void action({ type: 'voiceKey', key: key.value }); };
   const clear = trigger('voice-key-clear'); if (clear) clear.onclick = () => { void action({ type: 'voiceKey', key: null }); };
-  const list = trigger('voice-list');
-  if (list) list.onclick = () => { list.disabled = true; list.textContent = t('获取中…'); void action({ type: 'voiceList' }).finally(() => { if (list.isConnected) { list.disabled = false; list.textContent = t('获取'); } }); };
   const model = trigger('voice-model');
   if (model) model.onclick = () => { void action({ type: 'voiceModel', command: model.dataset.command as 'download' | 'cancel' | 'remove' }); };
   const preview = trigger('voice-preview');

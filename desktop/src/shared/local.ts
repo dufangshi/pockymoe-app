@@ -18,7 +18,7 @@ export type LocalAction =
   | { type: 'checkUpdate' }
   | { type: 'voiceModel'; command: 'download' | 'cancel' | 'remove' }
   | { type: 'voiceKey'; key: string | null }
-  | { type: 'voiceList' }
+  | { type: 'voiceDiscover' }
   | { type: 'voicePreview' }
   | { type: 'voiceInstall' }
   | { type: 'openUpstreams' }

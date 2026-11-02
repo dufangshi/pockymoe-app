@@ -26,7 +26,10 @@ export interface VoiceStatus {
   model: { state: LocalModelState; progress: number; error: string | null };
   /** A key is saved for the configured service's origin. Keys never leave the main process. */
   keySet: boolean;
+  /** Read from the configured service, so its models and voices are picked rather than typed. */
+  models: VoiceOption[];
   voices: VoiceOption[];
+  discovery: { state: 'idle' | 'loading' | 'done' | 'failed'; error: string | null };
   lastError: string | null;
 }
 
