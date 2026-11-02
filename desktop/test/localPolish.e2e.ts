@@ -107,6 +107,11 @@ test('long pickers scroll within the overlay and keep keyboard options visible',
 test('close-to-tray keeps the Web activity source running while unfocused', async () => {
   const web = await pageAt(origin);
   expect(await app.evaluate(() => globalThis.__pockymoeDesktopTest.windows.main().webContents.getBackgroundThrottling())).toBe(false);
+  expect(await app.evaluate(() => {
+    const window = globalThis.__pockymoeDesktopTest.windows.createMain();
+    window.close(); window.emit('ready-to-show');
+    const visible = window.isVisible(); window.destroy(); return visible;
+  })).toBe(false);
   await app.evaluate(() => globalThis.__pockymoeDesktopTest.windows.main().close());
   expect(await app.evaluate(() => globalThis.__pockymoeDesktopTest.windows.main().isVisible())).toBe(false);
   await expect.poll(() => web.evaluate(() => document.visibilityState)).toBe('visible');

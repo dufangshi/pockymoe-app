@@ -81,11 +81,12 @@ export class Windows {
       // Keep the persisted session partition name across the product rename.
       webPreferences: { preload: join(__dirname, '../preload/relay.js'), contextIsolation: true, sandbox: true, nodeIntegration: false, backgroundThrottling: false, partition: 'persist:remote-codex', additionalArguments: [`--pockymoe-web-origin=${this.settings.get().webOrigin}`] }
     });
+    let backgrounded = false;
     const webContentsId = w.webContents.id;
     this.relay.add(w);
     w.webContents.on('did-finish-load', () => this.syncPageChrome(w));
     this.secure(w, true);
-    w.on('close', e => { if (!this.quitting) { e.preventDefault(); w.hide(); } });
+    w.on('close', e => { if (!this.quitting) { e.preventDefault(); backgrounded = true; w.hide(); } });
     w.on('closed', () => {
       this.relay.delete(w); this.ready.delete(webContentsId); this.pending.delete(webContentsId);
       for (const [id, pending] of this.waiters) if (pending.sender === webContentsId) {
@@ -93,7 +94,7 @@ export class Windows {
       }
     });
     w.webContents.on('did-start-navigation', (_e, _url, inPlace, isMain) => { if (isMain && !inPlace) this.ready.delete(w.webContents.id); });
-    w.once('ready-to-show', () => w.show());
+    w.once('ready-to-show', () => { if (!backgrounded) w.show(); });
     const savePosition = (): void => {
       clearTimeout(this.positionTimer);
       this.positionTimer = setTimeout(() => {

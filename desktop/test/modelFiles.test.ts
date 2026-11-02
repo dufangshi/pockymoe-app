@@ -20,6 +20,8 @@ it('kills cancelled tar and waits for close before settling extraction', async (
   const child = Object.assign(new EventEmitter(), { kill: vi.fn() }); execute.mockReturnValue(child);
   const abort = new AbortController(); let settled = false;
   const promise = extractModel('张三 voice/archive', '张三 voice/staging', abort.signal).catch(error => { settled = true; throw error; });
+  expect(execute.mock.calls[0][1]).toEqual(['-xjf', expect.stringMatching(/^\.\.[\\/]archive$/), '-C', '.']);
+  expect(execute.mock.calls[0][2]).toMatchObject({ cwd: '张三 voice/staging' });
   const rejected = expect(promise).rejects.toMatchObject({ name: 'AbortError' });
   abort.abort(); expect(child.kill).toHaveBeenCalledTimes(1);
   await Promise.resolve(); expect(settled).toBe(false);
@@ -44,11 +46,11 @@ it('remove keeps staging alive until cancelled tar exits', async () => {
     expect(existsSync(dir)).toBe(false); expect(model.state).toBe('absent');
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
-it('stops retrying a persistent lock after three seconds', async () => {
-  vi.useFakeTimers();
+it('stops retrying a persistent lock after its deadline', async () => {
+  vi.useFakeTimers({ toFake: ['Date'] });
   const operation = vi.fn(() => { throw Object.assign(new Error('locked'), { code: 'EPERM' }); });
   const promise = retryModelFile(operation, 'win32');
   const rejected = expect(promise).rejects.toMatchObject({ code: 'EPERM' });
-  await vi.advanceTimersByTimeAsync(3000); await rejected;
-  expect(operation).toHaveBeenCalledTimes(31);
+  vi.setSystemTime(Date.now() + 3000); await rejected;
+  expect(operation).toHaveBeenCalledTimes(2);
 });

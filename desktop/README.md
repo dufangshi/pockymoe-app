@@ -434,3 +434,6 @@ Windows CI uploads six-theme contact sheets under
 `scale-<scale>/contact-sheets/{main,map,devices,preferences,quick,glass}.png`, along
 with the full original PNGs. Fixture tunnel deadlines start when that phase begins,
 so browser bootstrap time cannot exhaust a device's connection budget.
+
+Closing a main window before its first ready-to-show event suppresses that initial
+show, so loading cannot bring a backgrounded window back to the foreground.

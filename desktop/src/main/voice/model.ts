@@ -2,7 +2,7 @@ import { modelTar } from '../platform';
 import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { createReadStream, createWriteStream, existsSync, mkdirSync, renameSync, rmSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -23,7 +23,9 @@ const removeFile = (path: string): Promise<void> => retryModelFile(() => rmSync(
 export function extractModel(archive: string, staging: string, signal: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
     signal.throwIfAborted();
-    const child = execFile(tar(), ['-xjf', archive, '-C', staging], { windowsHide: process.platform === 'win32' });
+    // Windows tar decodes argv paths through the system codepage. Node sets cwd
+    // through the Unicode process API, so keep archive/destination arguments relative.
+    const child = execFile(tar(), ['-xjf', relative(staging, archive), '-C', '.'], { cwd: staging, windowsHide: process.platform === 'win32' });
     let failure: Error | null = null;
     const cancel = (): void => { child.kill(); };
     signal.addEventListener('abort', cancel, { once: true });
