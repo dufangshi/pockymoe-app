@@ -31,6 +31,13 @@ test('quit cannot reopen a main window through a late activation event', async (
       // Destruction happens inside state delivery, after emit's entry guard.
       await new Promise(resolve => setTimeout(resolve, 250));
     });
+    await app.evaluate(({ BrowserWindow }) => {
+      const pending = new BrowserWindow({ show: false });
+      const tray = globalThis.__pockymoeDesktopTest.tray;
+      tray.dispose();
+      pending.emit('ready-to-show'); tray.update(); tray.dispose();
+      pending.destroy();
+    });
     await app.evaluate(({ app }, proof) => {
       const { writeFileSync } = process.getBuiltinModule('fs');
       const manager = globalThis.__pockymoeDesktopTest.windows;

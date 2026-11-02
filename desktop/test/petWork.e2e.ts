@@ -134,6 +134,12 @@ const openPreferences = async (): Promise<Page> => {
   await expect.poll(() => app.windows().some(window => window.url().includes('preferences'))).toBe(true);
   const preferences = app.windows().find(window => window.url().includes('preferences'))!;
   await preferences.locator('[data-section="pet"]').click();
+  // Discovery starts when this section mounts. Open its pickers only after their
+  // data arrives; an open picker deliberately defers replacing its options.
+  await expect.poll(() => preferences.evaluate(async () => {
+    const state = await (window as unknown as { pockymoeDesktop: { getState(): Promise<import('../src/shared/local').LocalState> } }).pockymoeDesktop.getState();
+    return !!state.summary.muteTargets && (!state.settings.petVoiceSummary || state.summary.connections.length > 0);
+  })).toBe(true);
   return preferences;
 };
 test('summary: picks a saved upstream and its model, and reads what the model said', async () => {

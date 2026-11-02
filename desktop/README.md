@@ -442,3 +442,7 @@ On Windows the speech utility process selects the model directory through Node's
 Unicode cwd API and passes relative filenames to sherpa's native readers.
 Forced pet destruction retires its survivor after the native close stack unwinds,
 so an owner cannot reenter destruction of its child on Windows.
+
+Tray disposal removes pending window-ready callbacks and subscriptions; later
+window readiness or theme/activity changes cannot update a destroyed native tray.
+The shutdown regression delivers that late event after disposal before quitting.

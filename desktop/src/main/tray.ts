@@ -39,7 +39,15 @@ export function trayTemplate(snapshot: ActivitySnapshot | null, settings: Deskto
 }
 export class DesktopTray {
   readonly tray: Tray;
-  private windowCreated = (_event: Electron.Event, window: BrowserWindow): void => { window.once('ready-to-show', () => this.update()); };
+  private disposed = false;
+  private pendingWindows = new Map<BrowserWindow, () => void>();
+  private unsubscribers: (() => void)[] = [];
+  private themeUpdated = (): void => this.update();
+  private windowCreated = (_event: Electron.Event, window: BrowserWindow): void => {
+    const ready = (): void => { this.pendingWindows.delete(window); this.update(); };
+    this.pendingWindows.set(window, ready); window.once('ready-to-show', ready);
+    window.once('closed', () => this.pendingWindows.delete(window));
+  };
   menuLabels: string[] = [];
   private appearance: Appearance | null = null;
   setAppearance(appearance: Appearance): void { this.appearance = { ...appearance }; this.update(); }
@@ -49,8 +57,8 @@ export class DesktopTray {
     if (process.platform === 'win32') app.on('browser-window-created', this.windowCreated);
     if (process.platform === 'win32') this.tray.on('click', () => this.tray.popUpContextMenu());
     if (process.platform !== 'win32') this.tray.on('double-click', () => windows.focusMain());
-    hub.onSnapshot(() => this.update()); settings.onChange(() => this.update());
-    nativeTheme.on('updated', () => this.update());
+    this.unsubscribers = [hub.onSnapshot(() => this.update()), settings.onChange(() => this.update())];
+    nativeTheme.on('updated', this.themeUpdated);
     this.update();
   }
   private icon(state: string): Electron.NativeImage {
@@ -60,6 +68,7 @@ export class DesktopTray {
     return image;
   }
   setBadge(count: number, style: 'attention' | 'running' | 'none'): void {
+    if (this.disposed || this.tray.isDestroyed()) return;
     const n = Math.max(0, Math.min(999, Math.trunc(count)));
     if (process.platform === 'darwin') app.dock?.setBadge(n && style !== 'none' ? `${style === 'running' ? '◦' : ''}${n}` : '');
     if (process.platform === 'win32') {
@@ -68,6 +77,7 @@ export class DesktopTray {
     }
   }
   update(): void {
+    if (this.disposed || this.tray.isDestroyed()) return;
     const snapshot = this.hub.snapshot(), settings = this.settings.get();
     const { attention, running } = activityCounts(snapshot);
     const state = attention ? 'attention' : running ? 'running' : 'none';
@@ -88,5 +98,12 @@ export class DesktopTray {
     this.menuLabels = template.map(i => i.label || '');
     this.tray.setContextMenu(Menu.buildFromTemplate(template));
   }
-  dispose(): void { app.removeListener('browser-window-created', this.windowCreated); this.tray.destroy(); }
+  dispose(): void {
+    if (this.disposed) return; this.disposed = true;
+    app.removeListener('browser-window-created', this.windowCreated);
+    for (const [window, ready] of this.pendingWindows) window.removeListener('ready-to-show', ready);
+    this.pendingWindows.clear();
+    for (const unsubscribe of this.unsubscribers) unsubscribe();
+    nativeTheme.removeListener('updated', this.themeUpdated); this.tray.destroy();
+  }
 }
