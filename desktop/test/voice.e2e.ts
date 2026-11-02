@@ -35,13 +35,13 @@ test.beforeAll(async () => {
 test.afterAll(async () => { await new Promise<void>(done => server.close(() => done())); });
 test.beforeEach(async () => {
   seen = []; profile = mkdtempSync(join(tmpdir(), 'pockymoe-voice-'));
-  if (realModel && test.info().title.startsWith('local')) { mkdirSync(join(profile, 'voice')); symlinkSync(realModel, join(profile, 'voice', MODEL.name)); }
+  if (realModel && test.info().title.startsWith('local')) { mkdirSync(join(profile, 'voice')); symlinkSync(realModel, join(profile, 'voice', MODEL.name), process.platform === 'win32' ? 'junction' : 'dir'); }
   const env: Record<string, string> = {};
-  for (const key of ['PATH', 'HOME', 'TMPDIR', 'USER', 'LOGNAME']) if (process.env[key]) env[key] = process.env[key]!;
+  for (const key of ['PATH', 'HOME', 'TMPDIR', 'USER', 'LOGNAME', 'SystemRoot', 'WINDIR', 'TEMP', 'TMP', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'ComSpec', 'PATHEXT']) if (process.env[key]) env[key] = process.env[key]!;
   Object.assign(env, { POCKYMOE_DESKTOP_E2E: '1', POCKYMOE_DESKTOP_USER_DATA: profile, POCKYMOE_DESKTOP_WEB_ORIGIN: origin, POCKYMOE_DESKTOP_RELAY_ORIGIN: origin });
   // POCKYMOE_DESKTOP_APP checks a packaged build, whose addon lives in app.asar.unpacked.
-  const packaged = process.env.POCKYMOE_DESKTOP_APP;
-  app = await electron.launch({ ...(packaged ? { executablePath: packaged, args: [] } : { args: [resolve('.')] }), env });
+  const packaged = process.env.POCKYMOE_PACKAGED_EXECUTABLE || process.env.POCKYMOE_DESKTOP_APP;
+  app = await electron.launch({ ...(packaged ? { executablePath: packaged, args: process.env.POCKYMOE_DESKTOP_SCALE ? [`--force-device-scale-factor=${process.env.POCKYMOE_DESKTOP_SCALE}`] : [] } : { args: [resolve('.')] }), env });
 });
 test.afterEach(async () => {
   // Electron ignores a quit that arrives before it is ready, which a test skipped at once would send.

@@ -44,10 +44,10 @@ test.beforeEach(async () => {
   speech = []; profile = mkdtempSync(join(tmpdir(), 'pockymoe-pet-work-'));
   if (clipPack && test.info().title.startsWith('clips')) { mkdirSync(join(profile, 'pets')); cpSync(clipPack, join(profile, 'pets', clipPackId()), { recursive: true }); }
   const env: Record<string, string> = {};
-  for (const key of ['PATH', 'HOME', 'TMPDIR', 'USER', 'LOGNAME']) if (process.env[key]) env[key] = process.env[key]!;
+  for (const key of ['PATH', 'HOME', 'TMPDIR', 'USER', 'LOGNAME', 'SystemRoot', 'WINDIR', 'TEMP', 'TMP', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'ComSpec', 'PATHEXT']) if (process.env[key]) env[key] = process.env[key]!;
   Object.assign(env, { POCKYMOE_DESKTOP_E2E: '1', POCKYMOE_DESKTOP_USER_DATA: profile, POCKYMOE_DESKTOP_WEB_ORIGIN: origin, POCKYMOE_DESKTOP_RELAY_ORIGIN: origin });
-  const packaged = process.env.POCKYMOE_DESKTOP_APP;
-  app = await electron.launch({ ...(packaged ? { executablePath: packaged, args: [] } : { args: [resolve('.')] }), env });
+  const packaged = process.env.POCKYMOE_PACKAGED_EXECUTABLE || process.env.POCKYMOE_DESKTOP_APP;
+  app = await electron.launch({ ...(packaged ? { executablePath: packaged, args: process.env.POCKYMOE_DESKTOP_SCALE ? [`--force-device-scale-factor=${process.env.POCKYMOE_DESKTOP_SCALE}`] : [] } : { args: [resolve('.')] }), env });
   await expect.poll(() => app.evaluate(() => '__pockymoeDesktopTest' in globalThis)).toBe(true);
   await expect.poll(() => app.windows().filter(window => window.url().includes('pet/index.html')).length, { timeout: 20_000 }).toBe(2);
   await expect.poll(() => app.windows().some(window => window.url().startsWith(origin))).toBe(true);
@@ -285,7 +285,7 @@ test('closing the panel leaves the main window where it was', async () => {
   await expect.poll(focused).toBe(false);
   await act({ type: 'toggleTray' });
   // What a real click can do on macOS: the app comes forward with its main window.
-  await app.evaluate(({ BrowserWindow }) => { BrowserWindow.getAllWindows().find(window => !window.webContents.getURL().includes('pet/index.html'))?.focus(); });
+  if (process.platform === 'darwin') await app.evaluate(({ BrowserWindow }) => { BrowserWindow.getAllWindows().find(window => !window.webContents.getURL().includes('pet/index.html'))?.focus(); });
   await act({ type: 'close' });
   await expect.poll(focused).toBe(false);
 });

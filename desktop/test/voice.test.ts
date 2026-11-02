@@ -1,3 +1,4 @@
+import { modelTar } from '../src/main/platform';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -160,7 +161,7 @@ describe('local model', () => {
   function fixture(): { bytes: Buffer; source: { name: string; url: string; sha256: string; bytes: number } } {
     const root = temp(), name = 'model-fixture';
     mkdirSync(join(root, name)); writeFileSync(join(root, name, 'model.int8.onnx'), 'weights');
-    const tarPath = join(temp(), 'm.tar.bz2'); execFileSync('/usr/bin/tar', ['-cjf', tarPath, '-C', root, name]);
+    const tarPath = join(temp(), 'm.tar.bz2'); execFileSync(modelTar(process.platform, process.env.SystemRoot), ['-cjf', tarPath, '-C', root, name]);
     const bytes = readFileSync(tarPath);
     return { bytes, source: { name, url: 'https://example.invalid/m', sha256: createHash('sha256').update(bytes).digest('hex'), bytes: bytes.length } };
   }

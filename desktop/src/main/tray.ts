@@ -1,5 +1,5 @@
 import { t } from '../shared/i18n';
-import { app, Menu, nativeImage, nativeTheme, Tray, type MenuItemConstructorOptions } from 'electron';
+import { app, Menu, nativeImage, nativeTheme, Tray, type BrowserWindow, type MenuItemConstructorOptions } from 'electron';
 import { join } from 'node:path';
 import type { ActivityItem, ActivitySnapshot, Appearance, DesktopSettings } from '../shared/contract';
 import { activitySecondary, conversationKey, groupActivities } from '../shared/activityGroups';
@@ -39,19 +39,22 @@ export function trayTemplate(snapshot: ActivitySnapshot | null, settings: Deskto
 }
 export class DesktopTray {
   readonly tray: Tray;
+  private windowCreated = (_event: Electron.Event, window: BrowserWindow): void => { window.once('ready-to-show', () => this.update()); };
   menuLabels: string[] = [];
   private appearance: Appearance | null = null;
   setAppearance(appearance: Appearance): void { this.appearance = { ...appearance }; this.update(); }
   constructor(private hub: ActivityHub, private settings: SettingsStore, private windows: Windows) {
     this.tray = new Tray(this.icon('none'));
     this.tray.setToolTip('Pockymoe');
+    if (process.platform === 'win32') app.on('browser-window-created', this.windowCreated);
+    if (process.platform === 'win32') this.tray.on('click', () => this.tray.popUpContextMenu());
     this.tray.on('double-click', () => windows.focusMain());
     hub.onSnapshot(() => this.update()); settings.onChange(() => this.update());
     nativeTheme.on('updated', () => this.update());
     this.update();
   }
   private icon(state: string): Electron.NativeImage {
-    const suffix = process.platform === 'win32' ? (this.appearance ? this.appearance.effective === 'dark' : nativeTheme.shouldUseDarkColors) ? '-dark.ico' : '.ico' : 'Template.png';
+    const suffix = process.platform === 'win32' ? nativeTheme.shouldUseDarkColorsForSystemIntegratedUI ? '-dark.ico' : '.ico' : 'Template.png';
     const image = nativeImage.createFromPath(join(app.getAppPath(), 'build', `tray-${state}${suffix}`));
     if (process.platform === 'darwin') image.setTemplateImage(true);
     return image;
@@ -60,8 +63,8 @@ export class DesktopTray {
     const n = Math.max(0, Math.min(999, Math.trunc(count)));
     if (process.platform === 'darwin') app.dock?.setBadge(n && style !== 'none' ? `${style === 'running' ? '◦' : ''}${n}` : '');
     if (process.platform === 'win32') {
-      const icon = n && style !== 'none' ? nativeImage.createFromPath(join(app.getAppPath(), 'build', `overlay-${style}-${n > 9 ? 'many' : n}.png`)) : null;
-      for (const w of this.windows.relay) w.setOverlayIcon(icon, n ? `${n} ${style === 'attention' ? t('需要你') : t('进行中')}` : '');
+      const icon = n && style === 'attention' ? nativeImage.createFromPath(join(app.getAppPath(), 'build', `overlay-${style}-${n > 9 ? 'many' : n}.png`)) : null;
+      for (const w of this.windows.relay) w.setOverlayIcon(icon, icon ? `${n} ${t('需要你')}` : '');
     }
   }
   update(): void {
@@ -85,5 +88,5 @@ export class DesktopTray {
     this.menuLabels = template.map(i => i.label || '');
     this.tray.setContextMenu(Menu.buildFromTemplate(template));
   }
-  dispose(): void { this.tray.destroy(); }
+  dispose(): void { app.removeListener('browser-window-created', this.windowCreated); this.tray.destroy(); }
 }

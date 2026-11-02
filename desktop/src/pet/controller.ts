@@ -1,4 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, nativeImage, nativeTheme, screen } from 'electron';
+import { release } from 'node:os';
+import { windowsGlassMaterial } from '../shared/platform';
 import { join } from 'node:path';
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import type { ActivityItem, ActivityRecent, Appearance, DesktopSettings, HostCommand, HostCommandResult, PetController, PetControllerDeps } from '../shared/contract';
@@ -57,7 +59,7 @@ export function createPetController(deps: PetControllerDeps): PetController {
   const window = new BrowserWindow({ ...petLayout(position, (screen.getAllDisplays().find(candidate => candidate.id === position.displayId) ?? primary).workArea, petHeight(settings)).window, show: false, transparent: true, frame: false,
     focusable: false, hasShadow: false, skipTaskbar: true, resizable: false, maximizable: false, minimizable: false,
     ...(process.platform === 'darwin' ? { type: 'panel' as const } : {}), webPreferences: security });
-  const glass = new BrowserWindow({ ...glassOptions(process.platform), parent: window, width: 280, height: 40, show: false, webPreferences: security });
+  const glass = new BrowserWindow({ ...glassOptions(process.platform, release(), process.env.POCKYMOE_WINDOWS_GLASS === 'solid'), parent: window, width: 280, height: 40, show: false, webPreferences: security });
   configureOverlay(window); configureOverlay(glass);
   window.setIgnoreMouseEvents(true, { forward: true });
   for (const view of [window, glass]) {
@@ -154,7 +156,7 @@ export function createPetController(deps: PetControllerDeps): PetController {
     const layout = petLayout(position, display().workArea, petHeight(settings), { dockAmount });
     const effectiveTargets = [...new Map([...items, ...targets.values(), ...recent.map(item => ({ ...item, workspaceId: '', state: 'idle' as const, since: new Date(0).toISOString(), unread: false }))].map(item => [item.key, item])).values()];
     const sleeping = pack?.manifest.remoteCodex?.sleeping;
-    const shared = { appearance, accountId, items, recent, targets: effectiveTargets, mood: drag?.moved && pack?.manifest.remoteCodex?.clips?.dragging ? 'dragging' : moods.value(items, now, snoozed), moodEpoch, pinned: controlsPinned && !panel && !menu,
+    const shared = { appearance, glassFallback: process.platform === 'win32' && windowsGlassMaterial(release(), process.env.POCKYMOE_WINDOWS_GLASS === 'solid') === 'solid', accountId, items, recent, targets: effectiveTargets, mood: drag?.moved && pack?.manifest.remoteCodex?.clips?.dragging ? 'dragging' : moods.value(items, now, snoozed), moodEpoch, pinned: controlsPinned && !panel && !menu,
       clips: pack?.manifest.remoteCodex?.clips && pack.manifest.remoteCodex.clipFormat ? { format: pack.manifest.remoteCodex.clipFormat, states: pack.manifest.remoteCodex.clips, epoch: packEpoch } : null,
       // Timing stays here: while the pointer holds a bubble, its restart must not reach the renderer as a change.
       bubble: bubble && { ...bubble, createdAt: 0, shownAt: null },

@@ -20,3 +20,13 @@
 .voice-sample{flex:1;min-width:0;max-width:none!important;font-size:11px;color:var(--theme-fg-muted);overflow-wrap:anywhere}
 .voice-group .inline-controls #summary-source{max-width:170px}
 .mute-add .inline-controls #mute-kind{min-width:112px;width:112px;flex:none}.mute-add .inline-controls #mute-target{min-width:116px;max-width:150px}.mute-rules{display:flex;flex-direction:column;gap:2px;padding:0 0 8px}.mute-rule{display:flex;align-items:center;gap:8px;min-height:26px;font-size:12px}.mute-kind{flex:none;font-size:10px;color:var(--theme-fg-muted);min-width:36px}.mute-label{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.mute-remove{flex:none;width:22px;height:22px;padding:0;border:0;background:none;color:var(--theme-fg-muted);line-height:20px}
+
+:root[data-platform=win32]{font-family:"Segoe UI Variable Text","Segoe UI","Microsoft YaHei UI",sans-serif}
+:root[data-platform=win32][data-theme-preset=terminal],:root[data-platform=win32] code,:root[data-platform=win32] .elapsed,:root[data-platform=win32] .voice-advanced textarea{font-family:"Cascadia Mono",Consolas,"Microsoft YaHei UI",monospace}
+:root[data-platform=win32] textarea{appearance:none}
+:root[data-platform=win32][data-glass-fallback=true] .quick{background:color-mix(in srgb,var(--app-bg) 96%,transparent);border:1px solid var(--theme-border);border-radius:12px}
+
+.local-message{width:min(420px,calc(100vw - 32px));max-height:calc(100vh - 64px);padding:20px;border:1px solid var(--theme-border);border-radius:8px;background:var(--theme-surface);color:var(--app-fg);box-shadow:0 6px 24px #0003}
+.local-message::backdrop{background:color-mix(in srgb,var(--app-fg) 16%,transparent);backdrop-filter:blur(4px)}
+.local-message h1{font-size:13px;line-height:18px;margin-bottom:12px}.local-message [data-scroll]{max-height:calc(100vh - 200px);overflow:auto;overflow-wrap:anywhere}.local-message p:first-child{color:var(--app-fg);font-size:13px;line-height:18px}.local-message p+p{margin-top:8px}.message-buttons{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}
+@media(max-width:639px){.local-message{width:100%;max-height:calc(100vh - 38px);margin:auto 0 0;border-radius:12px 12px 0 0}}

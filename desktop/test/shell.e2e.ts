@@ -9,14 +9,16 @@ import type { Windows } from '../src/main/windows';
 import type { DesktopTray } from '../src/main/tray';
 import type { Notifications } from '../src/main/notifications';
 import type { AppearanceStore } from '../src/main/appearance';
+import type { ShowMessage } from '../src/main/updates';
+import type { LocalMessages } from '../src/main/messages';
 import type { Appearance, PockymoeHost } from '../src/shared/contract';
 import { resolveLocale } from '../src/shared/i18n';
 import { item, snapshot } from './fixtures';
 
-type Runtime = { lastDialog?: Electron.MessageBoxOptions; lastSave?: Electron.SaveDialogOptions; appearance: AppearanceStore; hub: ActivityHub; settings: SettingsStore; windows: Windows; tray: DesktopTray; notifications: Notifications };
+type Runtime = { messages: LocalMessages; lastMessageResponse?: number; showMessageBox: ShowMessage; lastDialog?: Electron.MessageBoxOptions; lastSave?: Electron.SaveDialogOptions; updater: { checkForUpdates(): Promise<{ isUpdateAvailable: boolean }> }; appearance: AppearanceStore; hub: ActivityHub; settings: SettingsStore; windows: Windows; tray: DesktopTray; notifications: Notifications };
 declare global { var __pockymoeDesktopTest: Runtime }
 declare global { interface Window { pockymoeHost?: PockymoeHost; commands: unknown[] } }
-const evidence = join(process.env.POCKYMOE_DESKTOP_EVIDENCE || '/tmp/rc-desktop/evidence/round3/shell', 'compat');
+const evidence = join(process.env.POCKYMOE_DESKTOP_EVIDENCE || join(tmpdir(), 'pockymoe-shell-evidence'), 'compat');
 let relay: Server, api: Server, relayOriginValue: string, other: Server, origin: string, otherOrigin: string;
 const apps: ElectronApplication[] = [];
 const themes = new WeakMap<ElectronApplication, 'light' | 'dark'>();
@@ -26,13 +28,14 @@ async function server(handler: RequestListener): Promise<{ server: Server; origi
   const address = server.address(); if (!address || typeof address === 'string') throw new Error('No fixture port');
   return { server, origin: `http://127.0.0.1:${address.port}` };
 }
-async function launch(theme: 'light' | 'dark', firstRun = false): Promise<ElectronApplication> {
+async function launch(theme: 'light' | 'dark', firstRun = false, material = 'native'): Promise<ElectronApplication> {
   const dir = mkdtempSync(join(tmpdir(), 'rc-shell-e2e-')); directories.push(dir);
   const env: Record<string, string> = {};
-  for (const key of ['PATH', 'HOME', 'TMPDIR', 'USER', 'LOGNAME', 'DISPLAY']) if (process.env[key]) env[key] = process.env[key]!;
+  for (const key of ['PATH', 'HOME', 'TMPDIR', 'USER', 'LOGNAME', 'DISPLAY', 'SystemRoot', 'WINDIR', 'TEMP', 'TMP', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'ComSpec', 'PATHEXT']) if (process.env[key]) env[key] = process.env[key]!;
   Object.assign(env, { POCKYMOE_DESKTOP_E2E: '1', POCKYMOE_DESKTOP_USER_DATA: dir, POCKYMOE_DESKTOP_THEME: theme });
+  if (material === 'solid') env.POCKYMOE_WINDOWS_GLASS = 'solid';
   if (!firstRun) { env.POCKYMOE_DESKTOP_WEB_ORIGIN = origin; env.POCKYMOE_DESKTOP_RELAY_ORIGIN = relayOriginValue; }
-  const app = await electron.launch({ args: [resolve('.')], env }); apps.push(app); themes.set(app, theme);
+  const app = await electron.launch({ ...(process.env.POCKYMOE_PACKAGED_EXECUTABLE ? { executablePath: process.env.POCKYMOE_PACKAGED_EXECUTABLE, args: process.env.POCKYMOE_DESKTOP_SCALE ? [`--force-device-scale-factor=${process.env.POCKYMOE_DESKTOP_SCALE}`] : [] } : { args: [resolve('.')] }), env }); apps.push(app); themes.set(app, theme);
   return app;
 }
 async function pageAt(app: ElectronApplication, fragment: string): Promise<Page> {
@@ -103,6 +106,7 @@ test('OAuth finishes in a bridge-free sign-in window on the page session', async
   await expect(signIn).toHaveTitle('Provider sign-in');
   expect(await signIn.evaluate(() => typeof window.pockymoeHost)).toBe('undefined');
   expect(await signIn.evaluate(() => navigator.userAgent)).not.toMatch(/Electron|Pockymoe/i);
+  if (process.platform === 'win32') expect(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().some(window => window.isMenuBarVisible() || window.isMenuBarAutoHide()))).toBe(false);
   expect(page.url()).not.toContain('/relay/auth/');
   await signIn.evaluate(callback => { location.assign(callback); }, `${relayOriginValue}/relay/auth/oauth/github/callback`);
   await expect.poll(() => page.url()).toContain('signedIn=1');
@@ -284,6 +288,10 @@ for (const pack of packs) for (const theme of ['light', 'dark'] as const) test(`
     dialog.showMessageBox = (async (...args: unknown[]) => { globalThis.__pockymoeDesktopTest.lastDialog = args.at(-1) as Electron.MessageBoxOptions; return { response: 0, checkboxChecked: false }; }) as typeof dialog.showMessageBox;
     dialog.showSaveDialog = (async (...args: unknown[]) => { globalThis.__pockymoeDesktopTest.lastSave = args.at(-1) as Electron.SaveDialogOptions; return { canceled: true, filePath: '' }; }) as typeof dialog.showSaveDialog;
   });
+  const packaged = await app.evaluate(({ app }) => {
+    if (app.isPackaged) globalThis.__pockymoeDesktopTest.updater.checkForUpdates = async () => ({ isUpdateAvailable: false });
+    return app.isPackaged;
+  });
   const timings: { locale: string; milliseconds: number }[] = [];
   for (const locale of ['en', 'zh-CN'] as const) {
     const switchedAt = Date.now();
@@ -304,7 +312,12 @@ for (const pack of packs) for (const theme of ['light', 'dark'] as const) test(`
     expect(timings.at(-1)!.milliseconds).toBeLessThan(1000);
     writeFileSync(join(evidence, `menu-${locale}.json`), JSON.stringify(menu, null, 2));
     await prefs.locator('#update').click();
-    await expect.poll(() => app.evaluate(() => globalThis.__pockymoeDesktopTest.lastDialog?.message)).toBe(locale === 'en' ? 'Development builds do not check for updates' : '开发版本不检查更新');
+    const updateMessage = packaged ? locale === 'en' ? "You're up to date" : '已是最新版本' : locale === 'en' ? 'Development builds do not check for updates' : '开发版本不检查更新';
+    if (process.platform === 'win32') {
+      const prompt = prefs.getByRole('dialog'); await expect(prompt).toContainText(updateMessage);
+      await prompt.getByRole('button', { name: locale === 'en' ? 'OK' : '好', exact: true }).click();
+      await expect(prompt).toHaveCount(0);
+    } else await expect.poll(() => app.evaluate(() => globalThis.__pockymoeDesktopTest.lastDialog?.message)).toBe(updateMessage);
     expect(await page.evaluate(() => window.pockymoeHost!.files.saveAs('locale.txt', new ArrayBuffer(0)))).toEqual({ saved: false });
     expect(await app.evaluate(() => globalThis.__pockymoeDesktopTest.lastSave?.buttonLabel)).toBe(locale === 'en' ? 'Save' : '保存');
     await capture(app, first, `locale-${locale}-setup`, pack, theme);
@@ -322,4 +335,81 @@ for (const pack of packs) for (const theme of ['light', 'dark'] as const) test(`
   await expect(quick.getByRole('button', { name: 'Open in thread', exact: true })).toBeVisible({ timeout: 1000 });
   await quick.getByRole('button', { name: 'Open in thread', exact: true }).click();
   await expect(page).toHaveURL(`${origin}/devices/mac/threads/thread-1`);
+});
+
+for (const material of ['native', 'solid']) for (const pack of packs) for (const theme of ['light', 'dark'] as const) test(`Windows surface acceptance (${material} ${pack} ${theme})`, async () => {
+  test.skip(process.platform !== 'win32', 'Windows native window acceptance');
+  test.setTimeout(120_000);
+  const app = await launch(theme, false, material), web = await pageAt(app, origin);
+  await web.evaluate(value => window.pockymoeHost!.appearance.sync(value), appearanceFor(pack, theme));
+  await app.evaluate(() => {
+    for (const role of ['preferences', 'quick', 'about', 'relay'] as const) globalThis.__pockymoeDesktopTest.windows.createLocal(role);
+  });
+  const prefs = await pageAt(app, 'view=preferences');
+  await prefs.locator('[data-section=shortcuts]').click();
+  await expect(prefs.locator('kbd').first()).toContainText('Ctrl');
+  const sprite = await pageAt(app, '/pet/');
+  await sprite.evaluate(() => (window as unknown as { rcDesktop: { pet: { action(value: unknown): Promise<unknown> } } }).rcDesktop.pet.action({ type: 'toggleTray' }));
+  await expect.poll(() => app.windows().filter(page => page.url().includes('/pet/')).length).toBe(2);
+  const scales: { url: string; devicePixelRatio: number }[] = [];
+  for (const page of app.windows()) {
+    await page.waitForLoadState('domcontentloaded');
+    const violations = await page.evaluate(() => {
+      const text = [document.body.innerText, ...Array.from(document.querySelectorAll('*')).flatMap(el => [el.getAttribute('title') || '', el.getAttribute('aria-label') || ''])].join(' ');
+      const scrollbars = Array.from(document.querySelectorAll<HTMLElement>('*')).filter(el => {
+        const style = getComputedStyle(el);
+        const body = getComputedStyle(document.body), viewport = el === document.scrollingElement;
+        const overflowing = (/auto|scroll/.test(style.overflowY) || viewport && !/hidden|clip/.test(body.overflowY)) && el.scrollHeight > el.clientHeight + 1 || (/auto|scroll/.test(style.overflowX) || viewport && !/hidden|clip/.test(body.overflowX)) && el.scrollWidth > el.clientWidth + 1;
+        return overflowing && style.scrollbarWidth !== 'none' && getComputedStyle(el, '::-webkit-scrollbar').display !== 'none';
+      }).map(el => el.className);
+      return { macLabels: /[⌘⌥]/.test(text), scrollbars, devicePixelRatio };
+    });
+    expect(violations.macLabels, page.url()).toBe(false);
+    expect(violations.scrollbars, page.url()).toEqual([]);
+    test.info().annotations.push({ type: 'scale', description: `${page.url()}: devicePixelRatio=${violations.devicePixelRatio}` });
+    scales.push({ url: page.url(), devicePixelRatio: violations.devicePixelRatio });
+    const label = page.url().includes('/pet/') ? await page.evaluate(() => `pet-${document.body.dataset.surface}`) : new URL(page.url()).searchParams.get('view') || 'main-fixture';
+    await page.screenshot({ path: join(evidence, `windows-${material}-${label}-${pack}-${theme}.png`), animations: 'disabled' });
+  }
+  const displays = await app.evaluate(({ screen }) => screen.getAllDisplays().map(display => ({ bounds: display.bounds, workArea: display.workArea, scaleFactor: display.scaleFactor })));
+  writeFileSync(join(evidence, `windows-${material}-scale-${pack}-${theme}.json`), JSON.stringify({ requested: process.env.POCKYMOE_DESKTOP_SCALE || 'system', scales, displays }, null, 2));
+  // Page screenshots omit native chrome. Also retain the OS window thumbnails when available.
+  const native = await app.evaluate(async ({ BrowserWindow, desktopCapturer }) => {
+    const sources = await desktopCapturer.getSources({ types: ['window'], thumbnailSize: { width: 1920, height: 1440 } });
+    return BrowserWindow.getAllWindows().map(window => {
+      const source = sources.find(source => source.id === window.getMediaSourceId());
+      return { id: window.id, url: window.webContents.getURL(), bounds: window.getBounds(), visible: window.isVisible(), image: source && !source.thumbnail.isEmpty() ? source.thumbnail.toPNG().toString('base64') : null };
+    });
+  });
+  for (const window of native) if (window.image) writeFileSync(join(evidence, `windows-${material}-native-window-${window.id}-${pack}-${theme}.png`), Buffer.from(window.image, 'base64'));
+  writeFileSync(join(evidence, `windows-${material}-native-windows-${pack}-${theme}.json`), JSON.stringify(native.map(({ image, ...window }) => ({ ...window, captured: !!image })), null, 2));
+  await prefs.locator('[data-section=pet]').click();
+  await prefs.locator('#petVoiceProvider').click();
+  await prefs.getByRole('option', { name: 'OpenAI 兼容服务', exact: true }).click();
+  await prefs.locator('.voice-advanced summary').click();
+  const extra = prefs.locator('#voice-extra');
+  await extra.fill(JSON.stringify({ fixture: Array.from({ length: 30 }, () => 'scrollbar fixture') }, null, 2));
+  expect(await extra.evaluate(element => element.scrollHeight > element.clientHeight)).toBe(true);
+  expect(await extra.evaluate(element => getComputedStyle(element).scrollbarWidth)).toBe('none');
+  await prefs.screenshot({ path: join(evidence, `windows-${material}-preferences-voice-${pack}-${theme}.png`), animations: 'disabled' });
+  await app.evaluate(() => { void globalThis.__pockymoeDesktopTest.showMessageBox({ title: 'Pockymoe', message: '确认更新', detail: 'Windows local confirmation fixture', buttons: ['继续', '取消'], cancelId: 1, defaultId: 1 }); });
+  const prompt = prefs.getByRole('dialog'); await expect(prompt).toBeVisible();
+  await expect(prompt.getByRole('button', { name: '取消' })).toBeFocused();
+  await prefs.keyboard.press('Tab'); await expect(prompt.getByRole('button', { name: '继续' })).toBeFocused();
+  await prefs.keyboard.press('Tab'); await expect(prompt.getByRole('button', { name: '取消' })).toBeFocused();
+  await prefs.screenshot({ path: join(evidence, `windows-${material}-confirmation-${pack}-${theme}.png`), animations: 'disabled' });
+  await prefs.keyboard.press('Escape'); await expect(prompt).toHaveCount(0);
+  await app.evaluate(({ BrowserWindow }) => { for (const window of BrowserWindow.getAllWindows()) { if (window.isMenuBarVisible() || window.isMenuBarAutoHide()) throw new Error('Native menu must stay hidden, including on Alt'); } });
+  await app.evaluate(() => globalThis.__pockymoeDesktopTest.windows.focusMain());
+  await web.keyboard.press('Alt');
+  expect(await app.evaluate(() => globalThis.__pockymoeDesktopTest.windows.main().isMenuBarVisible())).toBe(false);
+  const beforeShortcut = await web.evaluate(() => window.commands.length);
+  await web.keyboard.press('Control+0');
+  await expect.poll(() => web.evaluate(() => window.commands.slice(-1))).toEqual([expect.objectContaining({ type: 'openMap' })]);
+  expect(await web.evaluate(() => window.commands.length)).toBeGreaterThan(beforeShortcut);
+  for (const type of ['openMap', 'openDevices'] as const) {
+    await app.evaluate((_e, type) => { void globalThis.__pockymoeDesktopTest.windows.dispatch({ type }); }, type);
+    await expect.poll(() => web.evaluate(() => window.commands)).toEqual(expect.arrayContaining([expect.objectContaining({ type })]));
+    await web.screenshot({ path: join(evidence, `windows-${material}-${type}-web-contract-fixture-${pack}-${theme}.png`), animations: 'disabled' });
+  }
 });

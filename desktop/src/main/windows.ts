@@ -1,6 +1,8 @@
 import { t } from '../shared/i18n';
 import { BrowserWindow, nativeTheme, screen, shell, type Rectangle } from 'electron';
 import { join } from 'node:path';
+import { release } from 'node:os';
+import { windowPalette, windowsMaterial, windowsGlassMaterial } from '../shared/platform';
 import { randomUUID } from 'node:crypto';
 import type { Appearance, HostCommand, HostCommandResult } from '../shared/contract';
 import { channels as c } from '../shared/channels';
@@ -23,20 +25,27 @@ export class Windows {
   private appearance: Appearance | null = null;
   setAppearance(appearance: Appearance): void {
     this.appearance = { ...appearance };
-    if (process.platform === 'win32') for (const w of this.relay) w.setTitleBarOverlay(this.overlay());
+    this.refreshChrome();
     for (const [w, role] of this.local) {
-      w.setBackgroundColor(role === 'quick' ? '#00000000' : appearance.effective === 'dark' ? '#232325' : '#f8f8f7');
+      w.setBackgroundColor(role === 'quick' ? '#00000000' : process.platform === 'win32' ? this.palette().background : appearance.effective === 'dark' ? '#232325' : '#f8f8f7');
       w.setTitle(role === 'preferences' ? t('设置 — Pockymoe') : role === 'relay' ? t('连接 — Pockymoe') : 'Pockymoe');
     }
   }
   constructor(private settings: SettingsStore, private dataDir: string) {
     const stored = readJson(join(dataDir, 'window-bounds.json'));
     this.bounds = stored && typeof stored === 'object' ? stored as Record<string, Rectangle> : {};
-    nativeTheme.on('updated', () => { if (process.platform === 'win32') for (const w of this.relay) w.setTitleBarOverlay(this.overlay()); });
+    nativeTheme.on('updated', () => this.refreshChrome());
   }
+  private refreshChrome(): void {
+    if (process.platform !== 'win32') return;
+    for (const w of [...this.relay, ...[...this.local].filter(([, role]) => role !== 'quick').map(([window]) => window)]) {
+      w.setTitleBarOverlay(this.overlay()); w.setBackgroundColor(this.palette().background);
+    }
+  }
+  private palette() { return windowPalette(this.appearance, nativeTheme.shouldUseDarkColors); }
   private overlay(): { color: string; symbolColor: string; height: number } {
-    const dark = this.appearance ? this.appearance.effective === 'dark' : nativeTheme.shouldUseDarkColors;
-    return { color: dark ? '#202022' : '#f4f4f3', symbolColor: dark ? '#ededed' : '#252525', height: 38 };
+    const palette = this.palette();
+    return { color: palette.background, symbolColor: palette.foreground, height: 38 };
   }
   private currentBounds(): Rectangle {
     const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
@@ -51,8 +60,8 @@ export class Windows {
   createMain(path = '/'): BrowserWindow {
     const w = new BrowserWindow({
       ...this.currentBounds(), minWidth: 900, minHeight: 600, show: false, title: 'Pockymoe',
-      backgroundColor: process.platform === 'darwin' ? '#00000000' : '#202022',
-      ...(process.platform === 'darwin' ? { titleBarStyle: 'hiddenInset' as const, trafficLightPosition: { x: 14, y: 13 }, vibrancy: 'sidebar' as const, visualEffectState: 'followWindow' as const, transparent: true } : { titleBarStyle: 'hidden' as const, titleBarOverlay: this.overlay(), backgroundMaterial: 'mica' as const }),
+      backgroundColor: process.platform === 'darwin' ? '#00000000' : this.palette().background,
+      ...(process.platform === 'darwin' ? { titleBarStyle: 'hiddenInset' as const, trafficLightPosition: { x: 14, y: 13 }, vibrancy: 'sidebar' as const, visualEffectState: 'followWindow' as const, transparent: true } : { titleBarStyle: 'hidden' as const, titleBarOverlay: this.overlay(), backgroundMaterial: windowsMaterial(release()) }),
       // The Web window owns account activity even when hidden. Keep its timers
       // and visibility state active so close-to-tray cannot pause native alerts.
       // Keep the persisted session partition name across the product rename.
@@ -118,7 +127,7 @@ export class Windows {
   private openSignIn(owner: BrowserWindow, url: string): void {
     if (this.signInWindow && !this.signInWindow.isDestroyed()) { this.signInWindow.focus(); void this.signInWindow.loadURL(url).catch(() => undefined); return; }
     const w = new BrowserWindow({
-      width: 520, height: 720, title: 'Pockymoe', parent: owner, autoHideMenuBar: true,
+      width: 520, height: 720, title: 'Pockymoe', parent: owner, autoHideMenuBar: process.platform !== 'win32',
       webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false, partition: 'persist:remote-codex' },
     });
     this.signInWindow = w;
@@ -140,14 +149,16 @@ export class Windows {
     const existing = [...this.local].find(([w, r]) => r === role && !w.isDestroyed())?.[0];
     if (existing) { existing.show(); existing.focus(); return existing; }
     const quick = role === 'quick';
+    const acrylic = process.platform === 'win32' && windowsGlassMaterial(release(), process.env.POCKYMOE_WINDOWS_GLASS === 'solid') === 'acrylic';
     const w = new BrowserWindow({ width: quick ? 560 : role === 'preferences' ? 660 : 460, height: quick ? 340 : role === 'preferences' ? 500 : role === 'about' ? 330 : 320,
       minWidth: quick ? 360 : 380, minHeight: quick ? 100 : 300,
       show: false, resizable: !quick, maximizable: false, minimizable: false, frame: !quick,
       title: role === 'preferences' ? t('设置 — Pockymoe') : role === 'relay' ? t('连接 — Pockymoe') : 'Pockymoe',
-      titleBarStyle: process.platform === 'darwin' && !quick ? 'hiddenInset' : undefined,
+      titleBarStyle: !quick ? process.platform === 'darwin' ? 'hiddenInset' : process.platform === 'win32' ? 'hidden' : undefined : undefined,
+      ...(process.platform === 'win32' && !quick ? { titleBarOverlay: this.overlay() } : {}),
       vibrancy: process.platform === 'darwin' ? quick ? 'hud' : 'popover' : undefined, visualEffectState: 'active',
-      ...(quick ? { transparent: process.platform === 'darwin', ...(process.platform === 'win32' ? { backgroundMaterial: 'acrylic' as const } : {}) } : {}),
-      backgroundColor: quick ? '#00000000' : nativeTheme.shouldUseDarkColors ? '#202022' : '#f8f8f7',
+      ...(quick ? { transparent: process.platform === 'darwin' || process.platform === 'win32' && !acrylic, ...(acrylic ? { backgroundMaterial: 'acrylic' as const, roundedCorners: true } : {}) } : {}),
+      backgroundColor: quick ? '#00000000' : process.platform === 'win32' ? this.palette().background : nativeTheme.shouldUseDarkColors ? '#202022' : '#f8f8f7',
       webPreferences: { preload: join(__dirname, '../preload/local.js'), contextIsolation: true, sandbox: true, nodeIntegration: false,
         additionalArguments: process.env.ELECTRON_RENDERER_URL ? ['--pockymoe-local-dev'] : [] }
     });

@@ -1,5 +1,8 @@
 import { t, getLocale, setLocale } from '../shared/i18n';
 import { app, BrowserWindow, dialog, globalShortcut, ipcMain, nativeTheme, Notification, session, shell, type IpcMainEvent, type IpcMainInvokeEvent } from 'electron';
+import { localFileMatches } from './platform';
+import { release } from 'node:os';
+import { saveName, windowsGlassMaterial } from '../shared/platform';
 import { basename, join } from 'node:path';
 import { mkdirSync, writeFileSync, existsSync, copyFileSync } from 'node:fs';
 import type { HostCapabilities, PetController, PetControllerDeps } from '../shared/contract';
@@ -15,7 +18,8 @@ import { Notifications, itemPath } from './notifications';
 import { DesktopTray } from './tray';
 import { installMenu } from './menu';
 import { apnsEnabled, registerApns } from './apns';
-import { checkUpdate, configureUpdates } from './updates';
+import { autoUpdater, checkUpdate, configureUpdates, type ShowMessage } from './updates';
+import { LocalMessages } from './messages';
 import { PetCatalog } from './petCatalog';
 import { VoiceService } from './voice';
 
@@ -29,10 +33,19 @@ if (!process.env.POCKYMOE_DESKTOP_USER_DATA && !existsSync(settingsPath) && exis
 }
 if (!app.requestSingleInstanceLock()) app.quit();
 else {
+  if (process.platform === 'win32') app.on('browser-window-created', (_event, window) => { window.setAutoHideMenuBar(false); window.setMenuBarVisibility(false); });
   let windows: Windows | undefined;
+  let activateToast: ((url: string) => boolean) | undefined;
+  const openLink = (url: string): void => { if (!activateToast?.(url)) windows?.openDeepLink(url); };
   const deepLinks: string[] = [];
-  app.on('open-url', (event, url) => { event.preventDefault(); if (windows) windows.openDeepLink(url); else deepLinks.push(url); });
-  app.on('second-instance', (_event, argv) => { windows?.focusMain(); for (const arg of argv) if (/^(pockymoe|remotecodex):/.test(arg)) windows?.openDeepLink(arg); });
+  app.on('open-url', (event, url) => { event.preventDefault(); if (windows) openLink(url); else deepLinks.push(url); });
+  app.on('second-instance', (_event, argv) => {
+    const links = argv.filter(arg => /^(pockymoe|remotecodex):/.test(arg));
+    const remaining = links.filter(url => !activateToast?.(url));
+    if (links.length && !remaining.length) return;
+    windows?.focusMain();
+    for (const url of remaining) { if (windows) openLink(url); else if (process.platform === 'win32') deepLinks.push(url); }
+  });
   app.on('window-all-closed', () => { /* Tray presence keeps the app running. */ });
   void app.whenReady().then(async () => {
     setLocale(app.getLocale());
@@ -58,6 +71,7 @@ else {
     const notifications = new Notifications(hub, settings, manager, () => pet, () => {
       const w = [...manager.relay].find(w => w.isFocused()); return w ? focusedThreads.get(w.webContents.id) ?? null : null;
     });
+    activateToast = url => notifications.activate(url);
     const voice = new VoiceService(dataDir, settings, () => pet?.say(t('语音已就绪')), (command, timeoutMs) => manager.query(command as CommandInput, timeoutMs));
     const petDirectories = [app.isPackaged ? join(process.resourcesPath, 'pets') : join(app.getAppPath(), 'assets/pets'), join(dataDir, 'pets')];
     mkdirSync(petDirectories[1], { recursive: true });
@@ -84,7 +98,7 @@ else {
       const w = BrowserWindow.fromWebContents(e.sender);
       if (!w || !manager.local.has(w) || e.senderFrame !== e.sender.mainFrame) throw new Error('Untrusted local IPC sender');
       const url = new URL(e.senderFrame.url);
-      const valid = process.env.ELECTRON_RENDERER_URL ? url.origin === new URL(process.env.ELECTRON_RENDERER_URL).origin && url.pathname === '/local/index.html' : url.protocol === 'file:' && decodeURIComponent(url.pathname) === join(__dirname, '../renderer/local/index.html');
+      const valid = process.env.ELECTRON_RENDERER_URL ? url.origin === new URL(process.env.ELECTRON_RENDERER_URL).origin && url.pathname === '/local/index.html' : localFileMatches(url.href, join(__dirname, '../renderer/local/index.html'));
       if (!valid) throw new Error('Untrusted local page');
       return w;
     };
@@ -122,7 +136,7 @@ else {
     handle(c.save, async (e, name, data) => {
       if (typeof name !== 'string' || !(data instanceof ArrayBuffer) || data.byteLength > 64 * 1024 * 1024) throw new Error(t('文件无效（最大 64 MB）'));
       const parent = BrowserWindow.fromWebContents(e.sender)!;
-      const result = await dialog.showSaveDialog(parent, { title: t('保存文件'), buttonLabel: t('保存'), nameFieldLabel: t('文件名'), defaultPath: basename(name).slice(0, 255) || 'download' });
+      const result = await dialog.showSaveDialog(parent, { title: t('保存文件'), buttonLabel: t('保存'), nameFieldLabel: t('文件名'), defaultPath: process.platform === 'win32' ? saveName(name, process.platform) : basename(name).slice(0, 255) || 'download' });
       if (result.canceled || !result.filePath) return { saved: false };
       writeFileSync(result.filePath, Buffer.from(data)); savedNotification(result.filePath);
       return { saved: true, path: result.filePath };
@@ -134,7 +148,7 @@ else {
     relaySession.on('will-download', (event, item, wc) => {
       const w = BrowserWindow.fromWebContents(wc);
       if (!w || !manager.relay.has(w)) { event.preventDefault(); return; }
-      item.setSaveDialogOptions({ defaultPath: join(app.getPath('downloads'), basename(item.getFilename())) });
+      item.setSaveDialogOptions({ defaultPath: join(app.getPath('downloads'), process.platform === 'win32' ? saveName(item.getFilename(), process.platform) : basename(item.getFilename())) });
       item.once('done', (_e, state) => { if (state === 'completed') savedNotification(item.getSavePath()); });
     });
     function applySettings(patch: unknown): ReturnType<SettingsStore['get']> {
@@ -145,8 +159,10 @@ else {
       }
       return settings.set(next);
     }
-    const localState = (): LocalState => ({ locale: getLocale(), preferencesRequestId, preferencesSection, settings: settings.get(), appearance: appearance.get(), snapshot: hub.snapshot(), petAvailable: !!pet, petPacks: petCatalog.list(), version: app.getVersion(), voice: voice.status(), summary: voice.summaryStatus() });
-    const broadcast = (): void => { for (const w of manager.local.keys()) if (!w.isDestroyed()) w.webContents.send(c.localState, localState()); };
+    const messages = new LocalMessages(() => broadcast());
+    const showMessageBox: ShowMessage = options => process.platform === 'win32' ? messages.show(options, manager.createLocal('preferences')) : dialog.showMessageBox(options);
+    const localState = (window?: BrowserWindow): LocalState => ({ message: window ? messages.view(window.id) : null, platform: process.platform, glassFallback: process.platform === 'win32' && windowsGlassMaterial(release(), process.env.POCKYMOE_WINDOWS_GLASS === 'solid') === 'solid', locale: getLocale(), preferencesRequestId, preferencesSection, settings: settings.get(), appearance: appearance.get(), snapshot: hub.snapshot(), petAvailable: !!pet, petPacks: petCatalog.list(), version: app.getVersion(), voice: voice.status(), summary: voice.summaryStatus() });
+    const broadcast = (): void => { for (const w of manager.local.keys()) if (!w.isDestroyed()) w.webContents.send(c.localState, localState(w)); };
     voice.onChange(broadcast);
     let nativeLocale = getLocale();
     appearance.onChange(next => {
@@ -155,7 +171,7 @@ else {
         for (const [notice, path] of [...savedNotifications]) { notice.close(); savedNotification(path, notice.id); } }
       broadcast();
     });
-    ipcMain.handle(c.localGet, e => { guardLocal(e); return localState(); });
+    ipcMain.handle(c.localGet, e => localState(guardLocal(e)));
     ipcMain.handle(c.localAction, async (e, value: unknown) => {
       try {
         const w = guardLocal(e);
@@ -210,7 +226,10 @@ else {
             const safe = externalUrl(action.url); if (!safe) throw new Error(t('操作无效'));
             await shell.openExternal(safe); break;
           }
-          case 'checkUpdate': await checkUpdate(); break;
+          case 'checkUpdate': await checkUpdate(showMessageBox); break;
+          case 'messageResponse':
+            if (!messages.respond(w.id, action.id, action.response)) throw new Error(t('操作无效'));
+            break;
           case 'voiceModel':
             if (action.command === 'download') void voice.model.download();
             else if (action.command === 'cancel') voice.model.cancel();
@@ -267,11 +286,11 @@ else {
         else app.setAsDefaultProtocolClient(protocol, process.execPath, [app.getAppPath()]);
       }
     }
-    for (const url of [...deepLinks, ...process.argv.filter(a => /^(pockymoe|remotecodex):/.test(a))]) manager.openDeepLink(url);
-    if (process.env.POCKYMOE_DESKTOP_E2E !== '1') { configureUpdates(); void registerApns(settings, manager); }
+    for (const url of [...deepLinks, ...process.argv.filter(a => /^(pockymoe|remotecodex):/.test(a))]) openLink(url);
+    if (process.env.POCKYMOE_DESKTOP_E2E !== '1') { configureUpdates(showMessageBox); void registerApns(settings, manager); }
     app.on('activate', () => { if (manager.relay.size) manager.focusMain(); else manager.createLocal('relay'); });
-    app.on('before-quit', () => { manager.quitting = true; manager.dispose(); notifications.dispose(); voice.dispose(); pet?.dispose(); tray.dispose(); hub.dispose(); globalShortcut.unregisterAll(); });
-    if (process.env.POCKYMOE_DESKTOP_E2E === '1') Object.assign(globalThis, { __pockymoeDesktopTest: { hub, settings, appearance, windows: manager, tray, notifications, capabilities } });
+    app.on('before-quit', () => { manager.quitting = true; messages.dispose(); manager.dispose(); notifications.dispose(); voice.dispose(); pet?.dispose(); tray.dispose(); hub.dispose(); globalShortcut.unregisterAll(); });
+    if (process.env.POCKYMOE_DESKTOP_E2E === '1') Object.assign(globalThis, { __pockymoeDesktopTest: { hub, settings, appearance, windows: manager, tray, notifications, capabilities, updater: autoUpdater, showMessageBox, messages } });
   }).catch(error => {
     if (process.env.POCKYMOE_DESKTOP_E2E === '1') console.error(error);
     else dialog.showErrorBox(t('Pockymoe 无法启动'), t('请检查桌面应用的本地配置后重试。'));

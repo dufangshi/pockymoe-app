@@ -1,6 +1,7 @@
 /** One source for app-owned desktop strings. Thread titles, summaries and names
  * are user content and are intentionally never translated. */
 export const english = {
+  "Windows 仅在 Pockymoe 运行时提供提醒。": "Windows alerts are available only while Pockymoe is running.",
   "设备": "Device",
   "工作区": "Workspace",
   "对话": "Conversation",

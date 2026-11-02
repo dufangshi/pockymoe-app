@@ -1,4 +1,4 @@
-import { Menu, shell, type MenuItemConstructorOptions } from 'electron';
+import { BrowserWindow, Menu, shell, type MenuItemConstructorOptions } from 'electron';
 import { t } from '../shared/i18n';
 import type { SettingsStore } from './store';
 import type { Windows } from './windows';
@@ -45,4 +45,5 @@ export function installMenu(windows: Windows, settings: SettingsStore): void {
     ] },
     { role: 'help', label: t('帮助'), submenu: [{ label: t('Pockymoe 帮助'), click: () => { void shell.openExternal('https://github.com/dufangshi/pockymoe-app'); } }] }
   ]));
+  if (process.platform === 'win32') for (const window of BrowserWindow.getAllWindows()) { window.setAutoHideMenuBar(false); window.setMenuBarVisibility(false); }
 }

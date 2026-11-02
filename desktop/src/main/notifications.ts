@@ -1,5 +1,9 @@
 import { t, formatList } from '../shared/i18n';
-import { Notification, powerMonitor } from 'electron';
+import { randomUUID } from 'node:crypto';
+import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { toastActivation, toastXml } from './windowsToast';
+import { app, Notification, powerMonitor } from 'electron';
 import type { ActivityEvent, ActivityItem, PetController } from '../shared/contract';
 import { conversationKey, conversationTitle, groupActivities, isAgentActivity } from '../shared/activityGroups';
 import type { ActivityHub } from './activity';
@@ -13,6 +17,14 @@ function notificationContext(items: ActivityItem[]): string {
   return [...locations, ...(count ? [`🤖 ${count}`] : [])].join(' · ');
 }
 export class Notifications {
+  private activations = new Map<string, { open: () => void; action: (index: number) => void; alertIds: string[] }>();
+  activate(url: string): boolean {
+    if (process.platform !== 'win32') return false;
+    const target = toastActivation(url); if (!target) return false;
+    const entry = this.activations.get(target.token);
+    if (entry) { this.activations.delete(target.token); if (target.action === 'open') entry.open(); else entry.action(Number(target.action)); }
+    return true;
+  }
   private active = new Map<string, Notification>();
   readonly constructed: { alertId: string; key: string; type: string; at: string; events: { alertId: string; key: string; type: string }[] }[] = [];
   readonly decisions: { alertId: string; type: ActivityEvent['type']; at: string; system: boolean; pet: boolean }[] = [];
@@ -43,6 +55,7 @@ export class Notifications {
   shouldSpeak(event: ActivityEvent): boolean { return this.policy(event).pet; }
   private close(id: string): void {
     this.batch.remove(id);
+    for (const [token, entry] of this.activations) if (entry.alertIds.includes(id)) this.activations.delete(token);
     const notification = this.active.get(id);
     notification?.close();
     if (process.platform === 'darwin') Notification.remove(notification?.id || id);
@@ -56,6 +69,7 @@ export class Notifications {
     const conversations = groupActivities(events.map(e => e.item), this.hub.snapshot()?.items);
     const allComplete = events.every(e => e.type === 'completed');
     const related = [...(this.hub.snapshot()?.items || []), ...events.map(event => event.item)].filter(candidate => conversationKey(candidate) === conversationKey(item));
+    const token = randomUUID();
     const notification = new Notification({
       id: first.alertId,
       groupId: `pockymoe:${conversationKey(item)}`,
@@ -89,7 +103,13 @@ export class Notifications {
     });
     this.delivered.set(notification, events);
     notification.on('close', () => { this.delivered.delete(notification); for (const event of events) if (this.active.get(event.alertId) === notification) this.active.delete(event.alertId); });
+    if (process.platform === 'win32') {
+      if (this.activations.size >= 100) this.activations.delete(this.activations.keys().next().value!);
+      this.activations.set(token, { alertIds: events.map(event => event.alertId), open: () => notification.emit('click'), action: index => notification.emit('action', {}, index) });
+      notification.toastXml = toastXml(token, notification.title, notification.subtitle, notification.body, (notification.actions || []).map(action => action.text || ''), pathToFileURL(app.isPackaged ? join(process.resourcesPath, 'icon.png') : join(app.getAppPath(), 'build/icon.png')).href, notification.silent);
+      // Windows may dismiss the toast before its protocol activation reaches second-instance.
+    }
     notification.show();
   }
-  dispose(): void { this.batch.dispose(); for (const n of new Set(this.active.values())) n.close(); }
+  dispose(): void { this.activations.clear(); this.batch.dispose(); for (const n of new Set(this.active.values())) n.close(); }
 }

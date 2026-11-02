@@ -1,3 +1,4 @@
+import { shortcutLabel } from '../shared/platform';
 import { t, getLocale, setLocale, localizeMessage } from '../shared/i18n';
 // Approved local-UI exception: docs/ui-principles.md (Electron utility windows).
 import type { ActivityItem, DesktopSettings } from '../shared/contract';
@@ -9,6 +10,7 @@ import { showError } from './errorMark';
 import { applyAppearance } from '../shared/appearance';
 import { statusMarkStyles } from '../shared/statusMarks';
 import { enhanceScrollbars } from './scrollbars';
+import { renderMessage } from './message';
 import { mountSelect, type SelectOption } from './select';
 import { bindVoice, updateVoiceProgress, voiceSection } from './voice';
 
@@ -24,6 +26,7 @@ const icons: Record<string, string> = {
 export const icon = (name: string): string => `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icons[name] || icons.general}</svg>`;
 export const escapeHtml = (text: string): string => text.replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]!);
 export const appIcon = new URL('../../build/icon.png', import.meta.url).href;
+document.documentElement.dataset.platform = navigator.userAgent.includes('Windows') ? 'win32' : '';
 const root = document.querySelector<HTMLDivElement>('#app')!;
 const view = new URLSearchParams(location.search).get('view') || 'relay';
 let state: LocalState;
@@ -102,7 +105,7 @@ function renderPreferences(): void {
   const picker = (id: string, label: string, disabled = false): string => `<button type="button" id="${id}" aria-label="${label}" ${disabled ? 'disabled' : ''}></button>`;
   if (section === 'general') content.innerHTML = `<h2>${t('连接')}</h2><section class="settings-group"><div class="connection-row"><div><label>${t('网页地址')}</label><p class="origin-value">${escapeHtml(s.webOrigin)}</p><label>${t('Relay 地址')}</label><p class="origin-value">${escapeHtml(s.relayOrigin)}</p></div><button id="change-relay">${t('更改…')}</button></div></section>
     <h2>${t('启动')}</h2><section class="settings-group">${toggle('launchAtLogin', t('登录时启动'), t('关闭窗口后仍在菜单栏或托盘中运行。'), s.launchAtLogin)}</section>
-    <h2>${t('提醒')}</h2><section class="settings-group"><div class="setting-row"><div><label for="alertMode">${t('提醒方式')}</label><p>${t('当前正在查看的线程不会打扰你。')}</p></div>${picker('alertMode', t('提醒方式'))}</div>
+    <h2>${t('提醒')}</h2><section class="settings-group"><div class="setting-row"><div><label for="alertMode">${t('提醒方式')}</label><p>${t('当前正在查看的线程不会打扰你。')}${state.platform === 'win32' ? ` ${t('Windows 仅在 Pockymoe 运行时提供提醒。')}` : ''}</p></div>${picker('alertMode', t('提醒方式'))}</div>
     <div class="setting-row"><div><label>${t('暂停提醒')}</label><p>${Date.parse(s.snoozeUntil || '') > Date.now() ? t('暂停至 {time}', { time: new Date(s.snoozeUntil!).toLocaleTimeString(getLocale(), { hour: '2-digit', minute: '2-digit' }) }) : t('暂时收起气泡和系统通知。')}</p></div><button id="snooze">${Date.parse(s.snoozeUntil || '') > Date.now() ? t('恢复提醒') : t('暂停 1 小时')}</button></div></section>`;
   else if (section === 'pet') {
     const pack = state.petPacks.find(pack => pack.id === s.petId);
@@ -115,7 +118,7 @@ function renderPreferences(): void {
       ${toggle('petSound', t('提示音'), t('点击桌宠和收到提醒时播放，打开时试听。'), s.petSound)}
       </section><h2>${t('语音')}</h2><section class="settings-group voice-group">${voiceSection(state, picker)}</section>`;
   } else content.innerHTML = `<h2>${t('全局快捷键')}</h2><section class="settings-group"><label for="quickWindowShortcut">${t('唤起快捷窗口')}</label><div class="shortcut-field"><input id="quickWindowShortcut" value="${escapeHtml(s.quickWindowShortcut)}" spellcheck="false" aria-label="${t('快捷窗口快捷键')}"/><button id="save-shortcut">${t('保存')}</button></div></section>
-    <h2>${t('在 Pockymoe 中')}</h2><section class="settings-group key-list">${[[t('搜索'), '⌘ / Ctrl F'], [t('打开地图'), '⌘ / Ctrl 0'], [t('新建线程'), '⌘ / Ctrl N'], [t('设置'), '⌘ / Ctrl ,'], [t('显示 / 隐藏桌宠'), '⌘ / Ctrl ⇧ P'], [t('退出应用'), '⌘ / Ctrl Q']].map(([label, key]) => `<div class="setting-row"><span>${label}</span><kbd>${key}</kbd></div>`).join('')}</section>`;
+    <h2>${t('在 Pockymoe 中')}</h2><section class="settings-group key-list">${[[t('搜索'), shortcutLabel(state.platform ?? 'darwin', 'F')], [t('打开地图'), shortcutLabel(state.platform ?? 'darwin', '0')], [t('新建线程'), shortcutLabel(state.platform ?? 'darwin', 'N')], [t('设置'), shortcutLabel(state.platform ?? 'darwin', ',')], [t('显示 / 隐藏桌宠'), shortcutLabel(state.platform ?? 'darwin', 'P', true)], [t('退出应用'), shortcutLabel(state.platform ?? 'darwin', 'Q')]].map(([label, key]) => `<div class="setting-row"><span>${label}</span><kbd>${key}</kbd></div>`).join('')}</section>`;
   const bindPicker = (id: keyof DesktopSettings, options: SelectOption[]): void => {
     const trigger = document.getElementById(id) as HTMLButtonElement | null;
     if (trigger) selectCleanups.push(mountSelect(trigger, options, String(s[id]), value => { void save({ [id]: value }); }));
@@ -130,6 +133,7 @@ function renderPreferences(): void {
   const shortcut = root.querySelector<HTMLButtonElement>('#save-shortcut'); if (shortcut) shortcut.onclick = () => { void save({ quickWindowShortcut: root.querySelector<HTMLInputElement>('#quickWindowShortcut')!.value }); };
   const importer = root.querySelector<HTMLButtonElement>('#import-pet'); if (importer) importer.onclick = () => { void action({ type: 'importPet' }); };
   root.querySelectorAll<HTMLButtonElement>('[data-external]').forEach(button => { button.onclick = () => { void action({ type: 'external', url: button.dataset.external! }); }; });
+  if (state.platform === 'win32') root.querySelectorAll('textarea').forEach(element => element.setAttribute('data-scroll', ''));
   enhanceScrollbars(root); root.querySelector('.pref-main')!.scrollTop = scroll;
   const replacement = activeId ? document.getElementById(activeId) : activeSection ? root.querySelector<HTMLElement>(`[data-section="${activeSection}"]`) : null;
   if (replacement && active) {
@@ -154,12 +158,15 @@ function renderWhenClosed(): void {
 async function save(patch: Partial<DesktopSettings>): Promise<void> { if (await action({ type: 'settings', patch })) toast(t('已保存')); else { state = await localBridge().getState(); renderPreferences(); } }
 async function init(): Promise<void> {
   state = await localBridge().getState();
+  document.documentElement.dataset.glassFallback = String(!!state.glassFallback);
   document.documentElement.dataset.view = view;
   setLocale(state.locale);
   section = state.preferencesSection;
   applyAppearance(state.appearance);
+  const messageResponse = (id: number, response: number): void => { void action({ type: 'messageResponse', id, response }); };
+  renderMessage(state.message, messageResponse);
   const marks = document.createElement('style'); marks.textContent = statusMarkStyles; document.head.append(marks);
-  localBridge().onState(next => { setLocale(next.locale); applyAppearance(next.appearance); });
+  localBridge().onState(next => { setLocale(next.locale); applyAppearance(next.appearance); renderMessage(next.message, messageResponse); });
   if (view === 'quick') { mountQuick(root, state); return; }
   if (view === 'preferences') renderPreferences(); else if (view === 'about') renderAbout(); else renderRelay();
   localBridge().onState(next => {
@@ -180,5 +187,5 @@ async function init(): Promise<void> {
   });
 }
 void init();
-document.addEventListener('keydown', e => { if (e.key === 'Escape') void action({ type: 'hide' }); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && !document.querySelector('dialog[open]')) void action({ type: 'hide' }); });
 export type { ActivityItem };

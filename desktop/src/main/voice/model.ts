@@ -1,3 +1,4 @@
+import { modelTar } from '../platform';
 import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { createReadStream, createWriteStream, existsSync, mkdirSync, renameSync, rmSync, statSync } from 'node:fs';
@@ -21,7 +22,7 @@ const sha256 = async (path: string): Promise<string> => {
   for await (const chunk of createReadStream(path)) hash.update(chunk as Buffer);
   return hash.digest('hex');
 };
-const tar = (): string => process.platform === 'win32' ? join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe') : '/usr/bin/tar';
+const tar = (): string => modelTar(process.platform, process.env.SystemRoot);
 /** Downloads the pinned model into userData, resuming a partial file. Only a verified archive is unpacked. */
 export class LocalModel {
   state: LocalModelState;
@@ -63,7 +64,7 @@ export class LocalModel {
       this.progress = 1; this.set('extracting');
       const staging = join(this.dir, 'staging');
       rmSync(staging, { recursive: true, force: true }); mkdirSync(staging, { recursive: true });
-      await run(tar(), ['-xjf', this.archive, '-C', staging]);
+      await run(tar(), ['-xjf', this.archive, '-C', staging], { windowsHide: process.platform === 'win32' });
       rmSync(this.path, { recursive: true, force: true });
       renameSync(join(staging, this.source.name), this.path);
       rmSync(staging, { recursive: true, force: true }); rmSync(this.archive, { force: true });

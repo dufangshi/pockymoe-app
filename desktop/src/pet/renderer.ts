@@ -1,3 +1,4 @@
+document.documentElement.dataset.platform = navigator.userAgent.includes('Windows') ? 'win32' : '';
 import './styles.css';
 import lucideNotice from './NOTICE?raw';
 document.head.append(document.createComment(lucideNotice));
@@ -330,7 +331,7 @@ bridge.onSpeech(audio => {
 bridge.onState(next => {
   const old = state, changedMode = old?.mode !== next.mode;
   if (old && old.accountId !== next.accountId) { failures.clear(); pending.clear(); draft = ''; sendState = 'idle'; selected = null; selectedRequest = null; collapsedRequests.clear(); }
-  state = next; setLocale(next.locale); applyAppearance(next.appearance); document.title = `Pockymoe · ${t('桌宠')}`; root.setAttribute('aria-label', document.title);
+  state = next; document.documentElement.dataset.glassFallback = String(!!next.glassFallback); setLocale(next.locale); applyAppearance(next.appearance); document.title = `Pockymoe · ${t('桌宠')}`; root.setAttribute('aria-label', document.title);
   const accent = next.appearance.accent; canvas.width = 1; canvas.height = 1; context.clearRect(0, 0, 1, 1); context.fillStyle = accent; context.fillRect(0, 0, 1, 1); const [r, g, b] = context.getImageData(0, 0, 1, 1).data; document.documentElement.style.setProperty('--accent-fg', accentForeground(r, g, b));
   document.body.dataset.surface = next.surface; root.dataset.visible = String(next.near || next.mode !== 'controls');
   if (next.surface === 'sprite') {

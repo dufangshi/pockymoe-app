@@ -27,3 +27,7 @@ xcuserdata/
 .xcode-version
 
 __pycache__/
+
+# Local task evidence and pnpm cache
+.scratch/
+.pnpm-store/

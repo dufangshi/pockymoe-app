@@ -14,6 +14,8 @@ asarUnpack:
   - '**/node_modules/sherpa-onnx-*-*/**'
 afterPack: scripts/afterPack.cjs
 extraResources:
+  - from: build/icon.png
+    to: icon.png
   - from: assets/pets
     to: pets
     filter: ['**/*']
@@ -31,9 +33,11 @@ win:
   target:
     - target: nsis
 nsis:
-  oneClick: false
+  oneClick: true
   perMachine: false
-  allowToChangeInstallationDirectory: true
+  allowElevation: false
+  deleteAppDataOnUninstall: false
+  shortcutName: Pockymoe
 protocols:
   name: Pockymoe
   schemes: [pockymoe, remotecodex]

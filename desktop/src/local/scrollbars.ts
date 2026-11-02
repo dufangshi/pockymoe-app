@@ -21,6 +21,7 @@ export function enhanceScrollbars(root: HTMLElement): void {
       thumb.setAttribute('aria-valuemin', '0'); thumb.setAttribute('aria-valuemax', String(Math.max(0, range))); thumb.setAttribute('aria-valuenow', String(Math.round(element.scrollTop)));
     };
     element.addEventListener('scroll', update, { passive: true });
+    element.addEventListener('input', update);
     const resize = new ResizeObserver(update); resize.observe(element);
     const mutation = new MutationObserver(update); mutation.observe(element, { childList: true, subtree: true });
     thumb.onpointerdown = e => {

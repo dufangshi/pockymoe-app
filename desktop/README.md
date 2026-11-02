@@ -27,8 +27,8 @@ loopback (`localhost`, `127.0.0.1`, `[::1]`).
 ## Install and use
 
 macOS: open the DMG and copy **Pockymoe.app** to Applications, or extract the ZIP.
-Windows: run the NSIS installer, choose an install directory if needed, then open
-Pockymoe from the Start menu. The development-signed macOS builds produced by the
+Windows: run the one-click NSIS installer (current user, no administrator prompt),
+then open Pockymoe from the Start menu or desktop shortcut. Uninstall keeps user data. The development-signed macOS builds produced by the
 QA command below are **not notarized** and are for local developer testing;
 normal distribution requires a Developer ID signature and notarization. Windows
 builds without an Authenticode certificate are unsigned.
@@ -86,7 +86,7 @@ Local windows receive only sanitized activity and appearance snapshots.
 
 `appearance.sync` updates effective light/dark, theme pack, resolved accent and
 optional font scale. Local windows mirror Classic / Plum Pocket / Terminal
-palettes, Windows tray variants and titlebar controls follow the effective mode,
+palettes and Windows titlebar controls follow the effective mode; tray variants follow the system taskbar theme,
 and pet dependencies expose `appearance()` and `onAppearance()`. The shared
 `statusMarks.ts` mirrors upstream shapes; running uses a complete faint track
 with a rotating arc, waiting a filled speech bubble, interruption an amber
@@ -165,9 +165,10 @@ pnpm exec playwright test test/shell.e2e.ts --project=electron --grep 'split ori
 Fixtures use fresh temporary profiles, a Web server and a separate fake Relay,
 and a whitelisted process environment. They never use production cookies or a
 running Supervisor. The debug object exists only with `POCKYMOE_DESKTOP_E2E=1`.
-Screenshots: `.local/desktop-evidence/shell/v2/` (three packs, light/dark, native
-utility-window sizes plus 900/1440 width stress checks). The normal quick window
-remains 640×420. Pet-specific checks belong to the pet module.
+Set `POCKYMOE_DESKTOP_EVIDENCE` to choose the screenshot directory (otherwise
+the suites use temporary directories). Captures cover three packs, light/dark,
+native utility-window sizes and narrow/desktop width checks. The normal quick
+window is 560 px wide and fits its contents. Pet-specific checks belong to the pet module.
 
 ## Packaging, signing and packaged-app QA
 
@@ -267,45 +268,78 @@ passed and its `app.asar` SHA256 exactly matches the executable under test.
 scope explicitly; an unknown case or missing/mismatched proof fails. New app
 artifacts require a full run.
 
-### Windows build on a Windows runner
+### Windows build and acceptance
 
-Windows x64 directory and NSIS builds also work on this Mac with electron-builder
-26.18; no Wine/system installation was required. Windows execution, Mica, tray,
-notifications and installer behavior still need a Windows machine. For a native
-runner, the following GitHub Actions job is ready to adapt (not dispatched here):
+`../.github/workflows/desktop-windows.yml` runs on `windows-latest` x64 for desktop
+pull requests and manual dispatch. It installs frozen dependencies, typechecks,
+runs all unit tests, builds the unpacked application and runs all Electron
+Playwright suites against `release/win-unpacked/Pockymoe.exe`. Two jobs request
+100% and 150% scale; acceptance annotations record actual renderer pixel ratios.
+Classic, Plum Pocket and Terminal are captured in light/dark with native material
+and forced fallback. Set `POCKYMOE_WINDOWS_GLASS=solid` before launch if real-device
+QA finds Acrylic corner artifacts or flicker; other values keep the native preference. Evidence/logs are
+uploaded even on failure. The voice release-download test is enabled, exercising
+model extraction and actual synthesis through the packaged native addon.
+There are no signing credentials or publish/release steps.
 
-```yaml
-jobs:
-  windows-desktop:
-    runs-on: windows-2022
-    defaults:
-      run:
-        working-directory: desktop
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 10
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: pnpm
-          cache-dependency-path: desktop/pnpm-lock.yaml
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm typecheck
-      - run: pnpm build
-      - run: pnpm exec electron-builder --win nsis --x64 --publish never
-      - uses: actions/upload-artifact@v4
-        with:
-          name: pockymoe-win-x64
-          path: desktop/release/*.exe
+From a fresh Windows clone, with Node 24 and pnpm 10 installed (PowerShell):
+
+```powershell
+cd desktop
+pnpm install --frozen-lockfile
+pnpm typecheck
+pnpm vitest run
+pnpm build
+pnpm exec electron-builder --win --x64 --dir --publish never
+$env:POCKYMOE_PACKAGED_EXECUTABLE = (Resolve-Path release/win-unpacked/Pockymoe.exe).Path
+$env:POCKYMOE_DESKTOP_EVIDENCE = Join-Path (Get-Location) evidence/scale-1
+$env:POCKYMOE_VOICE_DOWNLOAD = '1'
+$env:POCKYMOE_DESKTOP_SCALE = '1'
+pnpm exec playwright test --project=electron
+$env:POCKYMOE_DESKTOP_SCALE = '1.5'
+$env:POCKYMOE_DESKTOP_EVIDENCE = Join-Path (Get-Location) evidence/scale-1.5
+pnpm exec playwright test --project=electron
 ```
 
-Use a separate `--arm64` job for an ARM64 installer. Production Windows signing
-credentials belong in the runner's secret/environment configuration, never in
-the repository. `USE_SYSTEM_WINE=true` can prevent automatic Wine toolset
-retrieval during a macOS cross-build; it was not needed by the successful native
-resource/NSIS build steps here.
+The real voice-download test fetches the pinned 147 MB model from its public
+GitHub release. No account, production backend or credentials are needed.
+
+The surface test checks hidden native menus (including Alt), Ctrl labels,
+scrollbar styling (including voice parameter textareas), local-window screenshots
+and pet/glass screenshots. It also saves OS window thumbnails and bounds to
+inspect native chrome when the runner exposes those windows. Main,
+map and device images are **isolated Web contract fixtures**, not the separately
+deployed Web UI. They verify the host surface and command routing; real Web-page
+visual acceptance remains a separate Windows gate.
+
+Cross-build both architectures on this Mac without running the Windows binaries:
+
+```sh
+pnpm build
+pnpm exec electron-builder --win --x64 --arm64 --dir --publish never
+node scripts/verify-windows-package.cjs release/win-unpacked x64
+node scripts/verify-windows-package.cjs release/win-arm64-unpacked arm64
+```
+
+pnpm explicitly installs Darwin and Windows native packages for both architectures.
+`afterPack` keeps the target package and verifies the unpacked `.node` plus all four
+DLLs, including each PE machine header. Windows runtime support checks these files
+before offering local speech. Windows 11 build 22621+ requests Mica; older Windows
+uses the selected theme's solid background. Windows tray icons follow the system
+(taskbar) theme independently of the page theme. Only waiting conversations show
+an amber speech-bubble taskbar overlay. Toast buttons use XML protocol activation
+with in-memory, single-use tokens; approvals retain actual request IDs and don't
+raise the main window. Custom Toast XML preserves the sound suppression policy.
+Windows provides notifications only while the app runs. Update confirmations use
+the themed local modal on Windows (Escape cancels, focus stays inside and returns
+to the trigger); macOS retains its native dialogs. Confirmations are queued and
+only their owning utility window can answer them. A fatal renderer/startup failure
+still uses the OS error box because the local UI cannot run.
+
+The [Windows design acceptance](../docs/desktop-windows.zh.md#8-验收) still needs
+real-Windows checks of installer, full-screen overlays, taskbar placement, mixed
+DPI and arm64 execution. Cross-build checks do not prove the app runs on Windows.
+Task-specific evidence and audit reports belong in ignored `.scratch/` directories.
 
 ## Distribution and platform gates
 
