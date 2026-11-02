@@ -409,16 +409,24 @@ for (const material of ['native', 'solid']) for (const pack of packs) for (const
     // screenshots can otherwise wait forever for a frame from a hidden window.
     await test.step(`capture ${label}`, async () => {
       await page.evaluate(() => document.fonts.ready);
-      const png = await app.evaluate(async ({ BrowserWindow }, url) => {
-        const window = BrowserWindow.getAllWindows().find(window => window.webContents.getURL() === url)!;
-        // Captures inspect background surfaces too. Keep this fixture renderer
-        // painting even if the pet's normal hide timer fires during the copy.
-        window.webContents.setBackgroundThrottling(false);
-        window.getParentWindow()?.showInactive();
-        window.showInactive(); window.moveTop();
-        return (await window.webContents.capturePage(undefined, { stayHidden: false, stayAwake: true })).toPNG().toString('base64');
-      }, page.url());
-      writeFileSync(join(evidence, `windows-${material}-${label}-${pack}-${theme}.png`), Buffer.from(png, 'base64'));
+      // Pet sprite/glass share a URL. Resolve the exact native window for this
+      // Page, never the first URL match (which can silently capture its sibling).
+      const target = await app.browserWindow(page);
+      try {
+        const capture = await target.evaluate(async (window: Electron.BrowserWindow) => {
+          const surface = await window.webContents.executeJavaScript('document.body.dataset.surface || null') as string | null;
+          // Keep this fixture painting even if the normal hide timer fires.
+          window.webContents.setBackgroundThrottling(false);
+          window.getParentWindow()?.showInactive();
+          window.showInactive(); window.moveTop();
+          const png = await window.webContents.capturePage(undefined, { stayHidden: false, stayAwake: true });
+          return { id: window.id, surface, size: png.getSize(), png: png.toPNG().toString('base64') };
+        });
+        if (label.startsWith('pet-')) expect(capture.surface).toBe(label.slice(4));
+        expect(capture.size.width).toBeGreaterThan(0); expect(capture.size.height).toBeGreaterThan(0);
+        writeFileSync(join(evidence, `windows-${material}-${label}-${pack}-${theme}.png`), Buffer.from(capture.png, 'base64'));
+        writeFileSync(join(evidence, `windows-${material}-${label}-${pack}-${theme}.json`), JSON.stringify({ nativeWindowId: capture.id, surface: capture.surface, size: capture.size }));
+      } finally { await target.dispose(); }
     });
   }
   const displays = await app.evaluate(({ screen }) => screen.getAllDisplays().map(display => ({ bounds: display.bounds, workArea: display.workArea, scaleFactor: display.scaleFactor })));
