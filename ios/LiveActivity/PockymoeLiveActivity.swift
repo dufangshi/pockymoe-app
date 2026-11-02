@@ -23,7 +23,7 @@ struct PockymoeLiveActivity: Widget {
                     ActivityExpanded(state: state)
                 }
             } compactLeading: {
-                StatusMark(state: state.status)
+                StatusMark(state: state.status, size: 18)
             } compactTrailing: {
                 ActivityTrailing(state: state)
             } minimal: {

@@ -59,6 +59,23 @@ final class ActivityPolicyTests: XCTestCase {
         XCTAssertNil(next.endedAt)
         XCTAssertEqual(next.completedCount, 1)
     }
+    func testExpandedStatusWordingForSingleAndMultipleThreads() {
+        let cases: [([String], String)] = [
+            (["running"], "运行中"),
+            (["running", "running", "running"], "还有 2 个线程在运行"),
+            (["needsInput", "running"], "等待你处理"),
+            (["failed"], "运行失败"),
+            (["failed", "running", "running"], "运行失败 · 还有 2 个线程在运行"),
+            (["interrupted"], "已中断")
+        ]
+        for (states, expected) in cases {
+            var policy = ActivityPolicy()
+            let snapshot = ActivitySnapshot(accountId: "a", items: states.enumerated().map { item($0.element, "d:\($0.offset)") })
+            let state = policy.sync(snapshot, now: now)
+            XCTAssertEqual(state.expandedStatusLine, expected)
+            XCTAssertFalse(state.expandedStatusLine.contains("还有 0"))
+        }
+    }
     func testContentFreePushStateRoundTrip() throws {
         var policy = ActivityPolicy()
         let state = policy.sync(.init(accountId: "a", items: [item("running")]), now: now)

@@ -38,7 +38,7 @@ private struct RenderedActivity: View {
     var body: some View {
         Group {
             if layout == "compact" {
-                HStack { StatusMark(state: state.status); Spacer().frame(width: 100); ActivityTrailing(state: state) }.padding(12).frame(width: 230, height: 44)
+                HStack { StatusMark(state: state.status, size: 18); Spacer().frame(width: 100); ActivityTrailing(state: state) }.padding(12).frame(width: 230, height: 44)
             } else if layout == "minimal" {
                 StatusMark(state: state.status).frame(width: 44, height: 44)
             } else if layout == "expanded" {

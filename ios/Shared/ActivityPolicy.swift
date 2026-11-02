@@ -42,6 +42,15 @@ struct ActivityContentState: Codable, Hashable {
     var status: String {
         endedAt != nil ? "completed" : waitingCount > 0 ? "needsInput" : failedCount > 0 ? "failed" : runningCount > 0 ? "running" : rows.first?.state == "interrupted" ? "interrupted" : "completed"
     }
+    var expandedStatusLine: String {
+        switch status {
+        case "needsInput": return "等待你处理"
+        case "failed": return runningCount > 0 ? "运行失败 · 还有 \(runningCount) 个线程在运行" : "运行失败"
+        case "interrupted": return "已中断"
+        case "running": return runningCount > 1 ? "还有 \(runningCount - 1) 个线程在运行" : "运行中"
+        default: return "\(completedCount) 个线程已完成"
+        }
+    }
     var earliestStart: Date
     var dismissalDate: Date? { endedAt?.addingTimeInterval(15 * 60) }
 }
