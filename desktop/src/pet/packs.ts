@@ -11,9 +11,11 @@ export interface PetManifest { id: string; displayName: string; description: str
 /** One animation drawn from a sheet of frames in `clipFormat`, for art too rich for the atlas's 8 frames a row. */
 export interface PetClip { path: string; frames: number }
 export interface ClipFormat { fps: number; columns: number; width: number; height: number }
-export const CLIP_STATES = ['idle', 'running', 'waiting', 'waving', 'jumping', 'poked', 'failed', 'review', 'sleeping'] as const;
+export const CLIP_STATES = ['idle', 'running', 'waiting', 'waving', 'jumping', 'poked', 'failed', 'review', 'sleeping', 'dragging', 'landing'] as const;
 export type ClipState = typeof CLIP_STATES[number];
 export const MAX_CLIPS_BYTES = 160 * 1024 * 1024;
+const MAX_ZIP_BYTES = MAX_CLIPS_BYTES + 2 * MAX_PACK_BYTES;
+const MAX_ZIP_ENTRIES = 256;
 export interface PetPack { manifest: PetManifest; directory: string; image: Buffer; sleepingImage?: Buffer }
 function fail(message: string): never { throw new Error(`Invalid pet pack: ${message}`); }
 export function parseManifest(data: Buffer): PetManifest {
@@ -106,6 +108,10 @@ export async function loadPetPack(directory: string): Promise<PetPack> {
   return { manifest, image, directory, sleepingImage };
 }
 const clipPaths = (manifest: PetManifest): string[] => [...new Set(Object.values(manifest.remoteCodex?.clips ?? {}).flat().map(clip => clip.path))];
+function checkClipHeader(bytes: Buffer, format: ClipFormat, path: string): void {
+  const size = imageDimensions(bytes);
+  if (size.format !== 'webp' || size.width % format.width || size.height % format.height || size.width > format.columns * format.width) fail(`${path} does not match clipFormat`);
+}
 /** Only the headers: decoding every sheet at startup would be slow, and the renderer falls back to the atlas if one fails. */
 async function checkClips(directory: string, manifest: PetManifest): Promise<void> {
   const format = manifest.remoteCodex?.clipFormat;
@@ -118,8 +124,7 @@ async function checkClips(directory: string, manifest: PetManifest): Promise<voi
     const handle = await open(join(directory, path), constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
     try {
       const { buffer, bytesRead } = await handle.read(Buffer.alloc(64), 0, 64, 0);
-      const size = imageDimensions(buffer.subarray(0, bytesRead));
-      if (size.format !== 'webp' || size.width % format.width || size.height % format.height || size.width > format.columns * format.width) fail(`${path} does not match clipFormat`);
+      checkClipHeader(buffer.subarray(0, bytesRead), format, path);
     } finally { await handle.close(); }
   }
   if (total > MAX_CLIPS_BYTES) fail('clips exceed 160 MB');
@@ -141,13 +146,13 @@ function crc32(bytes: Buffer): number {
 }
 // Inspect the central directory first; never materialize archive paths on disk.
 export function unpackPetZip(bytes: Buffer): Map<string, Buffer> {
-  if (bytes.length > MAX_PACK_BYTES + 65536) fail('zip exceeds 8 MB plus metadata');
+  if (bytes.length > MAX_ZIP_BYTES) fail('zip exceeds 176 MB');
   let end = -1;
   for (let i = bytes.length - 22; i >= Math.max(0, bytes.length - 65557); i--)
     if (bytes.readUInt32LE(i) === 0x06054b50 && i + 22 + bytes.readUInt16LE(i + 20) === bytes.length) { end = i; break; }
   if (end < 0) fail('zip end record missing');
   const count = bytes.readUInt16LE(end + 10), centralSize = bytes.readUInt32LE(end + 12), centralOffset = bytes.readUInt32LE(end + 16);
-  if (bytes.readUInt16LE(end + 4) || bytes.readUInt16LE(end + 6) || bytes.readUInt16LE(end + 8) !== count || count > 32 || centralOffset + centralSize !== end) fail('multi-volume, ZIP64 or oversized archives are not supported');
+  if (bytes.readUInt16LE(end + 4) || bytes.readUInt16LE(end + 6) || bytes.readUInt16LE(end + 8) !== count || count > MAX_ZIP_ENTRIES || centralOffset + centralSize !== end) fail('multi-volume, ZIP64 or oversized archives are not supported');
   const entries = new Map<string, Buffer>();
   let offset = centralOffset, total = 0;
   for (let i = 0; i < count; i++) {
@@ -163,7 +168,7 @@ export function unpackPetZip(bytes: Buffer): Map<string, Buffer> {
     const kind = mode & 0xf000;
     if (kind && kind !== 0x8000 && kind !== 0x4000) fail('zip symlinks and special files are not allowed');
     if (flags & 1 || ![0, 8].includes(method)) fail('encrypted or unsupported zip compression');
-    if (size > MAX_PACK_BYTES || (total += size) > MAX_PACK_BYTES + MAX_MANIFEST_BYTES) fail('expanded zip exceeds size limit');
+    if (size > MAX_PACK_BYTES || (total += size) > MAX_ZIP_BYTES) fail('expanded zip exceeds size limit');
     if (localOffset + 30 > centralOffset || bytes.readUInt32LE(localOffset) !== 0x04034b50) fail('invalid local header');
     const localNameLength = bytes.readUInt16LE(localOffset + 26), localExtraLength = bytes.readUInt16LE(localOffset + 28);
     const start = localOffset + 30 + localNameLength + localExtraLength;
@@ -185,23 +190,32 @@ export async function importPetPack(source: string, userPetsDirectory: string, d
   const stat = await lstat(source);
   if (stat.isSymbolicLink()) fail('symlink sources are not allowed');
   let manifest: PetManifest, image: Buffer, sleepingImage: Buffer | undefined;
-  if (stat.isDirectory()) ({ manifest, image, sleepingImage } = await loadPetPack(source));
+  const clips = new Map<string, Buffer>();
+  if (stat.isDirectory()) {
+    ({ manifest, image, sleepingImage } = await loadPetPack(source));
+    for (const path of clipPaths(manifest)) clips.set(path, await safeRead(join(source, path), MAX_PACK_BYTES));
+  }
   else {
     if (!source.toLowerCase().endsWith('.zip')) fail('choose a pet folder or .zip');
-    const files = unpackPetZip(await safeRead(source, MAX_PACK_BYTES + 65536));
+    const files = unpackPetZip(await safeRead(source, MAX_ZIP_BYTES));
     const manifests = [...files.keys()].filter((name) => /(^|\/)pet\.json$/.test(name));
     if (manifests.length !== 1) fail('zip must contain exactly one pet.json');
     const root = manifests[0].slice(0, -'pet.json'.length);
     manifest = parseManifest(files.get(manifests[0])!);
-    if (manifest.remoteCodex?.clips) fail('a pack with clips must be imported as a folder');
     const atlas = files.get(root + manifest.spritesheetPath);
     sleepingImage = manifest.remoteCodex?.sleeping ? files.get(root + manifest.remoteCodex.sleeping.path) : undefined;
-    if (!atlas || files.size !== (manifest.remoteCodex?.sleeping ? 3 : 2) || manifest.remoteCodex?.sleeping && !sleepingImage) fail('zip must contain only pet.json and its declared spritesheets');
+    for (const path of clipPaths(manifest)) {
+      const clip = files.get(root + path);
+      if (!clip) fail(`zip is missing ${path}`);
+      checkClipHeader(clip, manifest.remoteCodex!.clipFormat!, path);
+      clips.set(path, clip);
+    }
+    if (!atlas || files.size !== (manifest.remoteCodex?.sleeping ? 3 : 2) + clips.size || manifest.remoteCodex?.sleeping && !sleepingImage) fail('zip must contain only pet.json and the files it declares');
     if (sleepingImage) validateSleeping(sleepingImage, manifest);
     image = atlas;
     validateAtlas(image, manifest);
   }
-  if (reservedIds.includes(manifest.id)) fail(`pet id ${manifest.id} is already installed`);
+  if (reservedIds.includes(manifest.id)) fail(`pet id ${manifest.id} is built in; give the pack another id`);
   if (image.length + (sleepingImage?.length ?? 0) > MAX_PACK_BYTES) fail('combined spritesheets exceed 8 MB');
   if (decode && (!await decode(image) || sleepingImage && !await decode(sleepingImage))) fail('cannot decode spritesheet pixels');
   await mkdir(userPetsDirectory, { recursive: true });
@@ -211,14 +225,17 @@ export async function importPetPack(source: string, userPetsDirectory: string, d
     await writeFile(join(staging, 'pet.json'), JSON.stringify(manifest, null, 2));
     await writeFile(join(staging, manifest.spritesheetPath), image);
     if (sleepingImage && manifest.remoteCodex?.sleeping) await writeFile(join(staging, manifest.remoteCodex.sleeping.path), sleepingImage);
-    if (manifest.remoteCodex?.clips) {
+    if (clips.size) {
       await mkdir(join(staging, 'clips'));
-      for (const path of clipPaths(manifest)) await writeFile(join(staging, path), await safeRead(join(source, path), MAX_PACK_BYTES));
+      for (const [path, clip] of clips) await writeFile(join(staging, path), clip);
     }
-    // Existing packs are immutable: an import may never replace a bundled/custom pack silently.
-    try { await lstat(destination); fail(`pet id ${manifest.id} is already installed`); }
-    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
-    await rename(staging, destination);
+    // Importing a pack again replaces it, so an updated zip just works. Built-in ids are refused above.
+    const previous = join(userPetsDirectory, `.replaced-${randomUUID()}`);
+    const replacing = await lstat(destination).then(() => true, () => false);
+    if (replacing) await rename(destination, previous);
+    try { await rename(staging, destination); }
+    catch (error) { if (replacing) await rename(previous, destination); throw error; }
+    if (replacing) await rm(previous, { recursive: true, force: true });
     return { manifest, image, directory: destination, sleepingImage };
   } finally { await rm(staging, { recursive: true, force: true }); }
 }

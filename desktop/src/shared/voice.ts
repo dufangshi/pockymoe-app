@@ -56,7 +56,8 @@ export const SUMMARY_LANGUAGES: SummaryLanguage[] = ['auto', 'zh-CN', 'en', 'ja'
 export interface SummaryConnection { deviceId: string; deviceName: string; id: string; name: string; protocol: string; model: string }
 export interface SummaryStatus {
   connections: SummaryConnection[];
-  keySet: boolean;
+  /** Models the selected upstream reports. */
+  models: VoiceOption[];
   lastError: string | null;
   /** What the last test produced. */
   sample: string | null;

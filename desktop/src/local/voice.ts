@@ -43,47 +43,42 @@ export function voiceSection(state: LocalState, picker: (id: string, label: stri
     <div class="setting-row"><label for="petVoiceSpeed">${t('语速')}</label>${picker('petVoiceSpeed', t('语速'))}</div>
     <div class="setting-row voice-preview"><p id="voice-error" class="inline-error" role="alert">${escapeHtml(state.voice.lastError ?? '')}</p><button id="voice-preview" ${!remote && state.voice.model.state !== 'ready' ? 'disabled' : ''}>${t('试听')}</button></div>
     ${privacy}
-    ${summaryRows(state, picker, field)}`;
+    ${summaryRows(state, picker)}`;
 }
 const languageLabels = (): Record<SummaryLanguage, string> => ({ auto: t('跟随界面语言'), 'zh-CN': '中文', en: 'English', ja: '日本語', ko: '한국어', fr: 'Français', de: 'Deutsch', es: 'Español' });
 const connectionValue = (deviceId: string, id: string): string => `${deviceId}\n${id}`;
-type Field = (id: string, label: string, value: string, placeholder?: string, note?: string) => string;
-function summaryRows(state: LocalState, picker: (id: string, label: string) => string, field: Field): string {
+function summaryRows(state: LocalState, picker: (id: string, label: string) => string): string {
   const settings = state.settings, connection = settings.petSummaryConnection, summary = state.summary;
   const toggle = `<div class="setting-row"><div><label for="petVoiceSummary">${t('朗读要点')}</label><p>${t('由模型总结这一轮做成了什么再读出来；关闭时只说“某线程完成了”。')}</p></div><input id="petVoiceSummary" class="switch" type="checkbox" ${settings.petVoiceSummary ? 'checked' : ''}/></div>`;
   if (!settings.petVoiceSummary) return toggle;
-  const custom = connection ? field('summary-model', t('模型'), connection.model, state.summary.connections.find(row => row.id === connection.id)?.model ?? '') : `
-    ${field('summary-url', t('服务地址'), settings.petSummaryCustom.url, 'https://api.openai.com/v1', t('OpenAI 格式，填到 /v1 为止。'))}
-    <div class="setting-row voice-field"><div><label for="summary-key">API Key</label><p>${summary.keySet ? t('已保存在系统钥匙串。') : t('保存在系统钥匙串，只发送给这个地址。')}</p></div><div class="inline-controls"><input id="summary-key" type="password" placeholder="${summary.keySet ? '••••••••' : ''}" autocomplete="off"/>${summary.keySet ? `<button id="summary-key-clear">${t('清除')}</button>` : ''}</div></div>
-    ${field('summary-custom-model', t('模型'), settings.petSummaryCustom.model, 'gpt-4o-mini')}`;
+  const defaultModel = summary.connections.find(row => row.id === connection?.id && row.deviceId === connection?.deviceId)?.model ?? '';
   return `${toggle}
-    <div class="setting-row"><div><label for="summary-source">${t('总结用的上游')}</label>${summary.connections.length ? '' : `<p>${t('没有读到设备上保存的上游，可以直接填地址。')}</p>`}</div>${picker('summary-source', t('总结用的上游'))}</div>
-    ${custom}
+    <div class="setting-row"><div><label for="summary-source">${t('上游')}</label><p>${summary.connections.length ? t('在设置的“上游”页添加和测试。') : t('还没有读到上游，请先在设置的“上游”页添加。')}</p></div><div class="inline-controls"><button type="button" id="summary-source" aria-label="${t('上游')}"></button><button id="open-upstreams" class="${summary.connections.length ? '' : 'primary'}">${t('管理上游')}</button></div></div>
+    ${connection ? `<div class="setting-row voice-field"><div><label for="summary-model">${t('模型')}</label></div><div class="inline-controls"><input id="summary-model" type="text" value="${escapeHtml(connection.model)}" placeholder="${escapeHtml(defaultModel)}" spellcheck="false" autocomplete="off"/>${summary.models.length ? `<button type="button" id="summary-model-list" aria-label="${t('选择模型')}"></button>` : ''}</div></div>` : ''}
     <div class="setting-row"><label for="petSummaryLanguage">${t('播报语言')}</label>${picker('petSummaryLanguage', t('播报语言'))}</div>
-    <div class="setting-row voice-preview"><p id="summary-result" class="${summary.lastError ? 'inline-error' : 'voice-sample'}" role="status">${escapeHtml(summary.lastError ?? summary.sample ?? '')}</p><button id="summary-test">${t('试一试')}</button></div>
+    <div class="setting-row voice-preview"><p id="summary-result" class="${summary.lastError ? 'inline-error' : 'voice-sample'}" role="status">${escapeHtml(summary.lastError ?? summary.sample ?? '')}</p><button id="summary-test" ${connection ? '' : 'disabled'}>${t('试一试')}</button></div>
     <p class="voice-note">${t('这一轮的用户输入和 agent 回答会发送给所选上游。')}</p>`;
 }
-let connectionsRequested = false;
-function bindSummary(root: HTMLElement, state: LocalState, _cleanups: (() => void)[], save: (patch: Partial<DesktopSettings>) => Promise<unknown>, action: (value: LocalAction) => Promise<boolean>, mount: (id: string, options: { value: string; label: string }[], value: string, change: (value: string) => void) => void): void {
+const refreshUpstreams = (action: (value: LocalAction) => Promise<boolean>): void => { void action({ type: 'summaryConnections' }); };
+let upstreamsWatched = false;
+function bindSummary(root: HTMLElement, state: LocalState, save: (patch: Partial<DesktopSettings>) => Promise<unknown>, action: (value: LocalAction) => Promise<boolean>, mount: (id: string, options: { value: string; label: string }[], value: string, change: (value: string) => void) => void): void {
   const settings = state.settings, summary = state.summary, connection = settings.petSummaryConnection;
   if (!settings.petVoiceSummary) return;
-  if (!connectionsRequested) { connectionsRequested = true; void action({ type: 'summaryConnections' }); }
+  // Coming back from Settings with a new upstream should just show it.
+  if (!upstreamsWatched) { upstreamsWatched = true; refreshUpstreams(action); window.addEventListener('focus', () => refreshUpstreams(action)); }
   const rows = summary.connections.map(row => ({ value: connectionValue(row.deviceId, row.id), label: `${row.name} · ${row.deviceName}` }));
   // A saved choice stays selectable while its device is offline.
   if (connection && !summary.connections.some(row => row.id === connection.id && row.deviceId === connection.deviceId)) rows.unshift({ value: connectionValue(connection.deviceId, connection.id), label: connection.name || connection.id });
-  mount('summary-source', [...rows, { value: 'custom', label: t('自定义地址') }], connection ? connectionValue(connection.deviceId, connection.id) : 'custom', value => {
-    if (value === 'custom') { void save({ petSummaryConnection: null }); return; }
+  mount('summary-source', connection ? rows : [{ value: '', label: t('请选择') }, ...rows], connection ? connectionValue(connection.deviceId, connection.id) : '', value => {
     const row = summary.connections.find(candidate => connectionValue(candidate.deviceId, candidate.id) === value);
     if (row) void save({ petSummaryConnection: { deviceId: row.deviceId, id: row.id, name: `${row.name} · ${row.deviceName}`, model: '' } });
   });
+  const manage = root.querySelector<HTMLButtonElement>('#open-upstreams'); if (manage) manage.onclick = () => { void action({ type: 'openUpstreams' }); };
   const labels = languageLabels(), languages = settings.petVoiceProvider === 'local' ? LOCAL_SUMMARY_LANGUAGES : SUMMARY_LANGUAGES;
   mount('petSummaryLanguage', languages.map(value => ({ value, label: labels[value] })), languages.includes(settings.petSummaryLanguage) ? settings.petSummaryLanguage : 'auto', value => { void save({ petSummaryLanguage: value as SummaryLanguage }); });
-  const text = (id: string): HTMLInputElement | null => root.querySelector<HTMLInputElement>(`#${id}`);
-  const model = text('summary-model'); if (model && connection) model.onchange = () => { void save({ petSummaryConnection: { ...connection, model: model.value.trim() } }); };
-  const url = text('summary-url'); if (url) url.onchange = () => { void save({ petSummaryCustom: { ...settings.petSummaryCustom, url: url.value } }); };
-  const customModel = text('summary-custom-model'); if (customModel) customModel.onchange = () => { void save({ petSummaryCustom: { ...settings.petSummaryCustom, model: customModel.value.trim() } }); };
-  const key = text('summary-key'); if (key) key.onchange = () => { if (key.value.trim()) void action({ type: 'summaryKey', key: key.value }); };
-  const clear = root.querySelector<HTMLButtonElement>('#summary-key-clear'); if (clear) clear.onclick = () => { void action({ type: 'summaryKey', key: null }); };
+  const model = root.querySelector<HTMLInputElement>('#summary-model');
+  if (model && connection) model.onchange = () => { void save({ petSummaryConnection: { ...connection, model: model.value.trim() } }); };
+  if (connection) mount('summary-model-list', summary.models.map(row => ({ value: row.id, label: row.label })), connection.model, value => { void save({ petSummaryConnection: { ...connection, model: value } }); });
   const test = root.querySelector<HTMLButtonElement>('#summary-test');
   if (test) test.onclick = () => { test.disabled = true; test.textContent = t('总结中…'); void action({ type: 'summaryTest' }).finally(() => { if (test.isConnected) { test.disabled = false; test.textContent = t('试一试'); } }); };
 }
@@ -105,7 +100,7 @@ export function bindVoice(root: HTMLElement, state: LocalState, cleanups: (() =>
   bindText('voice-url', 'url'); bindText('voice-model-name', 'model'); bindText('voice-name', 'voice'); bindText('voice-style', 'style'); bindText('voice-extra', 'extra');
   mount('voice-name-list', state.voice.voices.map(voice => ({ value: voice.id, label: voice.label })), remote?.voice ?? '', value => { update({ voice: value }); });
   const install = trigger('voice-install'); if (install) install.onclick = () => { void action({ type: 'voiceInstall' }); };
-  bindSummary(root, state, cleanups, save, action, mount);
+  bindSummary(root, state, save, action, mount);
   const key = root.querySelector<HTMLInputElement>('#voice-key');
   if (key) key.onchange = () => { if (key.value.trim()) void action({ type: 'voiceKey', key: key.value }); };
   const clear = trigger('voice-key-clear'); if (clear) clear.onclick = () => { void action({ type: 'voiceKey', key: null }); };

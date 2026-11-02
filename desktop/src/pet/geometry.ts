@@ -3,6 +3,10 @@ export interface PetDisplay { id: number; workArea: Rect }
 export type DockEdge = 'left' | 'right' | 'top' | 'bottom';
 export interface PetPosition { displayId: number; x: number; y: number; edge: DockEdge | null }
 export const PET_HEIGHT = { S: 96, M: 128, L: 160 } as const;
+/** Mini mode: the pet stays, just small. */
+export const MINI_HEIGHT = 72;
+/** How far a docked pet stays tucked when an alert brings its head out; 1 is fully tucked. */
+export const HEAD_PEEK = .6;
 const clamp = (value: number, min: number, max: number): number => Math.max(min, Math.min(Math.max(min, max), value));
 export function clampRect(rect: Rect, area: Rect): Rect {
   const width = Math.min(rect.width, area.width), height = Math.min(rect.height, area.height);

@@ -1,36 +1,37 @@
 #!/usr/bin/env python3
 """Turn a folder of alpha WebM animations into a pet pack with clips.
 
-Usage: build_clip_pack.py PLAN.json SOURCE_DIR OUT_DIR --ffmpeg PATH
+Usage: build_clip_pack.py PLAN.json SOURCE_DIR OUT_DIR --ffmpeg PATH [--zoom 1.05] [--zip OUT.zip]
 
 PLAN.json holds the manifest fields and which video plays in which state:
   {"id": "...", "displayName": "...", "description": "...", "states": {"running": ["work02", "work04"], ...},
    "atlas": {"idle": "idle", "running-right": "move01right", ...}}
 
-Clips play at 12 fps in 240×260 frames. The 8×9 atlas is still written, from evenly spaced
+Clips play at 15 fps in 240×260 frames. --zoom crops the margin around the character; --zip writes
+the single file that Preferences imports. The 8×9 atlas is still written, from evenly spaced
 frames, for the thumbnail and for any state without a clip. Needs Pillow and an ffmpeg with
 libvpx-vp9, whose decoder is the one that keeps the alpha channel.
 """
-import argparse, glob, json, math, subprocess, tempfile
+import argparse, glob, json, math, subprocess, tempfile, zipfile
 from pathlib import Path
 from PIL import Image
 
-FPS, COLUMNS, WIDTH, HEIGHT = 12, 12, 240, 260
+FPS, COLUMNS, WIDTH, HEIGHT = 15, 12, 240, 260
 ATLAS_ROWS = [('idle', 6), ('running-right', 8), ('running-left', 8), ('waving', 4), ('jumping', 5), ('failed', 8), ('waiting', 6), ('running', 6), ('review', 6)]
 ATLAS_CELL = (192, 208)
 
 
-def frames_of(ffmpeg, video, folder):
+def frames_of(ffmpeg, video, folder, zoom):
     # Crop the square video to the sprite window's shape, keeping the feet at the bottom.
     subprocess.run([ffmpeg, '-hide_banner', '-loglevel', 'error', '-y', '-c:v', 'libvpx-vp9', '-i', str(video),
-                    '-vf', f'fps={FPS},crop=iw*{WIDTH}/{HEIGHT}:ih,scale={WIDTH}:{HEIGHT}:flags=lanczos', '-vsync', '0', f'{folder}/%04d.png'], check=True)
+                    '-vf', f'fps={FPS},crop=iw*{WIDTH}/{HEIGHT}/{zoom}:ih/{zoom}:(iw-out_w)/2:ih-out_h,scale={WIDTH}:{HEIGHT}:flags=lanczos', '-vsync', '0', f'{folder}/%04d.png'], check=True)
     return sorted(glob.glob(f'{folder}/*.png'))
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('plan', type=Path); parser.add_argument('source', type=Path); parser.add_argument('out', type=Path)
-    parser.add_argument('--ffmpeg', required=True)
+    parser.add_argument('--ffmpeg', required=True); parser.add_argument('--zoom', type=float, default=1.0); parser.add_argument('--zip', type=Path)
     args = parser.parse_args()
     plan = json.loads(args.plan.read_text())
     (args.out / 'clips').mkdir(parents=True, exist_ok=True)
@@ -39,7 +40,7 @@ def main():
         names = {name for names in plan['states'].values() for name in names} | set(plan['atlas'].values())
         for name in sorted(names):
             folder = Path(work) / name; folder.mkdir()
-            frames[name] = frames_of(args.ffmpeg, args.source / f'{name}.webm', folder)
+            frames[name] = frames_of(args.ffmpeg, args.source / f'{name}.webm', folder, args.zoom)
             counts[name] = len(frames[name])
         for name in sorted({name for names in plan['states'].values() for name in names}):
             rows = math.ceil(counts[name] / COLUMNS)
@@ -59,6 +60,11 @@ def main():
         'clipFormat': {'fps': FPS, 'columns': COLUMNS, 'width': WIDTH, 'height': HEIGHT},
         'clips': {state: [{'path': f'clips/{name}.webp', 'frames': counts[name]} for name in names] for state, names in plan['states'].items()}}})
     (args.out / 'pet.json').write_text(json.dumps(manifest, ensure_ascii=False, indent=1) + '\n')
+    if args.zip:
+        # Stored: WebP does not compress further, and the pack stays quick to import.
+        with zipfile.ZipFile(args.zip, 'w', zipfile.ZIP_STORED) as bundle:
+            for path in sorted(p for p in args.out.rglob('*') if p.is_file()):
+                bundle.write(path, path.relative_to(args.out).as_posix())
     print('clips', len(list((args.out / 'clips').glob('*.webp'))), 'bytes', sum(f.stat().st_size for f in args.out.rglob('*') if f.is_file()))
 
 

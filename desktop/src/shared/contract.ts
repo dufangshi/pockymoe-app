@@ -110,7 +110,11 @@ export type HostCommand =
   /** Saved upstream connections on every connected device. Answers in `data`. */
   | { id: string; type: 'listConnections' }
   /** One completion through a saved connection; the key stays on that device. Answers in `data`. */
-  | { id: string; type: 'completeWithConnection'; deviceId: string; connectionId: string; model: string; system: string; user: string };
+  | { id: string; type: 'completeWithConnection'; deviceId: string; connectionId: string; model: string; system: string; user: string }
+  /** Models a saved connection serves, using the same probe as Settings. Answers in `data`. */
+  | { id: string; type: 'connectionModels'; deviceId: string; connectionId: string }
+  /** Opens Settings at the page for adding and testing upstreams. */
+  | { id: string; type: 'openUpstreams' };
 
 export interface HostCommandResult {
   ok: boolean;
@@ -143,10 +147,8 @@ export interface DesktopSettings {
   petVoiceRemotes: Partial<Record<RemoteProvider, RemoteVoice>>;
   /** Have a model say what a finished turn achieved, instead of only that it finished. */
   petVoiceSummary: boolean;
-  /** A saved upstream on a device, or null for petSummaryCustom. */
+  /** A saved upstream on a device. Upstreams are added and tested in the Web's Settings. */
   petSummaryConnection: { deviceId: string; id: string; name: string; model: string } | null;
-  /** An OpenAI-format endpoint called from here. Its API key is stored separately. */
-  petSummaryCustom: { url: string; model: string };
   petSummaryLanguage: SummaryLanguage;
   /** Hide the character past the screen edge when docked; default true. */
   petEdgeHide: boolean;
@@ -157,7 +159,7 @@ export interface DesktopSettings {
 }
 
 /** The page never sees or changes where spoken alerts are sent. */
-export type PageSettings = Omit<DesktopSettings, 'petVoiceProvider' | 'petVoiceSpeaker' | 'petVoiceSpeed' | 'petVoiceRemotes' | 'petVoiceSummary' | 'petSummaryConnection' | 'petSummaryCustom' | 'petSummaryLanguage'>;
+export type PageSettings = Omit<DesktopSettings, 'petVoiceProvider' | 'petVoiceSpeaker' | 'petVoiceSpeed' | 'petVoiceRemotes' | 'petVoiceSummary' | 'petSummaryConnection' | 'petSummaryLanguage'>;
 
 export interface Appearance {
   effective: 'light' | 'dark';
@@ -231,6 +233,8 @@ export type PetMood =
   | 'jumping'
   /** The reaction to being clicked. */
   | 'poked'
+  | 'dragging'
+  | 'landing'
   | 'review'
   | 'sleeping';
 
@@ -242,6 +246,9 @@ export interface PetControllerDeps {
   dispatch(command: Omit<HostCommand, 'id'>): Promise<HostCommandResult>;
   /** Opens the Preferences window without touching the page. */
   openPreferences(section?: 'general' | 'pet' | 'shortcuts'): void;
+  /** Whether a main window has keyboard focus, and a way to send it back behind other apps. */
+  mainFocused(): boolean;
+  lowerMain(): void;
   /** Encoded audio for an alert, or null when no voice is available yet. */
   speak(text: string): Promise<Uint8Array | null>;
   /** The line to read for a finished turn, or null to fall back to saying it finished. */
@@ -258,6 +265,8 @@ export interface PetControllerDeps {
 export interface PetController {
   setVisible(visible: boolean): void;
   isVisible(): boolean;
+  /** Reads packs again after one was imported or replaced. */
+  reloadPacks(): Promise<void>;
   /** Plays encoded speech now, ahead of the alert queue, for previews. */
   play(audio: Uint8Array): void;
   say(text: string): void;

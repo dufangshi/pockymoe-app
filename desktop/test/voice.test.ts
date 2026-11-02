@@ -8,7 +8,7 @@ import { defaults, pageSettings, pageSettingsPatch, SettingsStore } from '../src
 import { VoiceKeys } from '../src/main/voice/keys';
 import { LocalModel } from '../src/main/voice/model';
 import { isPrivateHost, listVoices, MAX_AUDIO_BYTES, parseVoices, speechRequest, synthesizeRemote, voiceEndpoint } from '../src/main/voice/remote';
-import { chatEndpoint, chatSummarizer, cleanSummary, concreteLanguage, summaryPrompt } from '../src/main/voice/summary';
+import { cleanSummary, concreteLanguage, summaryPrompt } from '../src/main/voice/summary';
 import { encodeWav } from '../src/main/voice/wav';
 import { LOCAL_SPEAKERS, MAX_SPEECH_CHARS, speechText, type RemoteVoice } from '../src/shared/voice';
 
@@ -202,40 +202,20 @@ describe('spoken summaries', () => {
     expect(long.endsWith('。')).toBe(true); expect(long).not.toContain('坏');
     expect(cleanSummary('x'.repeat(400)).length).toBeLessThanOrEqual(MAX_SPEECH_CHARS + 1);
   });
-  const reply = (content: unknown, status = 200): Response => new Response(JSON.stringify(status === 200 ? { choices: [{ message: { content } }] } : { error: { message: content } }), { status, headers: { 'content-type': 'application/json' } });
-  const custom = { url: 'https://llm.example.com/v1/', model: 'small' };
-  it('calls the OpenAI chat format with the key, refusing redirects', async () => {
-    const seen: { url: string; init: RequestInit }[] = [];
-    const line = await chatSummarizer(async (url, init) => { seen.push({ url, init }); return reply('Done.'); }, custom, 'sk').complete({ system: 's', user: 'u' });
-    expect(line).toBe('Done.'); expect(seen[0]!.url).toBe('https://llm.example.com/v1/chat/completions');
-    expect(seen[0]!.init.redirect).toBe('error'); expect((seen[0]!.init.headers as Record<string, string>).authorization).toBe('Bearer sk');
-    expect(JSON.parse(seen[0]!.init.body as string)).toEqual({ model: 'small', messages: [{ role: 'system', content: 's' }, { role: 'user', content: 'u' }], max_tokens: 1024 });
-  });
-  it('retries without a token limit only when the model refuses it', async () => {
-    const bodies: Record<string, unknown>[] = [];
-    const line = await chatSummarizer(async (_url, init) => { bodies.push(JSON.parse(init.body as string)); return bodies.length === 1 ? reply("Unsupported parameter: 'max_tokens'", 400) : reply('Done.'); }, custom, null).complete({ system: 's', user: 'u' });
-    expect(line).toBe('Done.'); expect(bodies[1]).not.toHaveProperty('max_tokens');
-    let calls = 0;
-    await expect(chatSummarizer(async () => { calls++; return reply('Bad model', 400); }, custom, null).complete({ system: 's', user: 'u' })).rejects.toThrow('Bad model');
-    expect(calls).toBe(1);
-  });
-  it('refuses bad configuration and empty answers', async () => {
-    const prompt = { system: 's', user: 'u' }, none = async (): Promise<Response> => { throw new Error('no call'); };
-    await expect(chatSummarizer(none, { url: '', model: 'm' }, null).complete(prompt)).rejects.toThrow('missingUrl');
-    await expect(chatSummarizer(none, { url: 'https://h/v1', model: ' ' }, null).complete(prompt)).rejects.toThrow('missingModel');
-    await expect(chatSummarizer(none, { url: 'http://public.example.com/v1', model: 'm' }, 'sk').complete(prompt)).rejects.toThrow('insecureKey');
-    await expect(chatSummarizer(async () => reply(''), custom, null).complete(prompt)).rejects.toThrow('notSummary');
-  });
-  it('accepts a pasted full URL', () => { expect(chatEndpoint('https://h/v1/chat/completions')).toBe('https://h/v1'); });
   it('hides summary settings from the page', () => {
-    expect(pageSettings({ ...defaults, petSummaryCustom: { url: 'https://secret.example/v1', model: 'm' } })).not.toHaveProperty('petSummaryCustom');
-    for (const patch of [{ petVoiceSummary: true }, { petSummaryCustom: { url: 'https://evil.example', model: 'm' } }, { petSummaryConnection: null }, { petSummaryLanguage: 'en' }]) expect(() => pageSettingsPatch(patch), JSON.stringify(patch)).toThrow();
+    expect(pageSettings({ ...defaults, petSummaryConnection: { deviceId: 'd', id: 'secret-id', name: '', model: '' } })).not.toHaveProperty('petSummaryConnection');
+    for (const patch of [{ petVoiceSummary: true }, { petSummaryConnection: null }, { petSummaryLanguage: 'en' }]) expect(() => pageSettingsPatch(patch), JSON.stringify(patch)).toThrow();
+  });
+  it('keeps other settings when a saved custom summary address is no longer recognized', () => {
+    const path = join(temp(), 'settings.json');
+    writeFileSync(path, JSON.stringify({ relayOrigin: defaults.relayOrigin, webOrigin: defaults.webOrigin, petId: 'bailong', petSummaryCustom: { url: 'https://h/v1', model: 'm' } }));
+    expect(new SettingsStore(path).get().petId).toBe('bailong');
   });
   it('validates summary settings', () => {
     const store = new SettingsStore(join(temp(), 'settings.json'));
-    store.set({ petVoiceSummary: true, petSummaryLanguage: 'ja', petSummaryCustom: { url: 'https://h/v1/chat/completions', model: 'm' }, petSummaryConnection: { deviceId: 'd', id: 'c', name: 'n', model: '' } });
-    expect(store.get().petSummaryCustom.url).toBe('https://h/v1');
-    for (const bad of [{ petSummaryLanguage: 'xx' }, { petSummaryCustom: { url: 'ftp://h', model: 'm' } }, { petSummaryConnection: { deviceId: '', id: 'c', name: '', model: '' } }]) expect(() => store.set(bad as never), JSON.stringify(bad)).toThrow();
+    store.set({ petVoiceSummary: true, petSummaryLanguage: 'ja', petSummaryConnection: { deviceId: 'd', id: 'c', name: 'n', model: '' } });
+    expect(store.get().petSummaryConnection?.id).toBe('c');
+    for (const bad of [{ petSummaryLanguage: 'xx' }, { petSummaryConnection: { deviceId: '', id: 'c', name: '', model: '' } }]) expect(() => store.set(bad as never), JSON.stringify(bad)).toThrow();
   });
 });
 describe('one-click model install', () => {

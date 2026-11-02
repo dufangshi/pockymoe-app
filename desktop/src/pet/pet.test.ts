@@ -107,9 +107,9 @@ describe('pack validation and safe import', () => {
   it('rejects symlinks, duplicates, corrupt zips and decompression bombs', () => {
     expect(() => unpackPetZip(zip([{ name: 'pet.json', data: Buffer.from('target'), mode: 0xa1ff }]))).toThrow('symlinks'); expect(() => unpackPetZip(zip([{ name: 'x', data: Buffer.alloc(1) }, { name: 'x', data: Buffer.alloc(1) }]))).toThrow('duplicate'); expect(() => unpackPetZip(Buffer.from('bad zip'))).toThrow('end record'); expect(() => unpackPetZip(zip([{ name: 'x', data: Buffer.alloc(MAX_PACK_BYTES + 1) }]))).toThrow('size limit');
   });
-  it('imports a nested zip atomically and refuses overwrite and symlink folders', async () => {
+  it('imports a nested zip atomically, replaces on a repeat, and refuses symlink folders', async () => {
     const temp = await mkdtemp(join(tmpdir(), 'pet-test-'));
-    try { const image = await readFile(join(fixture, 'spritesheet.png')), manifest = await readFile(join(fixture, 'pet.json')), source = join(temp, 'pack.zip'); await writeFile(source, zip([{ name: 'little/pet.json', data: manifest }, { name: 'little/spritesheet.png', data: image }])); const imported = await importPetPack(source, join(temp, 'pets')); expect(await readFile(join(imported.directory, 'spritesheet.png'))).toEqual(image); await expect(importPetPack(source, join(temp, 'pets'))).rejects.toThrow('already installed'); await symlink(fixture, join(temp, 'link')); await expect(loadPetPack(join(temp, 'link'))).rejects.toThrow('regular directory'); } finally { await rm(temp, { recursive: true, force: true }); }
+    try { const image = await readFile(join(fixture, 'spritesheet.png')), manifest = await readFile(join(fixture, 'pet.json')), source = join(temp, 'pack.zip'); await writeFile(source, zip([{ name: 'little/pet.json', data: manifest }, { name: 'little/spritesheet.png', data: image }])); const imported = await importPetPack(source, join(temp, 'pets')); expect(await readFile(join(imported.directory, 'spritesheet.png'))).toEqual(image); await expect(importPetPack(source, join(temp, 'pets'))).resolves.toBeTruthy(); await symlink(fixture, join(temp, 'link')); await expect(loadPetPack(join(temp, 'link'))).rejects.toThrow('regular directory'); } finally { await rm(temp, { recursive: true, force: true }); }
   });
 });
 
@@ -133,7 +133,7 @@ describe('interaction regressions', () => {
   });
   it('refuses a header-valid image if the pixel decoder rejects it, before installing anything', async () => {
     const temp = await mkdtemp(join(tmpdir(), 'pet-decode-'));
-    try { const source = new URL('../../assets/pets/placeholder/', import.meta.url).pathname; await expect(importPetPack(source, join(temp, 'pets'), undefined, ['placeholder'])).rejects.toThrow('already installed'); await expect(importPetPack(source, join(temp, 'pets'), () => false)).rejects.toThrow('cannot decode'); await expect(access(join(temp, 'pets', 'placeholder'))).rejects.toThrow(); } finally { await rm(temp, { recursive: true, force: true }); }
+    try { const source = new URL('../../assets/pets/placeholder/', import.meta.url).pathname; await expect(importPetPack(source, join(temp, 'pets'), undefined, ['placeholder'])).rejects.toThrow('built in'); await expect(importPetPack(source, join(temp, 'pets'), () => false)).rejects.toThrow('cannot decode'); await expect(access(join(temp, 'pets', 'placeholder'))).rejects.toThrow(); } finally { await rm(temp, { recursive: true, force: true }); }
   });
 });
 
@@ -162,6 +162,30 @@ describe('v3 atlas and fixed-window regressions', () => {
     expect(parseManifest(manifest({ running: [{ path: 'clips/work.webp', frames: 48 }] })).remoteCodex?.clips?.running?.[0]?.frames).toBe(48);
     for (const bad of [{ running: [{ path: '../secret.webp', frames: 4 }] }, { running: [{ path: 'clips/a/b.webp', frames: 4 }] }, { running: [{ path: 'clips/a.png', frames: 4 }] }, { running: [{ path: 'clips/a.webp', frames: 0 }] }, { other: [{ path: 'clips/a.webp', frames: 4 }] }, { running: [] }]) expect(() => parseManifest(manifest(bad)), JSON.stringify(bad)).toThrow();
     expect(() => parseManifest(manifest({ running: [{ path: 'clips/a.webp', frames: 4 }] }, { fps: 0, columns: 12, width: 240, height: 260 }))).toThrow();
+  });
+  it('imports one zip with the whole pet, clips included, and replaces it when imported again', async () => {
+    const temp = await mkdtemp(join(tmpdir(), 'pet-zip-'));
+    try {
+      const fixture = new URL('../../assets/pets/frost/', import.meta.url).pathname;
+      const image = await readFile(join(fixture, 'spritesheet.webp')), strip = await readFile(join(fixture, 'sleeping.webp'));
+      // A real WebP header: 4 frames of 192×208 in one row.
+      const manifest = (description: string): Buffer => Buffer.from(JSON.stringify({ id: 'custom', displayName: 'Custom', description, spritesheetPath: 'spritesheet.webp', remoteCodex: { clipFormat: { fps: 12, columns: 4, width: 192, height: 208 }, clips: { running: [{ path: 'clips/work.webp', frames: 4 }] } } }));
+      const source = join(temp, 'pet.zip'), pets = join(temp, 'pets');
+      const files = (description: string) => [{ name: 'pet.json', data: manifest(description) }, { name: 'spritesheet.webp', data: image }, { name: 'clips/work.webp', data: strip }];
+      await writeFile(source, zip(files('first')));
+      const first = await importPetPack(source, pets, undefined, ['moe']);
+      expect(first.manifest.remoteCodex?.clips?.running).toHaveLength(1);
+      expect((await readFile(join(pets, 'custom/clips/work.webp'))).equals(strip)).toBe(true);
+      expect((await loadPetPack(join(pets, 'custom'))).manifest.description).toBe('first');
+      await writeFile(source, zip(files('second')));
+      await importPetPack(source, pets, undefined, ['moe']);
+      expect((await loadPetPack(join(pets, 'custom'))).manifest.description).toBe('second');
+      await writeFile(source, zip(files('third').slice(0, 2)));
+      await expect(importPetPack(source, pets)).rejects.toThrow('missing clips/work.webp');
+      await writeFile(source, zip([...files('third'), { name: 'extra.bin', data: Buffer.from('x') }]));
+      await expect(importPetPack(source, pets)).rejects.toThrow('only pet.json');
+      expect((await loadPetPack(join(pets, 'custom'))).manifest.description).toBe('second');
+    } finally { await rm(temp, { recursive: true, force: true }); }
   });
   it('accepts the v2 layout of imported packs without adding look slots to animation loops', async () => {
     const pack = await loadPetPack(new URL('../../assets/pets/frost/', import.meta.url).pathname);

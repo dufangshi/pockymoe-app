@@ -159,9 +159,11 @@ function renderSprite(): void {
   const character = root.querySelector<HTMLElement>('#character')!;
   character.setAttribute('aria-label', t('桌宠，点击查看任务，拖动以移动'));
   character.style.width = `${state.pet.width}px`; character.style.height = `${state.pet.height}px`;
-  const tilt = state.edge ? (state.edge === 'left' || state.edge === 'bottom' ? 12 : -12) * state.dockAmount : 0;
+  // Leaning out from the edge; at the top she hangs upside down, so it is still her head that shows.
+  const tilt = !state.dockAmount || !state.edge ? 0 : state.edge === 'top' ? 180 : state.edge === 'bottom' ? 0 : (state.edge === 'left' ? 16 : -16) * Math.min(1, state.dockAmount * 1.4);
   character.style.transform = `translate(${state.pet.x}px,${state.pet.y}px) rotate(${tilt}deg)`;
-  character.hidden = state.settings.petMini; character.classList.toggle('sleeping', state.mood === 'sleeping');
+  character.classList.toggle('sleeping', state.mood === 'sleeping');
+  character.classList.toggle('peeking', state.dockAmount > 0 && state.dockAmount < 1);
   root.dataset.mood = state.mood; root.dataset.edge = state.edge ?? ''; root.dataset.dockAmount = String(state.dockAmount);
   if (animationState !== state.mood || lastEpoch !== state.moodEpoch) {
     lastEpoch = state.moodEpoch;
@@ -180,7 +182,7 @@ function renderSprite(): void {
 }
 // A pack's clips replace the atlas for the states they cover; any other state, or a clip that
 // fails to decode, draws from the atlas. Sheets are decoded when needed and few are kept.
-const CLIP_CACHE = 6, ONE_SHOT = ['failed', 'waving', 'jumping', 'poked'];
+const CLIP_CACHE = 6, ONE_SHOT = ['failed', 'waving', 'jumping', 'poked', 'landing'];
 const clipCache = new Map<string, Promise<ImageBitmap | null>>(), clipCursor = new Map<string, number>();
 let clipPlayer: { clip: PetClip; bitmap: ImageBitmap; start: number; drawn: number } | null = null, clipToken = 0, clipPack = '';
 function loadClip(path: string): Promise<ImageBitmap | null> {
@@ -236,7 +238,7 @@ function paintSprite(): void {
   sprite.style.backgroundPosition = `${-frame * state.pet.width}px ${sleeping ? 0 : -ANIMATIONS[animationState].row * state.pet.height}px`;
 }
 function opaqueAt(point: { clientX: number; clientY: number }): boolean {
-  if (!state || !(alpha || clipPlayer) || state.settings.petMini) return false;
+  if (!state || !(alpha || clipPlayer)) return false;
   const character = root.querySelector<HTMLElement>('#character'); if (!character) return false;
   const centerX = state.pet.width / 2, centerY = state.pet.height / 2;
   const matrix = new DOMMatrix(getComputedStyle(character).transform).inverse();
@@ -301,10 +303,11 @@ bridge.onState(next => {
   if (old && old.accountId !== next.accountId) { failures.clear(); pending.clear(); draft = ''; sendState = 'idle'; selected = null; selectedRequest = null; collapsedRequests.clear(); }
   state = next; setLocale(next.locale); applyAppearance(next.appearance); document.title = `Pockymoe · ${t('桌宠')}`; root.setAttribute('aria-label', document.title);
   const accent = next.appearance.accent; canvas.width = 1; canvas.height = 1; context.clearRect(0, 0, 1, 1); context.fillStyle = accent; context.fillRect(0, 0, 1, 1); const [r, g, b] = context.getImageData(0, 0, 1, 1).data; document.documentElement.style.setProperty('--accent-fg', accentForeground(r, g, b));
-  document.body.dataset.surface = next.surface; root.dataset.visible = String(next.near || next.settings.petMini || next.mode !== 'controls');
+  document.body.dataset.surface = next.surface; root.dataset.visible = String(next.near || next.mode !== 'controls');
   if (next.surface === 'sprite') {
     // Another pack's sheets share nothing with this one's.
-    if (next.packName !== clipPack) { clipPack = next.packName; for (const entry of clipCache.values()) void entry.then(bitmap => bitmap?.close()); clipCache.clear(); clipCursor.clear(); clipPlayer = null; clipToken++; lastEpoch = -1; }
+    const packKey = `${next.packName}#${next.clips?.epoch ?? 0}`;
+    if (packKey !== clipPack) { clipPack = packKey; for (const entry of clipCache.values()) void entry.then(bitmap => bitmap?.close()); clipCache.clear(); clipCursor.clear(); clipPlayer = null; clipToken++; lastEpoch = -1; }
     renderSprite(); updateHit(); return;
   }
   if (old?.detailOpen && !next.detailOpen) root.querySelector<HTMLButtonElement>('.error-mark[aria-expanded="true"]')?.click();
