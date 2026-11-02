@@ -10,6 +10,8 @@ import { LocalModel } from '../src/main/voice/model';
 import { isPrivateHost, listModels, listVoices, MAX_AUDIO_BYTES, parseModels, parseVoices, speechRequest, synthesizeRemote, voiceEndpoint } from '../src/main/voice/remote';
 import { cleanSummary, concreteLanguage, summaryPrompt } from '../src/main/voice/summary';
 import { encodeWav } from '../src/main/voice/wav';
+import { deliveryPolicy } from '../src/main/delivery';
+import { isMuted, type MuteRule } from '../src/shared/mutes';
 import { isNoDesktopRelease } from '../src/main/updateErrors';
 import { LOCAL_SPEAKERS, MAX_SPEECH_CHARS, speechText, type RemoteVoice } from '../src/shared/voice';
 
@@ -252,5 +254,35 @@ describe('checking for updates', () => {
     expect(isNoDesktopRelease('Cannot find latest-mac.yml in the latest release artifacts (https://github.com/x/y/releases/download/v0.1.4/latest-mac.yml): HttpError: 404')).toBe(true);
     expect(isNoDesktopRelease('No published versions on GitHub')).toBe(true);
     expect(isNoDesktopRelease('net::ERR_INTERNET_DISCONNECTED')).toBe(false);
+  });
+});
+describe('silencing finished work', () => {
+  const item = { key: 'd:t', deviceId: 'd', workspaceId: 'w', rootThreadKey: null };
+  const rule = (kind: MuteRule['kind'], id: string): MuteRule => ({ kind, id, label: id });
+  it('matches a device, a workspace, a thread, and an agent by its conversation', () => {
+    expect(isMuted(item, [rule('device', 'd')])).toBe(true);
+    expect(isMuted(item, [rule('workspace', 'd:w')])).toBe(true);
+    expect(isMuted(item, [rule('thread', 'd:t')])).toBe(true);
+    expect(isMuted({ ...item, key: 'd:agent', rootThreadKey: 'd:t' }, [rule('thread', 'd:t')])).toBe(true);
+    expect(isMuted(item, [rule('device', 'x'), rule('workspace', 'x:w'), rule('thread', 'd:other')])).toBe(false);
+    expect(isMuted(item, [])).toBe(false);
+  });
+  const event = (type: 'completed' | 'failed' | 'needsInput') => ({ type, alertId: 'a', at: '', item: { ...item, deviceName: '', workspaceLabel: '', threadId: 't', title: '', state: 'completed' as const, since: '', unread: true } });
+  const context = (petMuteAlerts: boolean) => ({ settings: { ...defaults, petMuteAlerts, petMutes: [rule('device', 'd')] }, focused: false, focusedThreadKey: null, petVisible: true, idleSeconds: 999 });
+  it('keeps completion alerts when only the voice is silenced', () => {
+    expect(deliveryPolicy(event('completed'), context(false)).pet).toBe(true);
+  });
+  it('drops completion alerts when asked, but never requests or failures', () => {
+    expect(deliveryPolicy(event('completed'), context(true))).toEqual({ pet: false, system: false });
+    expect(deliveryPolicy(event('failed'), context(true)).pet).toBe(true);
+    expect(deliveryPolicy(event('needsInput'), context(true)).system).toBe(true);
+  });
+  it('validates rules and keeps them from the page', () => {
+    const store = new SettingsStore(join(temp(), 'settings.json'));
+    store.set({ petMutes: [rule('device', 'd')], petMuteAlerts: true });
+    expect(store.get().petMutes).toHaveLength(1);
+    for (const bad of [{ petMutes: 'x' }, { petMutes: [{ kind: 'other', id: 'd', label: '' }] }, { petMutes: [{ kind: 'device', id: '', label: '' }] }]) expect(() => store.set(bad as never), JSON.stringify(bad)).toThrow();
+    expect(pageSettings(store.get())).not.toHaveProperty('petMutes');
+    expect(() => pageSettingsPatch({ petMuteAlerts: false })).toThrow();
   });
 });

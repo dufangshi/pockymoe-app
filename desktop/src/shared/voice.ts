@@ -57,6 +57,7 @@ export const LOCAL_SUMMARY_LANGUAGES: SummaryLanguage[] = ['auto', 'zh-CN', 'en'
 export const SUMMARY_LANGUAGES: SummaryLanguage[] = ['auto', 'zh-CN', 'en', 'ja', 'ko', 'fr', 'de', 'es'];
 /** A saved upstream on one of the account's devices; its key stays on that device. */
 export interface SummaryConnection { deviceId: string; deviceName: string; id: string; name: string; protocol: string; model: string; supervisorVersion?: string; needsUpdate?: boolean }
+export interface MuteTargets { devices: VoiceOption[]; workspaces: VoiceOption[]; threads: VoiceOption[] }
 export interface SummaryStatus {
   connections: SummaryConnection[];
   /** Models the selected upstream reports. */
@@ -66,4 +67,6 @@ export interface SummaryStatus {
   lastError: string | null;
   /** What the last test produced. */
   sample: string | null;
+  /** What can be silenced, read from the page; null until it answers. */
+  muteTargets: MuteTargets | null;
 }

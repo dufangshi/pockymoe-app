@@ -1,6 +1,19 @@
 /** One source for app-owned desktop strings. Thread titles, summaries and names
  * are user content and are intentionally never translated. */
 export const english = {
+  "设备": "Device",
+  "工作区": "Workspace",
+  "对话": "Conversation",
+  "移除 {name}": "Remove {name}",
+  "不播报的范围": "Don't announce",
+  "这些地方的任务完成时不读出来。需要你处理和失败的提醒不受影响。": "Finished work here isn't read aloud. Requests and failures still are.",
+  "类型": "Type",
+  "选择要静音的范围": "Choose what to silence",
+  "也不弹完成提醒": "Silence completion alerts too",
+  "这些地方完成时，桌宠也不弹气泡、不响提示音，也不发系统通知。": "When work finishes here, the pet shows no bubble and plays no chime, and there's no system notification.",
+  "正在读取…": "Reading…",
+  "恢复播报此对话": "Announce this conversation again",
+  "不再播报此对话": "Stop announcing this conversation",
   "{upstream}：这台设备的 Supervisor 要更新到 0.13.43 或更新版本才能总结。可以更新它，或换一台已更新设备上的上游。": "{upstream}: this device's Supervisor needs 0.13.43 or newer for summaries. Update it, or choose an upstream on an updated device.",
   "{device} 的 Supervisor 是 {version}，要更新到 0.13.43 或更新版本才能总结。": "{device} runs Supervisor {version}. Summaries need 0.13.43 or newer.",
   "需更新": "needs update",

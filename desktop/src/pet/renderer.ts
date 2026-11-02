@@ -12,6 +12,7 @@ import { showError } from '../local/errorMark';
 import { commandErrorMessage } from './errors';
 import { scrollGeometry } from './scroll';
 import { playSound, playSpeech } from './sounds';
+import { isMuted } from '../shared/mutes';
 import type { PetClip } from './packs';
 import type { ActivityItem, HostCommandResult } from '../shared/contract';
 import type { PetAction, PetBridge, PetViewState } from './bridge';
@@ -34,6 +35,7 @@ const canvas = document.createElement('canvas'), context = canvas.getContext('2d
 const paths: Record<string, string> = {
   robot: '<rect x="3" y="4" width="10" height="9" rx="2"/><path d="M8 2v2M1 7v3M15 7v3M6 10h4"/><circle cx="6" cy="7.5" r=".6"/><circle cx="10" cy="7.5" r=".6"/>', chevron: '<path d="m6 4 4 4-4 4"/>',
   tasks: '<rect x="3" y="2.5" width="10" height="11" rx="2"/><path d="M6 6h4M6 9h4"/>',
+  sound: '<path d="M2.5 6v4h2.5l3.5 3V3L5 6zM11 5.5a3.5 3.5 0 0 1 0 5"/>', muted: '<path d="M2.5 6v4h2.5l3.5 3V3L5 6zM11 6l3 4M14 6l-3 4"/>',
   home: '<path d="m2 7 6-5 6 5M4 6v8h8V6M7 14v-4h2v4"/>', more: '<circle cx="3" cy="8" r=".6"/><circle cx="8" cy="8" r=".6"/><circle cx="13" cy="8" r=".6"/>',
   close: '<path d="m5 5 6 6M11 5l-6 6"/>', send: '<path d="M8 13V3m-4 4 4-4 4 4"/>', check: '<path d="m3 8 3 3 7-7"/>',
   open: '<path d="M6 3h7v7M13 3l-9 9M3 5v8h8"/>',
@@ -66,11 +68,16 @@ function requestLine(item: ActivityItem, group: PetConversation, actions: boolea
   const owner = item.key !== group.key ? item.agentName || item.title : '';
   return `<div class="request-row ${actions ? '' : 'request-summary-row'} ${selected === group.key && selectedRequest === item.key ? 'selected' : ''}" data-key="${escape(item.key)}" data-request-key="${escape(item.key)}" data-conversation-key="${escape(group.key)}" role="option" aria-selected="${selected === group.key && selectedRequest === item.key}" tabindex="0" title="${escape([owner, item.request?.summary, petMetadata(item)].filter(Boolean).join(' · '))}">${owner ? `<span class="request-owner">${escape(owner)}</span>` : ''}<span class="request-copy">${requestSummaryHtml(item.request?.summary ?? '')}</span>${extra}${actions && item.request?.kind === 'approval' ? decisions(item, 'row') : ''}${actions ? errorSlot(`row:${item.key}`) : ''}</div>`;
 }
+function muteButton(group: PetConversation): string {
+  const muted = state ? isMuted(group.root, state.settings.petMutes) : false;
+  const label = t(muted ? '恢复播报此对话' : '不再播报此对话');
+  return button('toggleMute', label, icon(muted ? 'muted' : 'sound'), `aria-pressed="${muted}"`);
+}
 function taskRow(group: PetConversation, duplicateTitle = false): string {
   const item = group.statusItem, waiting = group.requests.length > 0, active = selected === group.key;
   const expanded = active && group.requests.length > 1 && !collapsedRequests.has(group.key), primary = group.requests[0];
   const toggle = group.requests.length > 1 ? button('toggleRequests', t(expanded ? '收起「{title}」的线程' : '展开「{title}」的线程', { title: group.title }), icon('chevron'), `class="request-toggle ${expanded ? 'expanded' : ''}" aria-expanded="${expanded}"`) : '';
-  return `<article class="conversation-row ${waiting ? 'waiting' : ''}" data-conversation-key="${escape(group.key)}"><div class="task-row ${active && !selectedRequest ? 'selected' : ''} ${item.state === 'idle' ? 'recent' : ''}" data-key="${escape(group.key)}" role="option" aria-selected="${active && !selectedRequest}" tabindex="0" title="${escape(`${group.title} · ${petMetadata(group.root)}`)}"><div class="row-main">${toggle}${status(item)}<span class="row-title">${escape(group.title)}</span><span class="row-meta">${item.state === 'running' && !duplicateTitle ? `<span data-since="${escape(item.since)}">${elapsed(Date.now() - Date.parse(item.since))}</span>` : escape(item.deviceName)}</span><span class="row-actions">${button('open', t('打开'), icon('open'))}${button('revealInMap', t('在地图中显示'), icon('map'))}</span>${robotBadge(group)}${primary && !expanded && primary.request?.kind === 'approval' ? `<span data-key="${escape(primary.key)}">${decisions(primary, 'row')}${errorSlot(`row:${primary.key}`)}</span>` : errorSlot(`row:${group.key}`)}</div></div>${expanded ? `<div class="request-lines">${group.requests.map(request => requestLine(request, group, true)).join('')}</div>` : primary ? requestLine(primary, group, false, group.requests.length > 1 ? button('toggleRequests', `${t('活动面板')} (${group.requests.length})`, `+${group.requests.length - 1}`, 'class="request-more"') : '') : ''}</article>`;
+  return `<article class="conversation-row ${waiting ? 'waiting' : ''}" data-conversation-key="${escape(group.key)}"><div class="task-row ${active && !selectedRequest ? 'selected' : ''} ${item.state === 'idle' ? 'recent' : ''}" data-key="${escape(group.key)}" role="option" aria-selected="${active && !selectedRequest}" tabindex="0" title="${escape(`${group.title} · ${petMetadata(group.root)}`)}"><div class="row-main">${toggle}${status(item)}<span class="row-title">${escape(group.title)}</span><span class="row-meta">${item.state === 'running' && !duplicateTitle ? `<span data-since="${escape(item.since)}">${elapsed(Date.now() - Date.parse(item.since))}</span>` : escape(item.deviceName)}</span><span class="row-actions">${muteButton(group)}${button('open', t('打开'), icon('open'))}${button('revealInMap', t('在地图中显示'), icon('map'))}</span>${robotBadge(group)}${primary && !expanded && primary.request?.kind === 'approval' ? `<span data-key="${escape(primary.key)}">${decisions(primary, 'row')}${errorSlot(`row:${primary.key}`)}</span>` : errorSlot(`row:${group.key}`)}</div></div>${expanded ? `<div class="request-lines">${group.requests.map(request => requestLine(request, group, true)).join('')}</div>` : primary ? requestLine(primary, group, false, group.requests.length > 1 ? button('toggleRequests', `${t('活动面板')} (${group.requests.length})`, `+${group.requests.length - 1}`, 'class="request-more"') : '') : ''}</article>`;
 }
 /** Everything running on the account, one row per conversation. */
 function runningList(): string {
@@ -139,6 +146,7 @@ root.addEventListener('click', event => {
     selected = groupKey; selectedRequest = null; renderGlass(); return;
   }
   if (type === 'showConversation' && key) { void bridge.action({ type: 'showConversation', key }); return; }
+  if (type === 'toggleMute' && key) { void bridge.action({ type: 'toggleMute', key }); return; }
   if (key && ['approve', 'deny', 'open', 'revealInMap'].includes(type)) { void itemAction({ type: type as 'approve' | 'deny' | 'open' | 'revealInMap', key }, surface); return; }
   if (type === 'send') { document.querySelector<HTMLFormElement>('#chat-form')?.requestSubmit(); return; }
   const action: PetAction = type === 'more' ? { type: 'menu', value: true } : type.startsWith('size-') ? { type: 'setSize', size: type.slice(5) as 'S' | 'M' | 'L' } : type === 'mini' ? { type: 'setMini', value: !state.settings.petMini } : type === 'edgeHide' ? { type: 'setEdgeHide', value: !state.edgeHide } : type === 'sound' ? { type: 'setSound', value: !state.settings.petSound } : type === 'voice' ? { type: 'setVoice', value: !state.settings.petVoice } : type === 'hide' ? { type: 'setVisible', value: false } : { type } as PetAction;

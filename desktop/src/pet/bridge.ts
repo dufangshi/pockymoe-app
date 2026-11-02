@@ -24,7 +24,7 @@ export interface PetViewState {
   pinned: boolean;
   clips: { format: ClipFormat; states: Partial<Record<SpriteState, PetClip[]>>; epoch: number } | null;
   bubble: PetBubble | null;
-  settings: Pick<DesktopSettings, 'petSize' | 'petMini' | 'petSound' | 'petVoice' | 'petId'>;
+  settings: Pick<DesktopSettings, 'petSize' | 'petMini' | 'petSound' | 'petVoice' | 'petId' | 'petMutes'>;
   imageUrl: string;
   sleeping?: { imageUrl: string; frames: number; durationsMs: number[] };
   packName: string;
@@ -43,7 +43,7 @@ export interface PetViewState {
 }
 export interface PetCue { sound: PetSound }
 export type PetAction =
-  | { type: 'open' | 'approve' | 'deny' | 'revealInMap'; key: string }
+  | { type: 'open' | 'approve' | 'deny' | 'revealInMap' | 'toggleMute'; key: string }
   | { type: 'reply'; key: string; text: string }
   | { type: 'target' | 'showConversation'; key: string }
   | { type: 'dismiss' | 'close' | 'openMap' }

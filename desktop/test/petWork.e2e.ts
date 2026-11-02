@@ -20,7 +20,7 @@ function wav(): Buffer {
   return b;
 }
 const FIXTURE = `<!doctype html><meta charset="utf-8"><title>Fixture</title><script>window.commands=[];window.pockymoeHost?.onCommand(command=>{window.commands.push(command);
-  const data=command.type==='turnText'?{request:'修一下登录白屏',answer:'白屏已修好，原因是回调读取了未加载的用户信息。'}:command.type==='listConnections'?[{deviceId:'old',deviceName:'wsl',id:'c2',name:'Older',protocol:'openai_chat',model:'small',supervisorVersion:'0.13.41',needsUpdate:true},{deviceId:'mac',deviceName:'MacBook',id:'c1',name:'Main',protocol:'openai_chat',model:'small',supervisorVersion:'0.13.43',needsUpdate:false}]:command.type==='connectionModels'?[{id:'small',name:'Small model'},{id:'large',name:'Large model'}]:command.type==='completeWithConnection'?{text:'连接总结：白屏修好了。'}:undefined;
+  const data=command.type==='turnText'?{request:'修一下登录白屏',answer:'白屏已修好，原因是回调读取了未加载的用户信息。'}:command.type==='listConnections'?[{deviceId:'old',deviceName:'wsl',id:'c2',name:'Older',protocol:'openai_chat',model:'small',supervisorVersion:'0.13.41',needsUpdate:true},{deviceId:'mac',deviceName:'MacBook',id:'c1',name:'Main',protocol:'openai_chat',model:'small',supervisorVersion:'0.13.43',needsUpdate:false}]:command.type==='listMuteTargets'?{devices:[{id:'mac',label:'MacBook Pro'},{id:'pc',label:'Windows PC'}],workspaces:[{id:'mac:rc',label:'remoteCodex · MacBook Pro'}],threads:[{id:'mac:thread-1',label:'修复登录状态同步 · remoteCodex'}]}:command.type==='connectionModels'?[{id:'small',name:'Small model'},{id:'large',name:'Large model'}]:command.type==='completeWithConnection'?{text:'连接总结：白屏修好了。'}:undefined;
   if(command.type==='connectionModels'&&window.failModels){window.pockymoeHost.commandResult(command.id,{ok:false,error:'upstream refused'});return;}
   if(command.type==='completeWithConnection'&&command.connectionId==='c2'){window.pockymoeHost.commandResult(command.id,{ok:false,code:'supervisorTooOld',error:'x'});return;}
   window.pockymoeHost.commandResult(command.id,{ok:true,...(data?{data}:{})});});</script>`;
@@ -195,6 +195,58 @@ test('summary: falls back to saying it finished when nothing is selected, and ha
   await expect(preferences.locator('#summary-key')).toHaveCount(0);
   await preferences.locator('#open-upstreams').click();
   await expect.poll(() => page.evaluate(() => (window.commands as { type: string }[]).some(entry => entry.type === 'openUpstreams'))).toBe(true);
+});
+const lastCue = async (): Promise<string> => (await (await pet('sprite')).locator('#app').getAttribute('data-last-cue')) ?? '';
+test('silencing: a device added in Preferences stops the voice but keeps the alert', async () => {
+  await settings({ ...remoteVoice(), petVoiceSummary: false, petSound: true });
+  const preferences = await openPreferences();
+  await preferences.locator('#mute-kind').click();
+  await preferences.getByRole('option', { name: 'Device', exact: true }).click();
+  await preferences.locator('#mute-target').click();
+  await preferences.getByRole('option', { name: 'MacBook Pro' }).click();
+  await expect(preferences.locator('.mute-rule')).toContainText('MacBook Pro');
+  await preferences.locator('.mute-rule').scrollIntoViewIfNeeded();
+  await preferences.screenshot({ path: join(evidence, 'mutes.png'), animations: 'disabled' });
+  await page.waitForTimeout(2700);
+  speech = [];
+  await finish();
+  await expect((await pet('glass')).locator('.bubble')).toBeVisible();
+  await expect.poll(lastCue).toContain('completed');
+  await page.waitForTimeout(1500);
+  expect(speech).toEqual([]);
+  await preferences.locator('.mute-remove').click();
+  await expect(preferences.locator('.mute-rule')).toHaveCount(0);
+});
+test('silencing: with alerts too, nothing shows for finished work but a request still does', async () => {
+  await settings({ ...remoteVoice(), petVoiceSummary: false, petMuteAlerts: true, petMutes: [{ kind: 'thread', id: 'mac:thread-1', label: 't' }] });
+  await page.waitForTimeout(2700);
+  speech = [];
+  await finish();
+  await page.waitForTimeout(1500);
+  expect(speech).toEqual([]);
+  await expect((await pet('glass')).locator('.bubble')).toHaveCount(0);
+  await sync([item({ state: 'needsInput', turnId: 'turn-2', request: { id: 'r1', kind: 'approval', summary: 'Allow?' } })]);
+  await expect((await pet('glass')).locator('.bubble')).toBeVisible();
+  await expect.poll(() => speech.length).toBe(1);
+});
+test('silencing: the activity panel can silence a conversation', async () => {
+  await baseline();
+  await sync([item()]);
+  const sprite = await pet('sprite'), glass = await pet('glass');
+  await sprite.evaluate(() => (window as unknown as { rcDesktop: { pet: { action(value: unknown): Promise<unknown> } } }).rcDesktop.pet.action({ type: 'toggleTray' }));
+  const toggle = glass.locator('[data-action="toggleMute"]').first();
+  await toggle.evaluate(element => (element as HTMLElement).click());
+  await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+  await glass.locator('[data-action="toggleMute"]').first().evaluate(element => (element as HTMLElement).click());
+  await expect(glass.locator('[data-action="toggleMute"]').first()).toHaveAttribute('aria-pressed', 'false');
+});
+test('a summary that works is not reported as failed when the voice cannot read it', async () => {
+  await settings({ petVoice: true, petVoiceProvider: 'compatible', petVoiceRemotes: { compatible: { url: 'http://127.0.0.1:9/v1', model: 't', voice: '', style: '', extra: '' } }, petVoiceSummary: true, petSummaryConnection: { deviceId: 'mac', id: 'c1', name: 'Main · MacBook', model: '' } });
+  const preferences = await openPreferences();
+  await preferences.locator('#summary-test').click();
+  await expect(preferences.locator('#summary-result')).toHaveText('连接总结：白屏修好了。');
+  await expect(preferences.locator('#voice-error')).toContainText("Can't reach the voice service");
+  await expect(preferences.locator('#toast.visible')).toHaveCount(0);
 });
 test('mini mode keeps the pet on screen, just smaller', async () => {
   const sprite = await pet('sprite');
