@@ -383,8 +383,8 @@ Settings. They do not use placeholder pages, injected theme CSS or production.
 The Windows CI starts/stops that fixture and runs English/Chinese locale
 assumptions, plus native and solid local surface matrices. Optional voice/clip
 cases skip before launching Electron, so a missing input does not leave an
-unready app for teardown. Windows shortcuts use native SendKeys after focusing
-the app; Mac tests invoke the built menu command without requiring OS automation
+unready app for teardown. Windows shortcuts use native SendKeys after focusing and verifying the exact
+main-window HWND (process activation can choose the pet instead); Mac tests invoke the built menu command without requiring OS automation
 permissions. The separate menu test includes Electron's role default accelerators.
 
 Quit marks the window manager as quitting before other cleanup and ignores later
