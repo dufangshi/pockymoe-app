@@ -330,6 +330,8 @@ uses the selected theme's solid background. Windows tray icons follow the system
 an amber speech-bubble taskbar overlay. Toast buttons use XML protocol activation
 with in-memory, single-use tokens; approvals retain actual request IDs and don't
 raise the main window. Custom Toast XML preserves the sound suppression policy.
+Windows glass/quick panels use a 96% theme-background tint on Acrylic and an opaque
+solid fallback, with normal/muted text tested to 4.5:1 over white and black backdrops.
 Windows provides notifications only while the app runs. Update confirmations use
 the themed local modal on Windows (Escape cancels, focus stays inside and returns
 to the trigger); macOS retains its native dialogs. Confirmations are queued and
@@ -384,3 +386,8 @@ cases skip before launching Electron, so a missing input does not leave an
 unready app for teardown. Windows shortcuts use native SendKeys after focusing
 the app; Mac tests invoke the built menu command without requiring OS automation
 permissions. The separate menu test includes Electron's role default accelerators.
+
+Quit marks the window manager as quitting before other cleanup and ignores later
+activation events, so an activation cannot reopen a background window during
+shutdown. `shutdown.e2e.ts` covers that ordering. Readiness failures report only
+window/runtime state and URL paths, never environment values or Web contents.

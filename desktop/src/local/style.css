@@ -24,9 +24,13 @@
 :root[data-platform=win32]{font-family:"Segoe UI Variable Text","Segoe UI","Microsoft YaHei UI",sans-serif}
 :root[data-platform=win32][data-theme-preset=terminal],:root[data-platform=win32] code,:root[data-platform=win32] .elapsed,:root[data-platform=win32] .voice-advanced textarea{font-family:"Cascadia Mono",Consolas,"Microsoft YaHei UI",monospace}
 :root[data-platform=win32] textarea{appearance:none}
-:root[data-platform=win32][data-glass-fallback=true] .quick{background:color-mix(in srgb,var(--app-bg) 96%,transparent);border:1px solid var(--theme-border);border-radius:12px}
+:root[data-platform=win32][data-view=quick]{--theme-fg-muted:var(--windows-panel-muted)}
+:root[data-platform=win32] .quick{background:color-mix(in srgb,var(--windows-panel-bg) 96%,transparent);color:var(--windows-panel-fg);border:1px solid var(--theme-border);border-radius:12px}
+:root[data-platform=win32][data-glass-fallback=true] .quick{background:var(--windows-panel-bg)}
 
 .local-message{width:min(420px,calc(100vw - 32px));max-height:calc(100vh - 64px);padding:20px;border:1px solid var(--theme-border);border-radius:8px;background:var(--theme-surface);color:var(--app-fg);box-shadow:0 6px 24px #0003}
 .local-message::backdrop{background:color-mix(in srgb,var(--app-fg) 16%,transparent);backdrop-filter:blur(4px)}
 .local-message h1{font-size:13px;line-height:18px;margin-bottom:12px}.local-message [data-scroll]{max-height:calc(100vh - 200px);overflow:auto;overflow-wrap:anywhere}.local-message p:first-child{color:var(--app-fg);font-size:13px;line-height:18px}.local-message p+p{margin-top:8px}.message-buttons{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}
 @media(max-width:639px){.local-message{width:100%;max-height:calc(100vh - 38px);margin:auto 0 0;border-radius:12px 12px 0 0}}
+:root[data-platform=win32] .quick input:disabled{opacity:1;color:var(--windows-panel-muted);-webkit-text-fill-color:var(--windows-panel-muted)}
+:root[data-platform=win32] .quick input::placeholder{color:var(--windows-panel-muted);opacity:1}

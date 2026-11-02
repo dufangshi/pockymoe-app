@@ -14,6 +14,7 @@ import type { LocalMessages } from '../src/main/messages';
 import type { Appearance, PockymoeHost } from '../src/shared/contract';
 import { resolveLocale } from '../src/shared/i18n';
 import { primaryKey } from './nativeKeys';
+import { windowAt } from './windowReady';
 import { item, snapshot } from './fixtures';
 
 type Runtime = { messages: LocalMessages; lastMessageResponse?: number; showMessageBox: ShowMessage; lastDialog?: Electron.MessageBoxOptions; lastSave?: Electron.SaveDialogOptions; updater: { checkForUpdates(): Promise<{ isUpdateAvailable: boolean }> }; appearance: AppearanceStore; hub: ActivityHub; settings: SettingsStore; windows: Windows; tray: DesktopTray; notifications: Notifications };
@@ -40,9 +41,7 @@ async function launch(theme: 'light' | 'dark', firstRun = false, material = 'nat
   return app;
 }
 async function pageAt(app: ElectronApplication, fragment: string): Promise<Page> {
-  let page: Page | undefined;
-  await expect.poll(() => { page = app.windows().find(w => w.url().includes(fragment)); return !!page; }).toBe(true);
-  await page!.waitForLoadState('domcontentloaded');
+  const page = await windowAt(app, fragment);
   await page!.emulateMedia({ colorScheme: themes.get(app) });
   return page!;
 }
@@ -369,6 +368,17 @@ for (const material of ['native', 'solid']) for (const pack of packs) for (const
     });
     expect(violations.macLabels, page.url()).toBe(false);
     expect(violations.scrollbars, page.url()).toEqual([]);
+    if (page.url().includes('/pet/') || page.url().includes('view=quick')) {
+      const panel = page.locator('.glass, .quick').first();
+      if (await panel.count()) {
+        const color = await panel.evaluate(element => {
+          const canvas = document.createElement('canvas'); canvas.width = canvas.height = 1;
+          const context = canvas.getContext('2d')!; context.fillStyle = getComputedStyle(element).backgroundColor;
+          context.fillRect(0, 0, 1, 1); return Array.from(context.getImageData(0, 0, 1, 1).data);
+        });
+        expect(color[3]).toBeGreaterThanOrEqual(material === 'solid' ? 255 : 244);
+      }
+    }
     test.info().annotations.push({ type: 'scale', description: `${page.url()}: devicePixelRatio=${violations.devicePixelRatio}` });
     scales.push({ url: page.url(), devicePixelRatio: violations.devicePixelRatio });
     const label = page.url().includes('/pet/') ? await page.evaluate(() => `pet-${document.body.dataset.surface}`) : new URL(page.url()).searchParams.get('view') || 'main-fixture';

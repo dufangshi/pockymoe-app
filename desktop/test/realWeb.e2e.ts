@@ -2,6 +2,7 @@ import { test, expect, _electron as electron, type ElectronApplication } from '@
 import { mkdtempSync, readFileSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { auditSurface } from './surfaceAudit';
 
 const enabled = process.env.POCKYMOE_REAL_WEB === '1';
 const evidence = join(process.env.POCKYMOE_DESKTOP_EVIDENCE || join(tmpdir(), 'pockymoe-desktop-evidence'), 'real-web');
@@ -54,6 +55,17 @@ for (const surface of ['main', 'map', 'devices'] as const) for (const pack of ['
     await page.evaluate(async () => { await document.fonts.ready; await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))); });
     mkdirSync(evidence, { recursive: true });
     await page.screenshot({ path: join(evidence, `${surface}-${pack}-${mode}.png`), animations: 'disabled' });
+    if (process.platform === 'win32') {
+      expect(await auditSurface(page)).toEqual({ macLabels: false, scrollbars: [] });
+      expect(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().some(window => window.isMenuBarVisible() || window.isMenuBarAutoHide()))).toBe(false);
+      const native = await app.evaluate(async ({ BrowserWindow, desktopCapturer }, url) => {
+        const window = BrowserWindow.getAllWindows().find(window => window.webContents.getURL() === url)!;
+        window.show(); window.focus();
+        const source = (await desktopCapturer.getSources({ types: ['window'], thumbnailSize: { width: 2560, height: 1600 } })).find(source => source.id === window.getMediaSourceId());
+        return source && !source.thumbnail.isEmpty() ? source.thumbnail.toPNG().toString('base64') : null;
+      }, page.url());
+      if (native) writeFileSync(join(evidence, `${surface}-${pack}-${mode}-native.png`), Buffer.from(native, 'base64'));
+    }
     const facts = await page.evaluate(() => ({ devicePixelRatio, pack: document.documentElement.dataset.themePreset, mode: document.documentElement.dataset.themeEffective, width: innerWidth, height: innerHeight }));
     writeFileSync(join(evidence, `${surface}-${pack}-${mode}.json`), JSON.stringify(facts, null, 2));
   } catch {

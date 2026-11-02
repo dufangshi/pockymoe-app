@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { Appearance, PockymoeHost } from '../src/shared/contract';
 import { item, snapshot } from './fixtures';
+import { windowAt } from './windowReady';
 // Runtime type is declared by shell.e2e.ts; this spec runs only local shell flows.
 declare global { interface Window { pockymoeHost?: PockymoeHost; commands: unknown[] } }
 let server: Server, origin: string, app: ElectronApplication, profile: string;
@@ -35,9 +36,7 @@ test.beforeEach(async () => {
 });
 test.afterEach(async () => { await app?.close(); rmSync(profile, { recursive: true, force: true }); });
 async function pageAt(fragment: string): Promise<Page> {
-  await expect.poll(() => app.windows().some(page => page.url().includes(fragment))).toBe(true);
-  const page = app.windows().find(page => page.url().includes(fragment))!;
-  await page.waitForLoadState('domcontentloaded'); return page;
+  return windowAt(app, fragment);
 }
 async function mode(pack = 'classic', effective: 'light' | 'dark' = 'light'): Promise<void> {
   await app.evaluate((_e, value) => globalThis.__pockymoeDesktopTest.appearance.sync(value), { pack, effective, accent: pack === 'terminal' ? '#31bd84' : pack === 'plum-pocket' ? '#d99d36' : '#37856d', locale: 'en' } satisfies Appearance);

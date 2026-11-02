@@ -35,6 +35,7 @@ if (!app.requestSingleInstanceLock()) app.quit();
 else {
   if (process.platform === 'win32') app.on('browser-window-created', (_event, window) => { window.setAutoHideMenuBar(false); window.setMenuBarVisibility(false); });
   let windows: Windows | undefined;
+  app.on('before-quit', () => { if (windows) windows.quitting = true; });
   let activateToast: ((url: string) => boolean) | undefined;
   const openLink = (url: string): void => { if (!activateToast?.(url)) windows?.openDeepLink(url); };
   const deepLinks: string[] = [];
@@ -288,7 +289,7 @@ else {
     }
     for (const url of [...deepLinks, ...process.argv.filter(a => /^(pockymoe|remotecodex):/.test(a))]) openLink(url);
     if (process.env.POCKYMOE_DESKTOP_E2E !== '1') { configureUpdates(showMessageBox); void registerApns(settings, manager); }
-    app.on('activate', () => { if (manager.relay.size) manager.focusMain(); else manager.createLocal('relay'); });
+    app.on('activate', () => { if (manager.quitting) return; if (manager.relay.size) manager.focusMain(); else manager.createLocal('relay'); });
     app.on('before-quit', () => { manager.quitting = true; messages.dispose(); manager.dispose(); notifications.dispose(); voice.dispose(); pet?.dispose(); tray.dispose(); hub.dispose(); globalShortcut.unregisterAll(); });
     if (process.env.POCKYMOE_DESKTOP_E2E === '1') Object.assign(globalThis, { __pockymoeDesktopTest: { hub, settings, appearance, windows: manager, tray, notifications, capabilities, updater: autoUpdater, showMessageBox, messages } });
   }).catch(error => {

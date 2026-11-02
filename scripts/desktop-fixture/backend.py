@@ -255,7 +255,7 @@ def assert_free(ports):
     for port in ports:
         try:
             with socket.socket() as listener:
-                listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                listener.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE if sys.platform == "win32" else socket.SO_REUSEADDR, 1)
                 listener.bind(("127.0.0.1", port))
         except OSError:
             raise FixtureError(f"Port {port} is occupied; choose isolated DESKTOP_E2E_* ports.") from None

@@ -34,3 +34,12 @@ export function saveName(name: string, platform: string): string {
   const leaf = name.split(/[\\/]/).pop()?.replace(windowsInvalidCharacters, '_').slice(0, 255).replace(/[ .]+$/, '') || 'download';
   return windowsReservedName(leaf) ? `_${leaf}`.slice(0, 255) : leaf;
 }
+
+/** Keep Windows glass text legible even when Acrylic sits over a white window. */
+export function windowsPanelPalette(appearance: Appearance | null): { background: string; foreground: string; muted: string } {
+  const palette = windowPalette(appearance);
+  const dark = appearance?.effective === 'dark';
+  const muted = appearance?.pack === 'plum-pocket' ? dark ? '#b9a2c0' : '#6e5875'
+    : appearance?.pack === 'terminal' ? dark ? '#93a09a' : '#5a5a55' : dark ? '#b2b5be' : '#55545a';
+  return { ...palette, muted };
+}

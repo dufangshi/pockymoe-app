@@ -4,7 +4,7 @@ The main process owns one fixed transparent character window and one reusable,
 parented glass window. Only dragging, size changes and display changes can alter
 character bounds. The glass child resizes to its compact controls, merged activity
 panel, pill bubble or More menu. macOS uses native HUD vibrancy. Windows 11 22H2+ requests native Acrylic in a nontransparent frameless child. Older
-builds use a transparent child with the design’s 96% solid fallback, 1px border and
+builds use a transparent child with the design’s opaque solid fallback, 1px border and
 12px corners. `POCKYMOE_WINDOWS_GLASS=solid` forces that fallback if real-device QA
 finds native corner artifacts or flicker. Other platforms retain the translucent fallback. An interactive panel
 focuses and closes on native blur or Esc; passive bubbles never take focus.

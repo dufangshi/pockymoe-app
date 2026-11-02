@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { localFileMatches, modelTar, windowsVoiceAvailable } from '../src/main/platform';
-import { saveName, shortcutLabel, windowPalette, windowsMaterial, windowsGlassMaterial, windowsReservedName } from '../src/shared/platform';
+import { windowsPanelPalette, saveName, shortcutLabel, windowPalette, windowsMaterial, windowsGlassMaterial, windowsReservedName } from '../src/shared/platform';
 import { toastActivation, toastXml } from '../src/main/windowsToast';
 import { dockPosition, petLayout, restorePosition } from '../src/pet/geometry';
 import { parseManifest } from '../src/pet/packs';
@@ -73,4 +73,20 @@ describe('Windows platform decisions', () => {
       }
     }
   });
+});
+
+
+it('keeps Windows panel text above 4.5:1 over white and black compositor backdrops', () => {
+  const rgb = (hex: string): number[] => hex.slice(1).match(/../g)!.map(value => parseInt(value, 16));
+  const luminance = (color: number[]): number => color.map(value => value / 255).map(value => value <= .04045 ? value / 12.92 : ((value + .055) / 1.055) ** 2.4).reduce((sum, value, index) => sum + value * [.2126, .7152, .0722][index], 0);
+  for (const pack of ['classic', 'plum-pocket', 'terminal']) for (const effective of ['light', 'dark'] as const) {
+    const palette = windowsPanelPalette({ pack, effective, accent: '#a57224' });
+    for (const backdrop of [0, 255]) for (const alpha of [.96, 1]) {
+      const background = luminance(rgb(palette.background).map(value => value * alpha + backdrop * (1 - alpha)));
+      for (const text of [palette.foreground, palette.muted]) {
+        const foreground = luminance(rgb(text));
+        expect((Math.max(background, foreground) + .05) / (Math.min(background, foreground) + .05)).toBeGreaterThanOrEqual(4.5);
+      }
+    }
+  }
 });
