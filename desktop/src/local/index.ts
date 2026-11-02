@@ -123,7 +123,7 @@ function renderPreferences(): void {
   bindPicker('alertMode', [{ value: 'petFirst', label: t('桌宠优先') }, { value: 'system', label: t('系统通知') }, { value: 'both', label: t('两者都用') }]);
   bindPicker('petSize', [{ value: 'S', label: t('小 · 96 px') }, { value: 'M', label: t('中 · 128 px') }, { value: 'L', label: t('大 · 160 px') }]);
   bindPicker('petId', state.petPacks.map(pack => ({ value: pack.id, label: pack.name, description: [pack.author, pack.license].filter(Boolean).join(' · '), image: pack.thumbnail, rows: pack.rows })));
-  if (section === 'pet') bindVoice(root, state, selectCleanups, save, action);
+  if (section === 'pet') bindVoice(root, state, selectCleanups, save, action, renderPreferences);
   root.querySelectorAll<HTMLInputElement>('.switch').forEach(el => { el.onchange = () => { void save({ [el.id]: el.checked }); }; });
   const snooze = root.querySelector<HTMLButtonElement>('#snooze'); if (snooze) snooze.onclick = () => { void save({ snoozeUntil: Date.parse(s.snoozeUntil || '') > Date.now() ? null : new Date(Date.now() + 3600_000).toISOString() }); };
   const relay = root.querySelector<HTMLButtonElement>('#change-relay'); if (relay) relay.onclick = () => { void action({ type: 'changeConnection' }); };

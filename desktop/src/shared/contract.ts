@@ -2,6 +2,7 @@
 // page half in apps/supervisor-web/src/desktop/host.ts; bump
 // HOST_BRIDGE_VERSION on any breaking change and feature-detect, never assume.
 // Design: docs/desktop-design.zh.md §6.
+import type { MuteRule } from './mutes';
 import type { RemoteProvider, RemoteVoice, SummaryLanguage, VoiceProvider } from './voice';
 
 export const HOST_BRIDGE_VERSION = 2;
@@ -114,7 +115,9 @@ export type HostCommand =
   /** Models a saved connection serves, using the same probe as Settings. Answers in `data`. */
   | { id: string; type: 'connectionModels'; deviceId: string; connectionId: string }
   /** Opens Settings at the page for adding and testing upstreams. */
-  | { id: string; type: 'openUpstreams' };
+  | { id: string; type: 'openUpstreams' }
+  /** Devices, workspaces and conversations a person may silence on the pet. Answers in `data`. */
+  | { id: string; type: 'listMuteTargets' };
 
 export interface HostCommandResult {
   ok: boolean;
@@ -150,6 +153,10 @@ export interface DesktopSettings {
   /** A saved upstream on a device. Upstreams are added and tested in the Web's Settings. */
   petSummaryConnection: { deviceId: string; id: string; name: string; model: string } | null;
   petSummaryLanguage: SummaryLanguage;
+  /** Finished work here is not read aloud. Requests and failures still are. */
+  petMutes: MuteRule[];
+  /** The same rules also stop its pet bubble, chime and system notification. */
+  petMuteAlerts: boolean;
   /** Hide the character past the screen edge when docked; default true. */
   petEdgeHide: boolean;
   launchAtLogin: boolean;
@@ -159,7 +166,7 @@ export interface DesktopSettings {
 }
 
 /** The page never sees or changes where spoken alerts are sent. */
-export type PageSettings = Omit<DesktopSettings, 'petVoiceProvider' | 'petVoiceSpeaker' | 'petVoiceSpeed' | 'petVoiceRemotes' | 'petVoiceSummary' | 'petSummaryConnection' | 'petSummaryLanguage'>;
+export type PageSettings = Omit<DesktopSettings, 'petVoiceProvider' | 'petVoiceSpeaker' | 'petVoiceSpeed' | 'petVoiceRemotes' | 'petVoiceSummary' | 'petSummaryConnection' | 'petSummaryLanguage' | 'petMutes' | 'petMuteAlerts'>;
 
 export interface Appearance {
   effective: 'light' | 'dark';

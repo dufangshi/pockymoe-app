@@ -3,7 +3,7 @@ import { existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import type { ActivityEvent, DesktopSettings, HostCommand, HostCommandResult, SettingsStoreLike } from '../../shared/contract';
 import { getLocale, t } from '../../shared/i18n';
-import { REMOTE_DEFAULTS, speechText, type RemoteProvider, type RemoteVoice, type SummaryConnection, type SummaryStatus, type VoiceOption, type VoiceStatus } from '../../shared/voice';
+import { REMOTE_DEFAULTS, speechText, type RemoteProvider, type RemoteVoice, type MuteTargets, type SummaryConnection, type SummaryStatus, type VoiceOption, type VoiceStatus } from '../../shared/voice';
 import { VoiceKeys } from './keys';
 import { LocalModel, MODEL } from './model';
 import { listModels, listVoices, speechRequest, synthesizeRemote, VoiceError, voiceEndpoint } from './remote';
@@ -12,7 +12,7 @@ import { cleanSummary, concreteLanguage, summaryPrompt, type Summarizer, type Tu
 const IDLE_UNLOAD_MS = 5 * 60_000, SYNTH_TIMEOUT_MS = 120_000;
 const COMPLETE_TIMEOUT_MS = 45_000;
 /** The page reaches the account's devices; none of this may open or raise a window. */
-type PageCommand = Extract<HostCommand, { type: 'turnText' | 'listConnections' | 'completeWithConnection' | 'connectionModels' }>;
+type PageCommand = Extract<HostCommand, { type: 'turnText' | 'listConnections' | 'completeWithConnection' | 'connectionModels' | 'listMuteTargets' }>;
 export type PageQuery = (command: PageCommand extends infer C ? C extends { id: string } ? Omit<C, 'id'> : never : never, timeoutMs?: number) => Promise<HostCommandResult>;
 const fetcher = (url: string, init: RequestInit): Promise<Response> => net.fetch(url, init as never);
 /** The addon ships per platform; where none exists (or it fails to load) remote services still work. */
@@ -43,7 +43,7 @@ export class VoiceService {
   private lastError: string | null = null;
   private supported = addonAvailable();
   private listeners = new Set<() => void>();
-  private summaryState: SummaryStatus = { connections: [], models: [], modelsError: null, lastError: null, sample: null };
+  private summaryState: SummaryStatus = { connections: [], models: [], modelsError: null, lastError: null, sample: null, muteTargets: null };
   constructor(dataDir: string, private settings: SettingsStoreLike, private ready: () => void, private query: PageQuery) {
     let wasReady = false;
     this.keys = new VoiceKeys(join(dataDir, 'voice-keys.json'), safeStorage);
@@ -90,6 +90,10 @@ export class VoiceService {
     if (result.ok && Array.isArray(result.data)) this.summaryState = { ...this.summaryState, connections: result.data as SummaryConnection[] };
     this.changed();
     await this.refreshModels();
+  }
+  async refreshMuteTargets(): Promise<void> {
+    const result = await this.query({ type: 'listMuteTargets' });
+    if (result.ok && result.data && typeof result.data === 'object') this.setSummaryState({ muteTargets: result.data as MuteTargets });
   }
   /** The same probe Settings uses. A failure leaves the list empty; the field still takes a typed name. */
   async refreshModels(): Promise<void> {

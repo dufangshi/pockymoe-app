@@ -1,4 +1,5 @@
 import type { ActivityEvent, DesktopSettings } from '../shared/contract';
+import { isMuted } from '../shared/mutes';
 export interface DeliveryContext {
   settings: DesktopSettings; focused: boolean; focusedThreadKey: string | null;
   petVisible: boolean; idleSeconds: number; now?: number; doNotDisturb?: boolean;
@@ -6,7 +7,8 @@ export interface DeliveryContext {
 export function deliveryPolicy(event: ActivityEvent, c: DeliveryContext): { pet: boolean; system: boolean } {
   const none = { pet: false, system: false };
   if (['started', 'resolved'].includes(event.type) || (c.focused && c.focusedThreadKey === event.item.key) ||
-      (c.settings.snoozeUntil && Date.parse(c.settings.snoozeUntil) > (c.now ?? Date.now()))) return none;
+      (c.settings.snoozeUntil && Date.parse(c.settings.snoozeUntil) > (c.now ?? Date.now())) ||
+      (event.type === 'completed' && c.settings.petMuteAlerts && isMuted(event.item, c.settings.petMutes))) return none;
   return {
     pet: c.settings.alertMode !== 'system' && c.petVisible && !c.doNotDisturb,
     system: c.settings.alertMode === 'system' || c.settings.alertMode === 'both' || !c.petVisible || c.idleSeconds >= 120 || event.type === 'needsInput'

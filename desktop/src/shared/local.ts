@@ -23,6 +23,7 @@ export type LocalAction =
   | { type: 'voiceInstall' }
   | { type: 'openUpstreams' }
   | { type: 'summaryConnections' }
+  | { type: 'muteTargets' }
   | { type: 'summaryTest' };
 export interface LocalBridge {
   getState(): Promise<LocalState>;

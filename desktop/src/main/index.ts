@@ -223,9 +223,12 @@ else {
             break;
           }
           case 'summaryConnections': await voice.refreshConnections(); break;
+          case 'muteTargets': await voice.refreshMuteTargets(); break;
           case 'summaryTest': {
             if (!pet) throw new Error(t('桌宠模块尚未安装。'));
-            pet.play(await voice.preview(await voice.testSummary()));
+            const line = await voice.testSummary();
+            // The summary worked. If the voice can't read it, the voice row says why.
+            await voice.preview(line).then(audio => pet!.play(audio), () => undefined);
             break;
           }
           case 'voiceKey': voice.setKey(typeof action.key === 'string' ? action.key : null); break;

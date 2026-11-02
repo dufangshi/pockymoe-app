@@ -4,6 +4,7 @@ import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import type { ActivityItem, ActivityRecent, Appearance, DesktopSettings, HostCommand, HostCommandResult, PetController, PetControllerDeps } from '../shared/contract';
 import { resolveLocale, setLocale, t } from '../shared/i18n';
 import { conversationKey, conversationTitle } from '../shared/activityGroups';
+import { isMuted, type MuteRule } from '../shared/mutes';
 import { ANIMATIONS } from './animation';
 import { BUBBLE_MS, BubbleQueue } from './bubbles';
 import { dockPosition, exposedRect, HEAD_PEEK, MINI_HEIGHT, PET_HEIGHT, petLayout, restorePosition, surfaceLayout, surfaceSide, type PetPosition, type SurfaceSide } from './geometry';
@@ -149,7 +150,7 @@ export function createPetController(deps: PetControllerDeps): PetController {
       clips: pack?.manifest.remoteCodex?.clips && pack.manifest.remoteCodex.clipFormat ? { format: pack.manifest.remoteCodex.clipFormat, states: pack.manifest.remoteCodex.clips, epoch: packEpoch } : null,
       // Timing stays here: while the pointer holds a bubble, its restart must not reach the renderer as a change.
       bubble: bubble && { ...bubble, createdAt: 0, shownAt: null },
-      settings: { petSize: settings.petSize, petMini: settings.petMini, petSound: settings.petSound, petVoice: settings.petVoice, petId: settings.petId },
+      settings: { petSize: settings.petSize, petMini: settings.petMini, petSound: settings.petSound, petVoice: settings.petVoice, petId: settings.petId, petMutes: settings.petMutes },
       imageUrl: pack ? `data:image/${pack.manifest.spritesheetPath.endsWith('png') ? 'png' : 'webp'};base64,${pack.image.toString('base64')}` : '',
       ...(pack?.sleepingImage && sleeping ? { sleeping: { imageUrl: `data:image/${sleeping.path.endsWith('png') ? 'png' : 'webp'};base64,${pack.sleepingImage.toString('base64')}`, frames: sleeping.frames, durationsMs: sleeping.durationsMs } } : {}),
       atlasRows: (pack?.manifest.spriteVersionNumber === 2 ? 11 : 9) as 9 | 11, frameScale: pack?.manifest.remoteCodex?.frameScale ?? 1,
@@ -192,7 +193,7 @@ export function createPetController(deps: PetControllerDeps): PetController {
     if (!value || typeof value !== 'object' || typeof (value as PetAction).type !== 'string') return { ok: false, error: t('桌宠操作无效', {}, uiLocale) };
     const action = value as PetAction;
     const item = 'key' in action ? items.find(candidate => candidate.key === action.key) ?? targets.get(action.key) ?? recent.find(candidate => candidate.key === action.key) ?? petConversations([...items, ...targets.values()]).find(group => group.key === action.key)?.root : undefined;
-    if (['open', 'approve', 'deny', 'reply', 'target', 'showConversation', 'revealInMap'].includes(action.type) && !item) return { ok: false, error: t('线程已不在活动列表中。', {}, uiLocale) };
+    if (['open', 'approve', 'deny', 'reply', 'target', 'showConversation', 'revealInMap', 'toggleMute'].includes(action.type) && !item) return { ok: false, error: t('线程已不在活动列表中。', {}, uiLocale) };
     switch (action.type) {
       case 'open': {
         if (!item) break;
@@ -230,6 +231,14 @@ export function createPetController(deps: PetControllerDeps): PetController {
       case 'setMini': if (typeof action.value === 'boolean') deps.settings.set({ petMini: action.value }); break;
       case 'setSound': if (typeof action.value === 'boolean') deps.settings.set({ petSound: action.value }); break;
       case 'setVoice': if (typeof action.value === 'boolean') deps.settings.set({ petVoice: action.value }); break;
+      case 'toggleMute': {
+        if (!item) break;
+        const key = conversationKey('state' in item ? item as ActivityItem : { ...item, state: 'idle', since: '', unread: false, workspaceId: '' });
+        const rule: MuteRule = { kind: 'thread', id: key, label: conversationTitle('state' in item ? item as ActivityItem : { ...item, state: 'idle', since: '', unread: false, workspaceId: '' }, items) };
+        const rest = settings.petMutes.filter(entry => !(entry.kind === 'thread' && entry.id === key));
+        deps.settings.set({ petMutes: rest.length === settings.petMutes.length ? [...rest, rule] : rest });
+        break;
+      }
       case 'setVisible': if (typeof action.value === 'boolean') deps.settings.set({ petVisible: action.value }); break;
       case 'setEdgeHide': if (typeof action.value === 'boolean') deps.settings.set({ petEdgeHide: action.value }); break;
       case 'setSize': if (['S', 'M', 'L'].includes(action.size)) deps.settings.set({ petSize: action.size }); break;
@@ -304,7 +313,7 @@ export function createPetController(deps: PetControllerDeps): PetController {
       // The summary runs only when its turn comes up to be read, so a burst costs one model call.
       const line = (fallback: string) => async (): Promise<string> => (await deps.summarize(event)) ?? fallback;
       if (event.type === 'needsInput') cue('needsInput', t('{title} 需要你处理', { title }, uiLocale));
-      else if (event.type === 'completed') cue('completed', line(t('{title} 完成了', { title }, uiLocale)));
+      else if (event.type === 'completed') cue('completed', isMuted(event.item, settings.petMutes) ? undefined : line(t('{title} 完成了', { title }, uiLocale)));
       else if (event.type === 'failed') cue('failed', line(t('{title} 失败了', { title }, uiLocale)));
     }
     moods.onEvent(event.type, now, delivered, reaction, reactionMs(event.type === 'failed' ? 'failed' : reaction));

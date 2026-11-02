@@ -3,6 +3,7 @@ import type { DesktopSettings } from '../shared/contract';
 import type { LocalAction, LocalState } from '../shared/local';
 import { LOCAL_SPEAKERS, LOCAL_SUMMARY_LANGUAGES, MODEL_DOWNLOAD_MB, REMOTE_DEFAULTS, SPEEDS, SUMMARY_LANGUAGES, type LocalSpeaker, type RemoteProvider, type RemoteVoice, type SummaryLanguage, type VoiceProvider } from '../shared/voice';
 import { mountSelect } from './select';
+import type { MuteRule } from '../shared/mutes';
 
 const escapeHtml = (value: string): string => value.replace(/[&<>"']/g, char => `&#${char.charCodeAt(0)};`);
 const speakerLabel = (speaker: LocalSpeaker): string => speaker.kind === 'en' ? t('英文女声 · {name}', { name: speaker.name }) : t(speaker.kind === 'zhFemale' ? '中文女声 · {name}' : '中文男声 · {name}', { name: speaker.name });
@@ -51,7 +52,30 @@ export function voiceSection(state: LocalState, picker: (id: string, label: stri
     <div class="setting-row"><label for="petVoiceSpeed">${t('语速')}</label>${picker('petVoiceSpeed', t('语速'))}</div>
     <div class="setting-row voice-preview"><p id="voice-error" class="inline-error" role="alert">${escapeHtml(state.voice.lastError ?? '')}</p><button id="voice-preview" ${!remote && state.voice.model.state !== 'ready' ? 'disabled' : ''}>${t('试听')}</button></div>
     ${privacy}
-    ${summaryRows(state, picker)}`;
+    ${summaryRows(state, picker)}
+    ${muteRows(state, picker)}`;
+}
+const muteKinds = (): Record<MuteRule['kind'], string> => ({ device: t('设备'), workspace: t('工作区'), thread: t('对话') });
+let muteKind: MuteRule['kind'] = 'thread', muteTargetsAsked = false;
+function muteRows(state: LocalState, picker: (id: string, label: string) => string): string {
+  const { petMutes, petMuteAlerts } = state.settings, kinds = muteKinds();
+  const rows = petMutes.map((rule, index) => `<div class="mute-rule"><span class="mute-kind">${kinds[rule.kind]}</span><span class="mute-label" title="${escapeHtml(rule.label)}">${escapeHtml(rule.label)}</span><button class="mute-remove" data-mute-remove="${index}" aria-label="${escapeHtml(t('移除 {name}', { name: rule.label }))}" title="${escapeHtml(t('移除 {name}', { name: rule.label }))}">×</button></div>`).join('');
+  return `<div class="setting-row mute-add"><div><label for="mute-target">${t('不播报的范围')}</label><p>${t('这些地方的任务完成时不读出来。需要你处理和失败的提醒不受影响。')}</p></div><div class="inline-controls">${picker('mute-kind', t('类型'))}${picker('mute-target', t('选择要静音的范围'))}</div></div>
+    ${rows ? `<div class="mute-rules">${rows}</div>` : ''}
+    <div class="setting-row"><div><label for="petMuteAlerts">${t('也不弹完成提醒')}</label><p>${t('这些地方完成时，桌宠也不弹气泡、不响提示音，也不发系统通知。')}</p></div><input id="petMuteAlerts" class="switch" type="checkbox" ${petMuteAlerts ? 'checked' : ''}/></div>`;
+}
+function bindMutes(root: HTMLElement, state: LocalState, save: (patch: Partial<DesktopSettings>) => Promise<unknown>, action: (value: LocalAction) => Promise<boolean>, mount: (id: string, options: { value: string; label: string }[], value: string, change: (value: string) => void) => void, rerender: () => void): void {
+  const rules = state.settings.petMutes, kinds = muteKinds();
+  // Asked again on focus, so a device or thread added meanwhile can be chosen.
+  if (!muteTargetsAsked) { muteTargetsAsked = true; void action({ type: 'muteTargets' }); window.addEventListener('focus', () => { void action({ type: 'muteTargets' }); }); }
+  mount('mute-kind', (Object.keys(kinds) as MuteRule['kind'][]).map(value => ({ value, label: kinds[value] })), muteKind, value => { muteKind = value as MuteRule['kind']; rerender(); });
+  const targets = state.summary.muteTargets, list = muteKind === 'device' ? targets?.devices : muteKind === 'workspace' ? targets?.workspaces : targets?.threads;
+  const free = (list ?? []).filter(row => !rules.some(rule => rule.kind === muteKind && rule.id === row.id));
+  mount('mute-target', [{ value: '', label: targets ? t('请选择') : t('正在读取…') }, ...free.map(row => ({ value: row.id, label: row.label }))], '', value => {
+    const row = free.find(candidate => candidate.id === value);
+    if (row) void save({ petMutes: [...rules, { kind: muteKind, id: row.id, label: row.label }] });
+  });
+  root.querySelectorAll<HTMLButtonElement>('[data-mute-remove]').forEach(button => { button.onclick = () => { void save({ petMutes: rules.filter((_, index) => index !== Number(button.dataset.muteRemove)) }); }; });
 }
 const languageLabels = (): Record<SummaryLanguage, string> => ({ auto: t('跟随界面语言'), 'zh-CN': '中文', en: 'English', ja: '日本語', ko: '한국어', fr: 'Français', de: 'Deutsch', es: 'Español' });
 const connectionValue = (deviceId: string, id: string): string => `${deviceId}\n${id}`;
@@ -102,7 +126,7 @@ export function updateVoiceProgress(root: HTMLElement, state: LocalState): void 
   const status = root.querySelector<HTMLElement>('#voice-model-status');
   if (status && state.voice.model.state === 'downloading') status.textContent = progressText(state);
 }
-export function bindVoice(root: HTMLElement, state: LocalState, cleanups: (() => void)[], save: (patch: Partial<DesktopSettings>) => Promise<unknown>, action: (value: LocalAction) => Promise<boolean>): void {
+export function bindVoice(root: HTMLElement, state: LocalState, cleanups: (() => void)[], save: (patch: Partial<DesktopSettings>) => Promise<unknown>, action: (value: LocalAction) => Promise<boolean>, rerender: () => void): void {
   const settings = state.settings, provider = settings.petVoiceProvider;
   const trigger = (id: string): HTMLButtonElement | null => root.querySelector<HTMLButtonElement>(`#${id}`);
   const labels = providerLabels();
@@ -122,6 +146,7 @@ export function bindVoice(root: HTMLElement, state: LocalState, cleanups: (() =>
   bindText('voice-url', 'url'); bindText('voice-model-name', 'model'); bindText('voice-name', 'voice'); bindText('voice-style', 'style'); bindText('voice-extra', 'extra');
   const install = trigger('voice-install'); if (install) install.onclick = () => { void action({ type: 'voiceInstall' }); };
   bindSummary(root, state, save, action, mount);
+  bindMutes(root, state, save, action, mount, rerender);
   const key = root.querySelector<HTMLInputElement>('#voice-key');
   if (key) key.onchange = () => { if (key.value.trim()) void action({ type: 'voiceKey', key: key.value }); };
   const clear = trigger('voice-key-clear'); if (clear) clear.onclick = () => { void action({ type: 'voiceKey', key: null }); };
