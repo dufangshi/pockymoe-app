@@ -1,3 +1,4 @@
+import { recordLifecycle } from './lifecycle';
 import { test, expect, _electron as electron, type ElectronApplication } from '@playwright/test';
 import { mkdtempSync, readFileSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -22,6 +23,7 @@ for (const surface of ['main', 'map', 'devices'] as const) for (const pack of ['
   let app: ElectronApplication | undefined, stage = 'launch', authenticated = false;
   try {
     app = await electron.launch({ ...(process.env.POCKYMOE_PACKAGED_EXECUTABLE ? { executablePath: process.env.POCKYMOE_PACKAGED_EXECUTABLE, args: process.env.POCKYMOE_DESKTOP_SCALE ? [`--force-device-scale-factor=${process.env.POCKYMOE_DESKTOP_SCALE}`] : [] } : { args: [resolve('.')] }), env });
+  await recordLifecycle(app, join(evidence, `lifecycle-${Date.now()}.jsonl`));
     await app.context().addInitScript(({ mode }) => { localStorage.setItem('remote-codex.locale', 'en'); localStorage.setItem('remote-codex-theme-mode', mode); }, { mode });
     await expect.poll(() => app!.windows().some(page => page.url().startsWith(fixture.webOrigin))).toBe(true);
     const page = app.windows().find(page => page.url().startsWith(fixture.webOrigin))!;

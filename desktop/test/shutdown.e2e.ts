@@ -1,3 +1,4 @@
+import { recordLifecycle } from './lifecycle';
 import { test, expect, _electron as electron } from '@playwright/test';
 import { createServer } from 'node:http';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
@@ -14,8 +15,18 @@ test('quit cannot reopen a main window through a late activation event', async (
   Object.assign(env, { POCKYMOE_DESKTOP_E2E: '1', POCKYMOE_DESKTOP_USER_DATA: profile, POCKYMOE_DESKTOP_WEB_ORIGIN: `http://127.0.0.1:${address.port}`, POCKYMOE_DESKTOP_RELAY_ORIGIN: `http://127.0.0.1:${address.port}` });
   const app = await electron.launch({ ...(process.env.POCKYMOE_PACKAGED_EXECUTABLE ? { executablePath: process.env.POCKYMOE_PACKAGED_EXECUTABLE, args: [] } : { args: [resolve('.')] }), env });
   const proof = join(profile, 'quit-proof.json');
+  await recordLifecycle(app, join(process.env.POCKYMOE_DESKTOP_EVIDENCE || profile, `shutdown-${Date.now()}.jsonl`));
   try {
     await expect.poll(() => app.evaluate(() => '__pockymoeDesktopTest' in globalThis)).toBe(true);
+    await expect.poll(() => app.windows().filter(page => page.url().includes('/pet/')).length).toBe(2);
+    for (const page of app.windows().filter(page => page.url().includes('/pet/'))) await page.waitForLoadState('domcontentloaded');
+    await app.evaluate(async ({ BrowserWindow }) => {
+      const glass = BrowserWindow.getAllWindows().find(window => window.webContents.getURL().includes('/pet/') && window.getParentWindow());
+      if (!glass) throw new Error('Pet glass window missing');
+      glass.destroy();
+      // The pet's 100ms proximity timer must tolerate OS destruction before quit.
+      await new Promise(resolve => setTimeout(resolve, 250));
+    });
     await app.evaluate(({ app }, proof) => {
       const { writeFileSync } = process.getBuiltinModule('fs');
       const manager = globalThis.__pockymoeDesktopTest.windows;
@@ -29,6 +40,6 @@ test('quit cannot reopen a main window through a late activation event', async (
     await app.close();
     expect(JSON.parse(readFileSync(proof, 'utf8'))).toEqual({ quitting: true, reopening: 0 });
   } finally {
-    await new Promise<void>(done => server.close(() => done())); rmSync(profile, { recursive: true, force: true });
+    await new Promise<void>(done => server.close(() => done())); rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 });

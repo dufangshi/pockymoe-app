@@ -1,3 +1,4 @@
+import { recordLifecycle } from './lifecycle';
 import { test, expect, _electron as electron, type ElectronApplication, type Page } from '@playwright/test';
 import { createServer, type Server } from 'node:http';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
@@ -45,6 +46,7 @@ test.beforeEach(async () => {
   // POCKYMOE_DESKTOP_APP checks a packaged build, whose addon lives in app.asar.unpacked.
   const packaged = process.env.POCKYMOE_PACKAGED_EXECUTABLE || process.env.POCKYMOE_DESKTOP_APP;
   app = await electron.launch({ ...(packaged ? { executablePath: packaged, args: [`--lang=${process.env.POCKYMOE_TEST_SYSTEM_LOCALE || 'en-US'}`, ...(process.env.POCKYMOE_DESKTOP_SCALE ? [`--force-device-scale-factor=${process.env.POCKYMOE_DESKTOP_SCALE}`] : [])] } : { args: [resolve('.'), `--lang=${process.env.POCKYMOE_TEST_SYSTEM_LOCALE || 'en-US'}`] }), env });
+  await recordLifecycle(app, join(evidence, `lifecycle-${Date.now()}.jsonl`));
   await expect.poll(() => app.evaluate(() => '__pockymoeDesktopTest' in globalThis)).toBe(true);
   await app.evaluate(() => globalThis.__pockymoeDesktopTest.appearance.sync({ pack: 'classic', effective: 'light', accent: '#a57224', locale: 'en' }));
 });

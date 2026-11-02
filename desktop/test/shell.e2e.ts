@@ -1,3 +1,4 @@
+import { recordLifecycle } from './lifecycle';
 import { test, expect, _electron as electron, type ElectronApplication, type Page } from '@playwright/test';
 import { createServer, type Server, type RequestListener } from 'node:http';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -37,7 +38,7 @@ async function launch(theme: 'light' | 'dark', firstRun = false, material = 'nat
   Object.assign(env, { POCKYMOE_DESKTOP_E2E: '1', POCKYMOE_DESKTOP_USER_DATA: dir, POCKYMOE_DESKTOP_THEME: theme });
   if (material === 'solid') env.POCKYMOE_WINDOWS_GLASS = 'solid';
   if (!firstRun) { env.POCKYMOE_DESKTOP_WEB_ORIGIN = origin; env.POCKYMOE_DESKTOP_RELAY_ORIGIN = relayOriginValue; }
-  const app = await electron.launch({ ...(process.env.POCKYMOE_PACKAGED_EXECUTABLE ? { executablePath: process.env.POCKYMOE_PACKAGED_EXECUTABLE, args: process.env.POCKYMOE_DESKTOP_SCALE ? [`--force-device-scale-factor=${process.env.POCKYMOE_DESKTOP_SCALE}`] : [] } : { args: [resolve('.')] }), env }); apps.push(app); themes.set(app, theme);
+  const app = await electron.launch({ ...(process.env.POCKYMOE_PACKAGED_EXECUTABLE ? { executablePath: process.env.POCKYMOE_PACKAGED_EXECUTABLE, args: process.env.POCKYMOE_DESKTOP_SCALE ? [`--force-device-scale-factor=${process.env.POCKYMOE_DESKTOP_SCALE}`] : [] } : { args: [resolve('.')] }), env }); await recordLifecycle(app, join(evidence, `lifecycle-${Date.now()}.jsonl`)); apps.push(app); themes.set(app, theme);
   return app;
 }
 async function pageAt(app: ElectronApplication, fragment: string): Promise<Page> {
@@ -120,6 +121,8 @@ test('split origins bridge, activity delivery, tray and quick-window command rou
   await expect.poll(() => page.evaluate(() => (window as unknown as { frameResults: unknown }).frameResults)).toEqual({ sameFrameBridge: false, otherBridge: false });
   await app.evaluate(() => globalThis.__pockymoeDesktopTest.windows.focusMain());
   if (process.platform === 'win32') await expect.poll(() => app.evaluate(() => globalThis.__pockymoeDesktopTest.windows.main().isFocused())).toBe(true);
+  await page.getByRole('heading', { name: 'Pockymoe fixture', exact: true }).click();
+  await expect.poll(() => page.evaluate(() => document.hasFocus())).toBe(true);
   await primaryKey(app, 'k');
   await expect.poll(() => page.evaluate(() => (window as unknown as { searchKeys: number }).searchKeys)).toBe(1);
   await app.evaluate(() => { globalThis.__pockymoeDesktopTest.settings.set({ petVisible: false }); globalThis.__pockymoeDesktopTest.windows.focusMain(); });
@@ -421,7 +424,7 @@ for (const material of ['native', 'solid']) for (const pack of packs) for (const
 
 
 test('native menu accelerators have no collisions, including role defaults', async () => {
-  const app = await launch('light'); await pageAt(app, origin);
+  const app = await launch('light'); const page = await pageAt(app, origin);
   const shortcuts = await app.evaluate(({ Menu }) => {
     const found: { label: string; accelerator: string }[] = [];
     const visit = (menu: Electron.Menu): void => { for (const item of menu.items) {
@@ -438,6 +441,8 @@ test('native menu accelerators have no collisions, including role defaults', asy
   expect(shortcuts.find(item => item.label === 'pockymoe-open-map')?.accelerator).toBe('CommandOrControl+0');
   expect(shortcuts.find(item => item.label === 'resetzoom')).toBeUndefined();
   await app.evaluate(() => globalThis.__pockymoeDesktopTest.windows.focusMain());
+  await page.getByRole('heading', { name: 'Pockymoe fixture', exact: true }).click();
+  await expect.poll(() => page.evaluate(() => document.hasFocus())).toBe(true);
   await primaryKey(app, '0');
   await expect.poll(() => app.windows().find(page => page.url().startsWith(origin))!.evaluate(() => window.commands)).toEqual(expect.arrayContaining([expect.objectContaining({ type: 'openMap' })]));
 });

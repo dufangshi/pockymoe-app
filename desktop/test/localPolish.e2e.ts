@@ -1,3 +1,4 @@
+import { recordLifecycle } from './lifecycle';
 import { test, expect, _electron as electron, type ElectronApplication, type Page } from '@playwright/test';
 import { createServer, type Server } from 'node:http';
 import { copyFileSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -33,6 +34,7 @@ test.beforeEach(async () => {
   for (const key of ['PATH', 'HOME', 'TMPDIR', 'USER', 'LOGNAME', 'DISPLAY', 'SystemRoot', 'WINDIR', 'TEMP', 'TMP', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'ComSpec', 'PATHEXT']) if (process.env[key]) env[key] = process.env[key]!;
   Object.assign(env, { POCKYMOE_DESKTOP_E2E: '1', POCKYMOE_DESKTOP_USER_DATA: profile, POCKYMOE_DESKTOP_WEB_ORIGIN: origin, POCKYMOE_DESKTOP_RELAY_ORIGIN: origin });
   app = await electron.launch({ ...(process.env.POCKYMOE_PACKAGED_EXECUTABLE ? { executablePath: process.env.POCKYMOE_PACKAGED_EXECUTABLE, args: process.env.POCKYMOE_DESKTOP_SCALE ? [`--force-device-scale-factor=${process.env.POCKYMOE_DESKTOP_SCALE}`] : [] } : { args: [resolve('.')] }), env });
+  await recordLifecycle(app, join(evidence, `lifecycle-${Date.now()}.jsonl`));
 });
 test.afterEach(async () => { await app?.close(); rmSync(profile, { recursive: true, force: true }); });
 async function pageAt(fragment: string): Promise<Page> {
@@ -162,5 +164,18 @@ test('local confirmations trap and restore focus, cancel safely and follow every
     await prefs.keyboard.press('Escape'); await expect(prompt).toHaveCount(0);
     await expect.poll(() => app.evaluate(() => globalThis.__pockymoeDesktopTest.lastMessageResponse)).toBe(1);
     await expect(prefs.locator('#update')).toBeFocused();
+  }
+});
+
+
+test('empty quick reply placeholder follows language changes', async () => {
+  await pageAt(origin);
+  await mode();
+  await app.evaluate(() => globalThis.__pockymoeDesktopTest.windows.createLocal('quick'));
+  const quick = await pageAt('view=quick');
+  await expect(quick.locator('#reply')).toBeDisabled();
+  for (const locale of ['zh-CN', 'en']) {
+    await app.evaluate((_electron, locale) => globalThis.__pockymoeDesktopTest.appearance.sync({ pack: 'classic', effective: 'light', accent: '#a57224', locale }), locale);
+    await expect(quick.locator('#reply')).toHaveAttribute('placeholder', locale === 'en' ? 'Quick reply to the selected thread…' : '给选中的线程快速回复…');
   }
 });

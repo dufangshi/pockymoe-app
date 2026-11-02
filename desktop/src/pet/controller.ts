@@ -144,7 +144,7 @@ export function createPetController(deps: PetControllerDeps): PetController {
     glass.setFocusable(true); emit(); glass.showInactive(); glass.focus();
   }
   function emit(): void {
-    if (disposed) return;
+    if (disposed || window.isDestroyed() || glass.isDestroyed()) return;
     const now = Date.now();
     const expiring = bubbles.current && !bubbles.current.sticky && bubbles.current.shownAt !== null && now - bubbles.current.shownAt >= BUBBLE_MS ? [...bubbles.current.events] : [];
     bubbles.tick(now);
@@ -349,7 +349,7 @@ export function createPetController(deps: PetControllerDeps): PetController {
   const displayChanged = (): void => { position = restorePosition(position, screen.getAllDisplays(), screen.getPrimaryDisplay(), petHeight(settings)); placeSprite(); savePosition(); emit(); };
   screen.on('display-removed', displayChanged); screen.on('display-metrics-changed', displayChanged);
   const timer = setInterval(() => {
-    if (disposed) return;
+    if (disposed || window.isDestroyed() || glass.isDestroyed()) return;
     const now = Date.now(), cursor = screen.getCursorScreenPoint(), bounds = window.getBounds(), child = glass.getBounds();
     const within = (r: Electron.Rectangle, margin = 0) => cursor.x >= r.x - margin && cursor.x <= r.x + r.width + margin && cursor.y >= r.y - margin && cursor.y <= r.y + r.height + margin;
     const tucked = position.edge && settings.petEdgeHide !== false && dockAmount > 0;
@@ -365,17 +365,26 @@ export function createPetController(deps: PetControllerDeps): PetController {
     dockAmount = position.edge && settings.petEdgeHide !== false && !peek ? alerting ? HEAD_PEEK : 1 : 0;
     emit();
   }, 100);
+  // Stop native-window polling before Electron begins destroying those windows.
+  const beforeQuit = (): void => dispose(false);
+  app.once('before-quit', beforeQuit);
   const devUrl = process.env.ELECTRON_RENDERER_URL;
   for (const view of [window, glass]) void (devUrl ? view.loadURL(`${devUrl.replace(/\/$/, '')}/pet/index.html`) : view.loadFile(join(__dirname, '../renderer/pet/index.html'))).then(() => { if (view === window) void refreshPacks(); });
+  function dispose(destroyWindows = true): void {
+    if (disposed) return; disposed = true; clearInterval(timer); clearTimeout(blurTimer); savePosition();
+    app.removeListener('before-quit', beforeQuit);
+    for (const unsubscribe of unsubscribes) unsubscribe();
+    screen.removeListener('display-removed', displayChanged); screen.removeListener('display-metrics-changed', displayChanged);
+    ipcMain.removeListener('rcDesktop:pet:ready', onReady); ipcMain.removeListener('rcDesktop:pet:hitTest', onHitTest); ipcMain.removeHandler('rcDesktop:pet:action'); ipcMain.removeHandler('rcDesktop:pet:clip');
+    if (destroyWindows) {
+      if (!glass.isDestroyed()) glass.destroy();
+      if (!window.isDestroyed()) window.destroy();
+    }
+  }
   return {
     async reloadPacks() { await refreshPacks(); packEpoch++; emit(); },
     setVisible(value) { if (deps.settings.get().petVisible !== value) deps.settings.set({ petVisible: value }); }, isVisible: () => visible && !disposed, play, say(text) { cue(undefined, text); },
-    dispose() {
-      if (disposed) return; disposed = true; clearInterval(timer); clearTimeout(blurTimer); savePosition();
-      for (const unsubscribe of unsubscribes) unsubscribe();
-      screen.removeListener('display-removed', displayChanged); screen.removeListener('display-metrics-changed', displayChanged);
-      ipcMain.removeListener('rcDesktop:pet:ready', onReady); ipcMain.removeListener('rcDesktop:pet:hitTest', onHitTest); ipcMain.removeHandler('rcDesktop:pet:action'); ipcMain.removeHandler('rcDesktop:pet:clip'); glass.destroy(); window.destroy();
-    },
+    dispose,
   };
 }
 /** Native Settings import entry; shell owns the parent window, pet owns validation. */

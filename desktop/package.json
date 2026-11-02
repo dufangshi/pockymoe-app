@@ -51,6 +51,9 @@
         "arm64",
         "x64"
       ]
+    },
+    "patchedDependencies": {
+      "playwright-core@1.64.1": "patches/playwright-core@1.64.1.patch"
     }
   },
   "optionalDependencies": {

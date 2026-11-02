@@ -394,3 +394,12 @@ window/runtime state and URL paths, never environment values or Web contents.
 Real conversation captures additionally wait for seeded transcript content (not
 just the route change) and dismiss the first-use tour through its normal button.
 This prevents a loading surface being mistaken for conversation acceptance.
+The pet cancels its native-window polling on `before-quit` and ignores already
+destroyed sprite/glass windows. This prevents a timer from raising an uncaught
+native-object error while Electron is closing the app. Empty quick-window reply
+placeholders also refresh when the interface language changes.
+The pinned Playwright 1.64.1 Electron driver has a small pnpm patch: its startup
+handshake waits for the injected loader function and awaits that function's
+promise. Without this, a launch can return behind Playwright's not-ready shim;
+waiting longer in a test does not start the app. Frozen installs apply the patch.
+This is independent of the product's destroyed-glass timer fix.
