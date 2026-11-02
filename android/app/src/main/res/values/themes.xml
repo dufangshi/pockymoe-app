@@ -1,8 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.RemoteCodex" parent="android:Theme.Material.Light.NoActionBar">
+    <style name="Base.Theme.RemoteCodex" parent="android:Theme.Material.Light.NoActionBar">
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
-        <item name="android:windowBackground">#FFE0E4E0</item>
+        <item name="android:windowDisablePreview">true</item>
+        <item name="android:windowBackground">#FAFAF8</item>
     </style>
+    <style name="Theme.RemoteCodex" parent="Base.Theme.RemoteCodex" />
 </resources>

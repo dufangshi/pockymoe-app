@@ -1,8 +1,4 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Remote Codex</string>
-    <string name="notification_channel_name">Agent runs</string>
-    <string name="notification_channel_desc">Notifies you when a running agent turn finishes.</string>
-    <string name="watch_notification_title">Watching agent runs</string>
-    <string name="watch_notification_text">Listening for completed runs on every device in this account.</string>
+    <string name="app_name" translatable="false">Pockymoe</string>
 </resources>
