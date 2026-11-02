@@ -4,6 +4,7 @@ export interface LocalMessage {
   id: number; title: string; message: string; detail: string; buttons: string[]; cancelId: number; defaultId: number;
 }
 export interface LocalState {
+  revision?: number; connectionError?: string;
   message?: LocalMessage | null;
   glassFallback?: boolean; platform?: string; locale: string; preferencesRequestId: number; preferencesSection: 'general' | 'pet' | 'shortcuts'; settings: DesktopSettings; appearance: Appearance | null; snapshot: ActivitySnapshot | null;
   petAvailable: boolean; petPacks: { id: string; name: string; thumbnail?: string; rows?: number; author?: string; source?: string; license?: string; licenseUrl?: string }[]; version: string; voice: VoiceStatus; summary: SummaryStatus;
@@ -14,6 +15,7 @@ export type LocalAction =
   | { type: 'open'; key: string }
   | { type: 'reply'; key: string; text: string }
   | { type: 'changeConnection' }
+  | { type: 'retryConnection' }
   | { type: 'hide' }
   | { type: 'importPet' }
   | { type: 'external'; url: string }

@@ -39,7 +39,10 @@ async function launch(theme: 'light' | 'dark', firstRun = false, material = 'nat
   Object.assign(env, { POCKYMOE_DESKTOP_E2E: '1', POCKYMOE_DESKTOP_USER_DATA: dir, POCKYMOE_DESKTOP_THEME: theme });
   if (material === 'solid') env.POCKYMOE_WINDOWS_GLASS = 'solid';
   if (!firstRun) { env.POCKYMOE_DESKTOP_WEB_ORIGIN = origin; env.POCKYMOE_DESKTOP_RELAY_ORIGIN = relayOriginValue; }
-  const app = await electron.launch({ ...(process.env.POCKYMOE_PACKAGED_EXECUTABLE ? { executablePath: process.env.POCKYMOE_PACKAGED_EXECUTABLE, args: process.env.POCKYMOE_DESKTOP_SCALE ? [`--force-device-scale-factor=${process.env.POCKYMOE_DESKTOP_SCALE}`] : [] } : { args: [resolve('.')] }), env }); await recordLifecycle(app, join(evidence, `lifecycle-${Date.now()}.jsonl`)); apps.push(app); themes.set(app, theme);
+  // Matrix captures intentionally inspect overlapping utility windows. Keep the
+  // test host's native occlusion calculation from suspending their compositor.
+  const captureArgs = process.platform === 'win32' ? ['--disable-features=CalculateNativeWinOcclusion'] : [];
+  const app = await electron.launch({ ...(process.env.POCKYMOE_PACKAGED_EXECUTABLE ? { executablePath: process.env.POCKYMOE_PACKAGED_EXECUTABLE, args: [...captureArgs, ...(process.env.POCKYMOE_DESKTOP_SCALE ? [`--force-device-scale-factor=${process.env.POCKYMOE_DESKTOP_SCALE}`] : [])] } : { args: [resolve('.'), ...captureArgs] }), env }); await recordLifecycle(app, join(evidence, `lifecycle-${Date.now()}.jsonl`)); apps.push(app); themes.set(app, theme);
   return app;
 }
 async function pageAt(app: ElectronApplication, fragment: string): Promise<Page> {
@@ -198,6 +201,7 @@ async function capture(app: ElectronApplication, page: Page, name: string, pack:
   await app.evaluate(({ BrowserWindow }, { url, size }) => BrowserWindow.getAllWindows().find(w => w.webContents.getURL() === url)!.setContentSize(size[0], size[1]), { url: page.url(), size: original });
 }
 for (const pack of packs) for (const theme of ['light', 'dark'] as const) test(`local windows appearance and origin discovery (${pack} ${theme})`, async () => {
+  test.setTimeout(60_000); // Capture native, phone and desktop surfaces before the live-timer check.
   const app = await launch(theme, true);
   const setup = await pageAt(app, 'view=relay');
   const appearance = appearanceFor(pack, theme);
@@ -205,14 +209,14 @@ for (const pack of packs) for (const theme of ['light', 'dark'] as const) test(`
   await expect(setup.locator('html')).toHaveAttribute('data-theme-preset', pack);
   await expect(setup.locator('html')).toHaveAttribute('data-theme-effective', theme);
   await expect(setup.getByRole('heading', { name: '连接 Pockymoe' })).toBeVisible();
-  await capture(app, setup, 'relay', pack, theme);
+  await capture(app, setup, 'relay', pack, theme, [380, 1440]);
   await setup.getByText('高级', { exact: true }).click();
-  await capture(app, setup, 'relay-advanced', pack, theme);
+  await capture(app, setup, 'relay-advanced', pack, theme, [380, 1440]);
   if (pack === 'classic' && theme === 'light') {
-    await setup.getByLabel('网页地址', { exact: true }).fill(origin);
+    await setup.getByLabel('Pockymoe 地址', { exact: true }).fill(origin);
     await setup.getByLabel('Relay 地址', { exact: true }).fill(relayOriginValue);
   } else await setup.getByText('高级', { exact: true }).click();
-  await setup.getByLabel('Pockymoe 地址', { exact: true }).fill(theme === 'light' ? relayOriginValue : origin); await setup.getByRole('button', { name: '连接', exact: true }).click();
+  await setup.getByLabel('Pockymoe 地址', { exact: true }).fill(pack === 'classic' && theme === 'light' ? origin : theme === 'light' ? relayOriginValue : origin); await setup.getByRole('button', { name: '连接', exact: true }).click();
   const page = await pageAt(app, origin); await expect.poll(() => page.evaluate(() => !!window.pockymoeHost)).toBe(true);
   expect(await page.evaluate(() => window.pockymoeHost!.settings.get())).toMatchObject({ webOrigin: origin, relayOrigin: relayOriginValue });
   await page.evaluate(a => window.pockymoeHost!.appearance.sync(a), appearance);
@@ -293,7 +297,7 @@ for (const pack of packs) for (const theme of ['light', 'dark'] as const) test(`
   const page = await pageAt(app, origin);
   await page.evaluate(a => { window.pockymoeHost!.appearance.sync(a); }, appearanceFor(pack, theme));
   const rows = [item({ title: 'Review desktop shell', state: 'needsInput', request: { id: 'locale-request', kind: 'approval', summary: 'Approve targeted tests' }, workspaceLabel: 'pockymoe' }), item({ key: 'mac:locale-running', threadId: 'locale-running', title: 'Verify activity updates', workspaceLabel: 'pockymoe', since: new Date(Date.now() - 65_000).toISOString() })];
-  await page.evaluate(s => { window.pockymoeHost!.activity.sync({ ...s, items: [], generatedAt: '2026-11-01T05:59:00.000Z', syncedDeviceIds: ['mac', 'pc'] }); window.pockymoeHost!.activity.sync(s); }, snapshot(rows));
+  await page.evaluate(async s => { window.pockymoeHost!.activity.sync({ ...s, items: [], generatedAt: '2026-11-01T05:59:00.000Z', syncedDeviceIds: ['mac', 'pc'] }); window.pockymoeHost!.activity.sync(s); await window.pockymoeHost!.capabilities(); }, snapshot(rows));
   await page.evaluate(() => window.pockymoeHost!.window.openPreferences('general'));
   const prefs = await pageAt(app, 'view=preferences');
   await app.evaluate(() => globalThis.__pockymoeDesktopTest.windows.createLocal('quick'));
@@ -370,6 +374,10 @@ for (const material of ['native', 'solid']) for (const pack of packs) for (const
   const scales: { url: string; devicePixelRatio: number }[] = [];
   for (const page of app.windows()) {
     await page.waitForLoadState('domcontentloaded');
+    if (page.url().includes('/pet/') && await page.evaluate(() => document.body.dataset.surface) === 'glass') {
+      if (!await page.locator('.panel').count()) await page.evaluate(() => (window as unknown as { rcDesktop: { pet: { action(value: unknown): Promise<unknown> } } }).rcDesktop.pet.action({ type: 'toggleTray' }));
+      await expect(page.locator('.panel')).toBeVisible();
+    }
     const violations = await page.evaluate(() => {
       const text = [document.body.innerText, ...Array.from(document.querySelectorAll('*')).flatMap(el => [el.getAttribute('title') || '', el.getAttribute('aria-label') || ''])].join(' ');
       const scrollbars = Array.from(document.querySelectorAll<HTMLElement>('*')).filter(el => {
@@ -396,7 +404,30 @@ for (const material of ['native', 'solid']) for (const pack of packs) for (const
     test.info().annotations.push({ type: 'scale', description: `${page.url()}: devicePixelRatio=${violations.devicePixelRatio}` });
     scales.push({ url: page.url(), devicePixelRatio: violations.devicePixelRatio });
     const label = page.url().includes('/pet/') ? await page.evaluate(() => `pet-${document.body.dataset.surface}`) : new URL(page.url()).searchParams.get('view') || 'main-fixture';
-    await page.screenshot({ path: join(evidence, `windows-${material}-${label}-${pack}-${theme}.png`), animations: 'disabled' });
+    // Some utility/child windows become hidden when another surface takes focus.
+    // Ask Electron to wake their compositor without focusing them; CDP
+    // screenshots can otherwise wait forever for a frame from a hidden window.
+    await test.step(`capture ${label}`, async () => {
+      await page.evaluate(() => document.fonts.ready);
+      // Pet sprite/glass share a URL. Resolve the exact native window for this
+      // Page, never the first URL match (which can silently capture its sibling).
+      const target = await app.browserWindow(page);
+      try {
+        const capture = await target.evaluate(async (window: Electron.BrowserWindow) => {
+          const surface = await window.webContents.executeJavaScript('document.body.dataset.surface || null') as string | null;
+          // Keep this fixture painting even if the normal hide timer fires.
+          window.webContents.setBackgroundThrottling(false);
+          window.getParentWindow()?.showInactive();
+          window.showInactive(); window.moveTop();
+          const png = await window.webContents.capturePage(undefined, { stayHidden: false, stayAwake: true });
+          return { id: window.id, surface, size: png.getSize(), png: png.toPNG().toString('base64') };
+        });
+        if (label.startsWith('pet-')) expect(capture.surface).toBe(label.slice(4));
+        expect(capture.size.width).toBeGreaterThan(0); expect(capture.size.height).toBeGreaterThan(0);
+        writeFileSync(join(evidence, `windows-${material}-${label}-${pack}-${theme}.png`), Buffer.from(capture.png, 'base64'));
+        writeFileSync(join(evidence, `windows-${material}-${label}-${pack}-${theme}.json`), JSON.stringify({ nativeWindowId: capture.id, surface: capture.surface, size: capture.size }));
+      } finally { await target.dispose(); }
+    });
   }
   const displays = await app.evaluate(({ screen }) => screen.getAllDisplays().map(display => ({ bounds: display.bounds, workArea: display.workArea, scaleFactor: display.scaleFactor })));
   writeFileSync(join(evidence, `windows-${material}-scale-${pack}-${theme}.json`), JSON.stringify({ requested: process.env.POCKYMOE_DESKTOP_SCALE || 'system', scales, displays }, null, 2));

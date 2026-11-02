@@ -43,7 +43,7 @@ function chunk(type, data) { const name = Buffer.from(type), result = Buffer.all
 const raw = Buffer.alloc(height * (width * 4 + 1));
 for (let y = 0; y < height; y++) pixels.copy(raw, y * (width * 4 + 1) + 1, y * width * 4, (y + 1) * width * 4);
 const ihdr = Buffer.alloc(13); ihdr.writeUInt32BE(width); ihdr.writeUInt32BE(height, 4); ihdr[8] = 8; ihdr[9] = 6;
-const out = fileURLToPath(new URL('../../../assets/pets/placeholder/', import.meta.url));
+const out = fileURLToPath(new URL('../../../test/fixtures/pets/placeholder/', import.meta.url));
 mkdirSync(out, { recursive: true });
 writeFileSync(out + 'spritesheet.png', Buffer.concat([Buffer.from([137,80,78,71,13,10,26,10]), chunk('IHDR', ihdr), chunk('IDAT', deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]));
 writeFileSync(out + 'pet.json', JSON.stringify({ id: 'placeholder', displayName: '小蓝 · Cobalt', description: 'An original little cobalt companion. Procedural placeholder artwork.', spritesheetPath: 'spritesheet.png', spriteVersionNumber: 1 }, null, 2) + '\n');

@@ -110,7 +110,7 @@ Mini 模式：宠物缩到 72px，其余行为不变。
 
 **白龙娘**（[jingh12312-rgb/bailong-desktop-pet](https://github.com/jingh12312-rgb/bailong-desktop-pet)）的素材没有授予再分发许可（见其 `ASSETS.md`），本项目已获得授权，但目前仍不内置：不进仓库、不进发布包，由用户导入 ZIP 使用。
 
-内置 `frost`（小霜），原创的白发龙娘：短发、连帽斗篷、铃铛、小翼和粗尾巴。用 gpt-image-2.5 画两张纯绿底的姿势表，由 `desktop/art/moe/build_atlas.py --chroma` 自己抠图，再按“一个状态一个姿势”做成图集，源文件在 `desktop/art/frost/`。之前选了 `gpt-dragon` 的用户自动换到它。加载器仍支持 v2 的 8×11 图集，用户可以导入。偏好设置里选宠物的控件显示缩略图和署名。
+只内置 MOE（`moe`），它也是默认宠物；源文件和构建工具保留在 `desktop/art/moe/`，通用工具保留在 `desktop/art/tools/`。其他角色一律由用户导入。原内置 `frost` 和旧 `gpt-dragon` 的选择迁移到 `moe`；用户后来导入的 `frost` 可正常选择并跨重启保留，只有 `moe` 不能被导入覆盖。未知的用户导入 id 不受迁移影响。加载器仍支持 v2 的 8×11 图集，用户可以导入。偏好设置里选宠物的控件显示缩略图和署名。
 
 ### 2.9 语音播报
 

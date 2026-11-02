@@ -58,7 +58,10 @@ All positioning remains in Electron DIP work areas, including taskbar insets;
 physical Windows verification.
 The shell may call `importPetPack({ settings, petDirectories, parent })`.
 
-`moe` and `frost` are original bundled packs; their sources are in `desktop/art/`.
+`moe` (MOE) is the only built-in pack and the default; its source and build tools
+remain in `desktop/art/moe/`. Every other pet is imported by the user. The
+procedural placeholder is a test fixture under `desktop/test/fixtures/pets/`,
+never a shipped pack.
 Native Preferences/About display each pack's credit via the shell's pet catalog.
 
 Focused checks from `desktop/`:
@@ -104,7 +107,7 @@ HTTP and records only owned disposable thread ids outside the repository.
 
 A pet travels as one zip, imported from Preferences. Its root holds `pet.json`, the atlas it
 names and, optionally, `sleeping.webp` and `clips/*.webp`, and nothing else. Importing a pack
-with an id already imported replaces it; built-in ids are refused. `art/tools/build_clip_pack.py`
+with an id already imported replaces it; `moe` is refused; former built-in id `frost` is now a normal import. `art/tools/build_clip_pack.py`
 writes such a zip from alpha WebM videos, and `art/tools/build_pose_clips.py` from generated
 pose sheets, turning a few drawings into motion.
 

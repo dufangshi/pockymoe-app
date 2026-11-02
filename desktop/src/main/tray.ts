@@ -44,6 +44,7 @@ export class DesktopTray {
   private unsubscribers: (() => void)[] = [];
   private themeUpdated = (): void => this.update();
   private windowCreated = (_event: Electron.Event, window: BrowserWindow): void => {
+    if (this.disposed || this.windows.quitting) return;
     const ready = (): void => { this.pendingWindows.delete(window); this.update(); };
     this.pendingWindows.set(window, ready); window.once('ready-to-show', ready);
     window.once('closed', () => this.pendingWindows.delete(window));
@@ -67,21 +68,36 @@ export class DesktopTray {
     if (process.platform === 'darwin') image.setTemplateImage(true);
     return image;
   }
+  private live(): boolean { return !this.disposed && !this.windows.quitting && !this.tray.isDestroyed(); }
   setBadge(count: number, style: 'attention' | 'running' | 'none'): void {
-    if (this.disposed || this.tray.isDestroyed()) return;
+    if (!this.live()) return;
     const n = Math.max(0, Math.min(999, Math.trunc(count)));
     if (process.platform === 'darwin') app.dock?.setBadge(n && style !== 'none' ? `${style === 'running' ? '◦' : ''}${n}` : '');
     if (process.platform === 'win32') {
       const icon = n && style === 'attention' ? nativeImage.createFromPath(join(app.getAppPath(), 'build', `overlay-${style}-${n > 9 ? 'many' : n}.png`)) : null;
-      for (const w of this.windows.relay) w.setOverlayIcon(icon, icon ? `${n} ${t('需要你')}` : '');
+      for (const w of this.windows.relay) {
+        if (!this.live()) return;
+        if (!w.isDestroyed()) w.setOverlayIcon(icon, icon ? `${n} ${t('需要你')}` : '');
+      }
     }
   }
   update(): void {
-    if (this.disposed || this.tray.isDestroyed()) return;
+    if (!this.live()) return;
+    try { this.updateState(); }
+    catch (error) {
+      // Native calls may pump ready/quit callbacks while an update is in flight.
+      if (!this.live() && error instanceof Error && error.message === 'Object has been destroyed') return;
+      throw error;
+    }
+  }
+  private updateState(): void {
     const snapshot = this.hub.snapshot(), settings = this.settings.get();
     const { attention, running } = activityCounts(snapshot);
     const state = attention ? 'attention' : running ? 'running' : 'none';
-    this.tray.setImage(this.icon(state));
+    const image = this.icon(state);
+    if (!this.live()) return;
+    this.tray.setImage(image);
+    if (!this.live()) return;
     this.tray.setToolTip(`Pockymoe · ${t('{count} 需要你', { count: attention })} · ${t('{count} 进行中', { count: running })}`);
     const badge = taskbarBadge(snapshot);
     this.setBadge(badge.count, badge.style);
@@ -96,7 +112,8 @@ export class DesktopTray {
       main: () => this.windows.focusMain(), settings: () => this.windows.createLocal('preferences'), quit: () => app.quit()
     });
     this.menuLabels = template.map(i => i.label || '');
-    this.tray.setContextMenu(Menu.buildFromTemplate(template));
+    const menu = Menu.buildFromTemplate(template);
+    if (this.live()) this.tray.setContextMenu(menu);
   }
   dispose(): void {
     if (this.disposed) return; this.disposed = true;
@@ -104,6 +121,6 @@ export class DesktopTray {
     for (const [window, ready] of this.pendingWindows) window.removeListener('ready-to-show', ready);
     this.pendingWindows.clear();
     for (const unsubscribe of this.unsubscribers) unsubscribe();
-    nativeTheme.removeListener('updated', this.themeUpdated); this.tray.destroy();
+    nativeTheme.removeListener('updated', this.themeUpdated); if (!this.tray.isDestroyed()) this.tray.destroy();
   }
 }

@@ -5,6 +5,7 @@ on:
       - 'desktop/**'
       - 'scripts/desktop-fixture/**'
       - '.github/workflows/desktop-windows.yml'
+      - 'scripts/check-production-address.py'
   workflow_dispatch:
 permissions:
   contents: read
@@ -62,6 +63,12 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Guard packaged app contents
+        run: |
+          node scripts/extract-asar.cjs release/win-unpacked/resources/app.asar release/scan-asar
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python ../scripts/check-production-address.py release/scan-asar release/win-unpacked/resources/app.asar release/win-unpacked/resources/app.asar.unpacked out
+          exit $LASTEXITCODE
       - name: Build pinned public Web and start isolated release runtime
         run: |
           pnpm exec playwright install chromium
