@@ -39,7 +39,10 @@ async function launch(theme: 'light' | 'dark', firstRun = false, material = 'nat
   Object.assign(env, { POCKYMOE_DESKTOP_E2E: '1', POCKYMOE_DESKTOP_USER_DATA: dir, POCKYMOE_DESKTOP_THEME: theme });
   if (material === 'solid') env.POCKYMOE_WINDOWS_GLASS = 'solid';
   if (!firstRun) { env.POCKYMOE_DESKTOP_WEB_ORIGIN = origin; env.POCKYMOE_DESKTOP_RELAY_ORIGIN = relayOriginValue; }
-  const app = await electron.launch({ ...(process.env.POCKYMOE_PACKAGED_EXECUTABLE ? { executablePath: process.env.POCKYMOE_PACKAGED_EXECUTABLE, args: process.env.POCKYMOE_DESKTOP_SCALE ? [`--force-device-scale-factor=${process.env.POCKYMOE_DESKTOP_SCALE}`] : [] } : { args: [resolve('.')] }), env }); await recordLifecycle(app, join(evidence, `lifecycle-${Date.now()}.jsonl`)); apps.push(app); themes.set(app, theme);
+  // Matrix captures intentionally inspect overlapping utility windows. Keep the
+  // test host's native occlusion calculation from suspending their compositor.
+  const captureArgs = process.platform === 'win32' ? ['--disable-features=CalculateNativeWinOcclusion'] : [];
+  const app = await electron.launch({ ...(process.env.POCKYMOE_PACKAGED_EXECUTABLE ? { executablePath: process.env.POCKYMOE_PACKAGED_EXECUTABLE, args: [...captureArgs, ...(process.env.POCKYMOE_DESKTOP_SCALE ? [`--force-device-scale-factor=${process.env.POCKYMOE_DESKTOP_SCALE}`] : [])] } : { args: [resolve('.'), ...captureArgs] }), env }); await recordLifecycle(app, join(evidence, `lifecycle-${Date.now()}.jsonl`)); apps.push(app); themes.set(app, theme);
   return app;
 }
 async function pageAt(app: ElectronApplication, fragment: string): Promise<Page> {
@@ -398,13 +401,13 @@ for (const material of ['native', 'solid']) for (const pack of packs) for (const
     scales.push({ url: page.url(), devicePixelRatio: violations.devicePixelRatio });
     const label = page.url().includes('/pet/') ? await page.evaluate(() => `pet-${document.body.dataset.surface}`) : new URL(page.url()).searchParams.get('view') || 'main-fixture';
     // Some utility/child windows become hidden when another surface takes focus.
-    // Ask Electron to wake their compositor without showing/focusing them; CDP
+    // Ask Electron to wake their compositor without focusing them; CDP
     // screenshots can otherwise wait forever for a frame from a hidden window.
     await test.step(`capture ${label}`, async () => {
       await page.evaluate(() => document.fonts.ready);
       const png = await app.evaluate(async ({ BrowserWindow }, url) => {
         const window = BrowserWindow.getAllWindows().find(window => window.webContents.getURL() === url)!;
-        return (await window.webContents.capturePage(undefined, { stayHidden: true, stayAwake: true })).toPNG().toString('base64');
+        return (await window.webContents.capturePage(undefined, { stayHidden: false, stayAwake: true })).toPNG().toString('base64');
       }, page.url());
       writeFileSync(join(evidence, `windows-${material}-${label}-${pack}-${theme}.png`), Buffer.from(png, 'base64'));
     });

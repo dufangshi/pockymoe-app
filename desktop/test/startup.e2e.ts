@@ -41,7 +41,9 @@ for (const profile of ['fresh', 'legacy', 'saved', 'relay-only', 'relay-failed']
   for (const key of ['PATH', 'HOME', 'TMPDIR', 'USER', 'LOGNAME', 'DISPLAY', 'SystemRoot', 'WINDIR', 'TEMP', 'TMP', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'ComSpec', 'PATHEXT']) if (process.env[key]) env[key] = process.env[key]!;
   let app: ElectronApplication | undefined;
   try {
+    console.log(`startup:${profile}:launch`);
     app = await test.step('launch isolated startup profile', () => electron.launch({ args: [bootstrap], env }));
+    console.log(`startup:${profile}:launched`);
     const configured = profile === 'saved' || profile === 'relay-only';
     const readyPage = await test.step('wait for profile navigation', () => configured
       ? Promise.race([
@@ -49,6 +51,7 @@ for (const profile of ['fresh', 'legacy', 'saved', 'relay-only', 'relay-failed']
         windowAt(app!, 'view=relay').then(async page => { throw new Error(`Saved profile unexpectedly returned to setup: ${await page.locator('#relay-error').textContent()}`); })
       ])
       : windowAt(app!, 'view=relay'));
+    console.log(`startup:${profile}:navigated`);
     if (!configured) {
       const page = readyPage;
       await expect(page.locator('#origin')).toHaveValue(profile === 'relay-failed' ? origin : '');
@@ -74,8 +77,11 @@ for (const profile of ['fresh', 'legacy', 'saved', 'relay-only', 'relay-failed']
       expect(app.windows().some(w => w.url().includes('view=relay'))).toBe(false);
     }
   } finally {
+    console.log(`startup:${profile}:close-app`);
     await test.step('close isolated startup app', async () => { await app?.close(); });
+    console.log(`startup:${profile}:close-server`);
     await test.step('close isolated startup server', () => new Promise<void>(done => { server.close(() => done()); server.closeAllConnections(); }));
     rmSync(dir, { recursive: true, force: true });
+    console.log(`startup:${profile}:done`);
   }
 });
