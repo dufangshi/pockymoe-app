@@ -396,7 +396,7 @@ just the route change) and dismiss the first-use tour through its normal button.
 This prevents a loading surface being mistaken for conversation acceptance.
 The pet cancels its native-window polling on `before-quit` and ignores already
 destroyed sprite/glass windows. This prevents a timer from raising an uncaught
-native-object error while Electron is closing the app. Empty quick-window reply
+native-object error while Electron is closing the app. On Windows, empty quick-window reply
 placeholders also refresh when the interface language changes.
 
 The real-Web audit distinguishes unstyled native scrollbars from the release

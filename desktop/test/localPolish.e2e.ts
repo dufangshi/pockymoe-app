@@ -168,7 +168,8 @@ test('local confirmations trap and restore focus, cancel safely and follow every
 });
 
 
-test('empty quick reply placeholder follows language changes', async () => {
+test('Windows empty quick reply placeholder follows language changes', async () => {
+  test.skip(process.platform !== 'win32', 'Windows-only locale repair; preserve the Mac reference behavior');
   await pageAt(origin);
   await mode();
   await app.evaluate(() => globalThis.__pockymoeDesktopTest.windows.createLocal('quick'));
