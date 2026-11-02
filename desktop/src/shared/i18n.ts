@@ -34,7 +34,6 @@ export const english = {
   "{device} 的 Supervisor 是 {version}，要更新到 0.13.43 或更新版本才能总结。": "{device} runs Supervisor {version}. Summaries need 0.13.43 or newer.",
   "需更新": "needs update",
   "已是最新版本": "You're up to date",
-  "当前版本 {version}": "Version {version}",
   "暂时无法检查更新": "Can't check for updates right now",
   "请检查网络后重试。": "Check your network and try again.",
   "页面还没有更新，请重新打开主窗口。": "The page is out of date. Reopen the main window.",

@@ -58,7 +58,7 @@ export class UpdateService {
   private cached: unknown;
   private pending: Promise<CheckResult> | null = null;
   private download: Promise<void> | null = null;
-  private ready: { file: string; entry: SignedUpdate } | null = null;
+  private ready: { file: string; entry: SignedUpdate; releaseUrl: string } | null = null;
   private stopped = false;
   private abort?: AbortController;
   private restoring: Promise<void>;
@@ -68,7 +68,7 @@ export class UpdateService {
     const saved = JSON.parse(await readFile(join(directory, '.ready.json'), 'utf8')) as SignedUpdate;
     if (!isNewerVersion(saved.version, version) || !signedUpdate(`<!-- pockymoe-updates-v1\n${JSON.stringify([saved])}\n-->`, saved.version, platform, publicKey)) return;
     const file = join(directory, saved.fileName); await verifyFile(file, saved);
-    this.ready = { file, entry: saved };
+    this.ready = { file, entry: saved, releaseUrl: `https://github.com/dufangshi/pockymoe-app/releases/tag/v${saved.version}` };
     const failed = await readFile(join(directory, 'install-failed'), 'utf8').then(() => true, () => false);
     this.set({ status: failed ? 'error' : 'ready', version: saved.version, releaseUrl: `https://github.com/dufangshi/pockymoe-app/releases/tag/v${saved.version}`, ...(failed ? { error: this.deps.failureMessage?.() || 'Installation failed; previous version restored' } : {}) });
   }
@@ -107,7 +107,7 @@ export class UpdateService {
     if (this.ready && !isNewerVersion(version, this.ready.entry.version)) return 'ready';
     const releaseUrl = `https://github.com/dufangshi/pockymoe-app/releases/tag/${release.tag_name}`;
     const entry = signedUpdate(release.body || '', version, this.deps.platform, this.deps.publicKey);
-    if (!entry) { this.set({ status: 'idle', version, releaseUrl }); return 'manual'; }
+    if (!entry) { if (this.ready) return 'ready'; this.set({ status: 'idle', version, releaseUrl }); return 'manual'; }
     const assets = release.assets?.filter(asset => asset.name === entry.fileName && asset.size === entry.size) || [];
     if (assets.length !== 1) return 'failed';
     const url = new URL(assets[0].browser_download_url);
@@ -116,7 +116,7 @@ export class UpdateService {
     this.set({ status: 'downloading', version, releaseUrl });
     this.download = this.downloadFile(url.href, entry).catch(() => {
       // Background failures stay invisible; the next scheduled check retries.
-      this.set(this.ready ? { status: 'ready', version: this.ready.entry.version, releaseUrl: this.current.releaseUrl } : { status: 'idle' });
+      this.set(this.ready ? { status: 'ready', version: this.ready.entry.version, releaseUrl: this.ready.releaseUrl } : { status: 'idle' });
     }).finally(() => { this.download = null; });
     return 'downloading';
   }
@@ -147,7 +147,7 @@ export class UpdateService {
       if (this.stopped) throw new Error('cancelled');
       await rename(part, file);
       await writeFile(join(directory, '.ready.json'), JSON.stringify(entry), { mode: 0o600 });
-      this.ready = { file, entry };
+      this.ready = { file, entry, releaseUrl: this.current.releaseUrl! };
       this.set({ status: 'ready', version: entry.version, releaseUrl: this.current.releaseUrl });
       // Only verified artifacts remain; never trust persisted ready metadata on restart.
       for (const name of await readdir(directory)) if (![entry.fileName, '.ready.json'].includes(name)) await rm(join(directory, name), { recursive: true, force: true });

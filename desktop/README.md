@@ -30,7 +30,7 @@ macOS (Apple silicon): open the DMG and copy **Pockymoe.app** to Applications.
 Windows: run the one-click NSIS installer (current user, no administrator prompt),
 then open Pockymoe from the Start menu or desktop shortcut. Uninstall keeps user data. The development-signed macOS builds produced by the
 QA command below are **not notarized** and are for local developer testing;
-public builds are ad-hoc signed and not notarized; macOS may require explicit approval in Privacy & Security. Windows
+public builds use a dedicated non-personal self-signed identity and are not notarized; macOS may require explicit approval in Privacy & Security. Windows
 builds without an Authenticode certificate are unsigned.
 
 On first launch, enter your Pockymoe address, for example
