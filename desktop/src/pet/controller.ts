@@ -400,10 +400,12 @@ export function createPetController(deps: PetControllerDeps): PetController {
     for (const unsubscribe of unsubscribes) unsubscribe();
     screen.removeListener('display-removed', displayChanged); screen.removeListener('display-metrics-changed', displayChanged);
     ipcMain.removeListener('rcDesktop:pet:ready', onReady); ipcMain.removeListener('rcDesktop:pet:hitTest', onHitTest); ipcMain.removeHandler('rcDesktop:pet:action'); ipcMain.removeHandler('rcDesktop:pet:clip');
-    if (destroyWindows) {
+    // Windows may already be destroying a native owner's children while closed
+    // is delivered. Let that stack unwind before retiring the surviving window.
+    if (destroyWindows) setImmediate(() => {
       if (!glass.isDestroyed()) glass.destroy();
       if (!window.isDestroyed()) window.destroy();
-    }
+    });
   }
   return {
     async reloadPacks() { await refreshPacks(); packEpoch++; emit(); },

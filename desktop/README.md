@@ -437,3 +437,8 @@ so browser bootstrap time cannot exhaust a device's connection budget.
 
 Closing a main window before its first ready-to-show event suppresses that initial
 show, so loading cannot bring a backgrounded window back to the foreground.
+
+On Windows the speech utility process selects the model directory through Node's
+Unicode cwd API and passes relative filenames to sherpa's native readers.
+Forced pet destruction retires its survivor after the native close stack unwinds,
+so an owner cannot reenter destruction of its child on Windows.
