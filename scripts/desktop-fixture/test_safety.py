@@ -46,7 +46,7 @@ class IsolationTests(unittest.TestCase):
             backend.write_json(path, {"hello": "世界"})
             if os.name != "nt":
                 self.assertEqual(path.stat().st_mode & 0o777, 0o600)
-            self.assertEqual(json.loads(path.read_text()), {"hello": "世界"})
+            self.assertEqual(json.loads(path.read_text(encoding="utf-8")), {"hello": "世界"})
             self.assertFalse(path.with_suffix(".tmp").exists())
 
     @unittest.skipIf(os.name == "nt", "Unix ps parser; Windows uses creation FILETIME")
@@ -82,9 +82,9 @@ class IsolationTests(unittest.TestCase):
                     patch.object(backend, "alive", return_value=True), patch.object(backend, "build_static_web", side_effect=build):
                 result = backend.rebuild_web(state)
             self.assertEqual(set(result), {"path", "durationSeconds"})
-            self.assertEqual((target / "index.html").read_text(), "new entry " + state["relayOrigin"])
-            self.assertEqual((target / "assets" / "old-hash.js").read_text(), "old lazy chunk")
-            self.assertEqual((Path(state["previousWebDist"]) / "index.html").read_text(), "old entry")
+            self.assertEqual((target / "index.html").read_text(encoding="utf-8"), "new entry " + state["relayOrigin"])
+            self.assertEqual((target / "assets" / "old-hash.js").read_text(encoding="utf-8"), "old lazy chunk")
+            self.assertEqual((Path(state["previousWebDist"]) / "index.html").read_text(encoding="utf-8"), "old entry")
 
     def test_failed_rebuild_keeps_served_artifact(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -99,7 +99,7 @@ class IsolationTests(unittest.TestCase):
                     patch.object(backend, "build_static_web", side_effect=backend.FixtureError("failed")):
                 with self.assertRaisesRegex(backend.FixtureError, "failed"):
                     backend.rebuild_web(state)
-            self.assertEqual((target / "index.html").read_text(), "old entry")
+            self.assertEqual((target / "index.html").read_text(encoding="utf-8"), "old entry")
 
 
 if __name__ == "__main__":

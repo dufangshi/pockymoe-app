@@ -16,6 +16,7 @@ import type { Appearance, PockymoeHost } from '../src/shared/contract';
 import { resolveLocale } from '../src/shared/i18n';
 import { primaryKey } from './nativeKeys';
 import { windowAt } from './windowReady';
+import { auditSurface } from './surfaceAudit';
 import { item, snapshot } from './fixtures';
 
 type Runtime = { messages: LocalMessages; lastMessageResponse?: number; showMessageBox: ShowMessage; lastDialog?: Electron.MessageBoxOptions; lastSave?: Electron.SaveDialogOptions; updater: { checkForUpdates(): Promise<{ isUpdateAvailable: boolean }> }; appearance: AppearanceStore; hub: ActivityHub; settings: SettingsStore; windows: Windows; tray: DesktopTray; notifications: Notifications };
@@ -445,4 +446,26 @@ test('native menu accelerators have no collisions, including role defaults', asy
   await expect.poll(() => page.evaluate(() => document.hasFocus())).toBe(true);
   await primaryKey(app, '0');
   await expect.poll(() => app.windows().find(page => page.url().startsWith(origin))!.evaluate(() => window.commands)).toEqual(expect.arrayContaining([expect.objectContaining({ type: 'openMap' })]));
+});
+
+
+test('surface audit rejects Mac labels and unstyled bars but accepts a painted theme scrollbar', async () => {
+  const app = await launch('light'); const page = await pageAt(app, origin);
+  await page.evaluate(() => {
+    const box = document.createElement('div'); box.className = 'audit-native-scrollbar';
+    box.style.cssText = 'height:20px;width:100px;overflow:scroll';
+    const content = document.createElement('div'); content.style.height = '200px'; box.append(content);
+    const label = document.createElement('button'); label.id = 'audit-mac-label'; label.title = '⌘0'; label.textContent = 'Audit label';
+    document.body.append(box, label);
+  });
+  const unstyled = await auditSurface(page);
+  expect(unstyled.macLabels).toBe(true); expect(unstyled.scrollbars).toContain('audit-native-scrollbar');
+  await page.evaluate(() => {
+    document.getElementById('audit-mac-label')!.remove();
+    const style = document.createElement('style');
+    style.textContent = '.audit-native-scrollbar::-webkit-scrollbar{width:8px;height:8px}.audit-native-scrollbar::-webkit-scrollbar-thumb{background:rgb(110 120 130);border:2px solid transparent;border-radius:4px;background-clip:padding-box}.audit-native-scrollbar::-webkit-scrollbar-button{width:0;height:0}';
+    document.head.append(style);
+  });
+  const painted = await auditSurface(page);
+  expect(painted.macLabels).toBe(false); expect(painted.scrollbars).not.toContain('audit-native-scrollbar');
 });

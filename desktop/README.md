@@ -398,3 +398,8 @@ The pet cancels its native-window polling on `before-quit` and ignores already
 destroyed sprite/glass windows. This prevents a timer from raising an uncaught
 native-object error while Electron is closing the app. Empty quick-window reply
 placeholders also refresh when the interface language changes.
+
+The real-Web audit distinguishes unstyled native scrollbars from the release
+Web's shared theme-painted WebKit thumbs (explicit size/color and no arrows).
+An Electron regression demonstrates that the audit rejects a default scrollbar
+and a Mac modifier label while accepting that fully styled scrollbar form.

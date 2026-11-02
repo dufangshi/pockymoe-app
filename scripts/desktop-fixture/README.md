@@ -146,6 +146,7 @@ cd desktop
 pnpm install --frozen-lockfile
 pnpm exec playwright install chromium
 cd ..
+$env:PYTHONUTF8 = '1'
 python scripts/desktop-fixture/prepare-release.py
 $runtime = Join-Path (Get-Location) .local/desktop-runtime-v0.13.44
 $env:DESKTOP_E2E_BIN = Join-Path $runtime remote-codex-win32-x64-msvc-cli.exe
