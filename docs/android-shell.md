@@ -11,10 +11,18 @@ Web. A direct Web address serves both unless overridden. Bad addresses or networ
 failures stay beside the connection field as one line, with no offline detour.
 Stored explicit Web/Relay pairs are kept exactly. A legacy single stored address
 is probed automatically once; failure returns to the prefilled connection form.
-The offline page always offers Retry and Change address. Retry uses the cached
-foreground as its fill with background-colored text; the secondary action keeps
-the flat outline. This native fallback uses the existing cached colors, since
-the connection decision specifies hierarchy but no additional native palette.
+Connection and offline pages follow system language and light/dark mode, using
+launch backgrounds #FAFAF8 / #17171A and matching system-bar icons. Their content
+is centered slightly above the middle, with 24dp side margins and a 420dp maximum
+width. The 56dp app icon sits 16dp above the 22sp semibold title and muted 14sp
+subtitle. Fields are 48dp tall with 12dp corners, 14dp horizontal padding, muted
+borders and Classic-accent focus borders; URL keyboards disable suggestions and
+capitalization, and Go submits. Errors occupy one reserved 13sp danger-colored
+line. Connect is a fixed 48dp Classic-accent primary button, visibly disabled when
+empty, with a small spinner replacing its label during probing. Advanced is a
+quiet 44dp text action below it and expands the optional Relay field. Offline
+uses the same styles with primary Retry and quiet Change address. A scroll
+container keeps fields reachable with the keyboard or at small heights.
 Product navigation, authentication, account settings, devices, workspaces and threads belong to Web.
 The design authority is `docs/mobile-design.zh.md` on the mobile integration
 branch; the Android branch does not own that document.
@@ -257,3 +265,11 @@ Relay origins through the visible fields. DEBUG-only instrumentation records
 origin names (never paths, query strings, headers or tokens) for connection
 probes, WebView, service-worker and native workbench requests. The test rejects destinations
 outside the entered origins; it does not monitor unrelated emulator OS traffic.
+
+For the connection-only acceptance run, use
+`ANDROID_CONNECTION_ONLY=1 scripts/e2e-android.sh` with the isolated backend above. It retains the existing
+fresh-install and legacy/probe/error cases, then captures the actual native
+component in English/Chinese and light/dark at phone and 320dp widths. Visual
+states include empty/disabled, Advanced, probing spinner, error and offline.
+The visual tests render the same native component with isolated locale/mode
+contexts; the production activity always uses system configuration.

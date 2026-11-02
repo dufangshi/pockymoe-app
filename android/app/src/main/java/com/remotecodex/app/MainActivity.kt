@@ -56,6 +56,7 @@ class MainActivity : ComponentActivity() {
     private var failed = false
     private var authStopped = false
     private var connectionAttempt = 0
+    private var connectionPage: ConnectionPage? = null
     private var authRecovery = false
     private var debugAuthUrl: String? = null
     private var permissionAsked = false
@@ -183,16 +184,17 @@ class MainActivity : ComponentActivity() {
     private fun sameOrigin(uri: Uri, expected: String = origin) =
         OriginPolicy.same(uri.toString(), expected)
 
+    private fun connectionText(chinese: String, english: String) =
+        if (resources.configuration.locales[0].language == "zh") chinese else english
+
     private fun connectionError() =
-        shellText(this, "无法连接，请检查服务地址。", "Cannot connect. Check the service address.")
+        connectionText("无法连接，请检查服务地址。", "Cannot connect. Check the service address.")
 
     private fun startConnection(address: String, relay: String, upgrading: Boolean = false) {
         val attempt = ++connectionAttempt
-        val button = root.findViewWithTag<Button>("connection-button")
         val error = root.findViewWithTag<TextView>("connection-error")
         error?.text = ""
-        button?.isEnabled = false
-        button?.text = shellText(this, "连接中…", "Connecting…")
+        connectionPage?.probing(true)
         lifecycleScope.launch {
             val result =
                 withContext(Dispatchers.IO) {
@@ -217,13 +219,13 @@ class MainActivity : ComponentActivity() {
                 .onFailure {
                     if (upgrading) localPage(false, connectionError())
                     else error?.text = connectionError()
-                    button?.isEnabled = true
-                    button?.text = shellText(this@MainActivity, "连接", "Connect")
+                    connectionPage?.probing(false)
                 }
         }
     }
 
     private fun localPage(offline: Boolean, notice: String = "") {
+        if (offline && root.findViewWithTag<View>("offline") != null) return
         if (!offline) {
             connectionAttempt++
             reply = null
@@ -233,173 +235,40 @@ class MainActivity : ComponentActivity() {
             }
             root.removeAllViews()
         }
-        if (offline && root.findViewWithTag<View>("offline") != null) return
-        val layout =
-            LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
-                val dp = resources.displayMetrics.density
-                setPadding(
-                    (24 * dp).toInt(),
-                    (64 * dp).toInt(),
-                    (24 * dp).toInt(),
-                    (24 * dp).toInt(),
-                )
-                setBackgroundColor(pageBackground)
-                tag = if (offline) "offline" else "connect"
-            }
-        val dark = Color.red(pageBackground) < 128
-        val textColor = if (dark) Color.parseColor("#E9E9E7") else Color.parseColor("#17171A")
-        layout.addView(
-            TextView(this).apply {
-                text =
-                    if (offline) shellText(this@MainActivity, "无法连接", "Unable to connect")
-                    else shellText(this@MainActivity, "连接 Pockymoe", "Connect to Pockymoe")
-                setTextColor(textColor)
-                textSize = 22f
-            }
-        )
-        if (offline) {
-            layout.addView(
-                TextView(this).apply {
-                    text =
-                        shellText(
-                            this@MainActivity,
-                            "无法连接到服务，请检查网络后重试。",
-                            "Cannot connect to the service. Check your connection and retry.",
-                        )
-                    setTextColor(textColor)
-                }
+        val stored = store.connection
+        val page =
+            ConnectionPage(
+                this,
+                offline,
+                store.serviceAddress,
+                stored.relayOrigin.takeIf { it != stored.webOrigin }.orEmpty(),
+                notice,
+                connect = { raw, relayRaw ->
+                    val address = com.remotecodex.app.data.normalizeRelayUrl(raw)
+                    val relay = com.remotecodex.app.data.normalizeRelayUrl(relayRaw)
+                    if (!validOrigin(address) || (relay.isNotBlank() && !validOrigin(relay)))
+                        root.findViewWithTag<TextView>("connection-error").text =
+                            connectionText("请输入有效的 HTTPS 地址", "Enter a valid HTTPS address")
+                    else startConnection(address, relay)
+                },
+                retry = {
+                    root.findViewWithTag<View>("offline")?.let(root::removeView)
+                    failed = false
+                    if (::web.isInitialized) {
+                        web.alpha = 0f
+                        web.reload()
+                    } else openWeb(null)
+                },
+                change = { localPage(false) },
             )
-            layout.addView(
-                Button(this).apply {
-                    text = shellText(this@MainActivity, "重试", "Retry")
-                    contentDescription = text
-                    isAllCaps = false
-                    tag = "primary"
-                    setOnClickListener {
-                        root.removeView(layout)
-                        failed = false
-                        if (::web.isInitialized) web.alpha = 0f
-                        if (::web.isInitialized) web.reload() else openWeb(null)
-                    }
-                }
-            )
-            layout.addView(
-                Button(this).apply {
-                    text = shellText(this@MainActivity, "更改地址", "Change address")
-                    contentDescription = text
-                    isAllCaps = false
-                    setOnClickListener { localPage(false) }
-                }
-            )
-        } else {
-            val stored = store.connection
-            val input =
-                EditText(this).apply {
-                    setText(store.serviceAddress)
-                    tag = "service-input"
-                    hint = "https://app.example.com"
-                    contentDescription = shellText(this@MainActivity, "服务地址", "Service address")
-                    setTextColor(textColor)
-                    inputType = 17
-                }
-            layout.addView(input)
-            layout.addView(
-                TextView(this).apply {
-                    tag = "connection-error"
-                    text = notice
-                    setTextColor(textColor)
-                    accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
-                }
-            )
-            val relay =
-                EditText(this).apply {
-                    setText(stored.relayOrigin.takeIf { it != stored.webOrigin }.orEmpty())
-                    hint =
-                        shellText(
-                            this@MainActivity,
-                            "Relay 地址（留空时自动识别）",
-                            "Relay address (automatic when blank)",
-                        )
-                    contentDescription = shellText(this@MainActivity, "Relay 地址", "Relay address")
-                    setTextColor(textColor)
-                    inputType = 17
-                    visibility = View.GONE
-                }
-            layout.addView(
-                Button(this).apply {
-                    text = shellText(this@MainActivity, "高级", "Advanced")
-                    contentDescription = text
-                    isAllCaps = false
-                    setOnClickListener {
-                        relay.visibility =
-                            if (relay.visibility == View.GONE) View.VISIBLE else View.GONE
-                    }
-                }
-            )
-            layout.addView(relay)
-            layout.addView(
-                Button(this).apply {
-                    text = shellText(this@MainActivity, "连接", "Connect")
-                    contentDescription = text
-                    tag = "connection-button"
-                    isAllCaps = false
-                    setOnClickListener {
-                        val address =
-                            com.remotecodex.app.data.normalizeRelayUrl(input.text.toString())
-                        val relayAddress =
-                            com.remotecodex.app.data.normalizeRelayUrl(relay.text.toString())
-                        if (
-                            !validOrigin(address) ||
-                                (relayAddress.isNotBlank() && !validOrigin(relayAddress))
-                        ) {
-                            root.findViewWithTag<TextView>("connection-error").text =
-                                shellText(
-                                    this@MainActivity,
-                                    "请输入有效的 HTTPS 服务和 Relay 地址",
-                                    "Enter valid HTTPS service and Relay addresses",
-                                )
-                            return@setOnClickListener
-                        }
-                        startConnection(address, relayAddress)
-                    }
-                }
-            )
+        connectionPage = page
+        root.setBackgroundColor(page.background)
+        WindowCompat.getInsetsController(window, root).apply {
+            val light = !StartupPaint.isDark(page.background)
+            isAppearanceLightStatusBars = light
+            isAppearanceLightNavigationBars = light
         }
-        // These two offline-only native pages use flat controls; product forms stay in the Web UI.
-        for (i in 0 until layout.childCount) {
-            val child = layout.getChildAt(i)
-            if (child is Button || child is EditText) {
-                child.minimumHeight = (44 * resources.displayMetrics.density).toInt()
-                child.background =
-                    GradientDrawable().apply {
-                        setColor(if (child.tag == "primary") textColor else Color.TRANSPARENT)
-                        cornerRadius = 8 * resources.displayMetrics.density
-                        setStroke((resources.displayMetrics.density).toInt(), textColor)
-                    }
-                (child as? TextView)?.setTextColor(
-                    if (child.tag == "primary") pageBackground else textColor
-                )
-                child.layoutParams =
-                    LinearLayout.LayoutParams(-1, -2).apply {
-                        topMargin = (12 * resources.displayMetrics.density).toInt()
-                    }
-            }
-        }
-        ViewCompat.setOnApplyWindowInsetsListener(layout) { view, insets ->
-            val bars =
-                insets.getInsets(
-                    WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.ime()
-                )
-            view.setPadding(
-                view.paddingLeft,
-                maxOf(bars.top, (64 * resources.displayMetrics.density).toInt()),
-                view.paddingRight,
-                bars.bottom,
-            )
-            insets
-        }
-        root.addView(layout, FrameLayout.LayoutParams(-1, -1))
+        root.addView(page.view, FrameLayout.LayoutParams(-1, -1))
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -872,6 +741,15 @@ class MainActivity : ComponentActivity() {
         if (Build.VERSION.SDK_INT >= 29) theme.rebase()
         else theme.applyStyle(R.style.Theme_RemoteCodex, true)
         super.onConfigurationChanged(newConfig)
+        if (root.findViewWithTag<View>("connect") != null) {
+            localPage(false)
+            return
+        }
+        root.findViewWithTag<View>("offline")?.let {
+            root.removeView(it)
+            localPage(true)
+            return
+        }
         // System theme changes must not recreate the retained WebView.
         // A first-run local page, with no saved paint, continues to follow the OS.
         if (::root.isInitialized && !prefs.contains("background")) {
