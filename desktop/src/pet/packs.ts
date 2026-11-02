@@ -136,13 +136,16 @@ export async function readClip(pack: PetPack, path: string): Promise<Buffer | nu
   if (!clipPaths(pack.manifest).includes(path)) return null;
   return safeRead(join(pack.directory, path), MAX_PACK_BYTES).catch(() => null);
 }
+// By table: a pack with clips runs to tens of megabytes, and this runs on the main process.
+const CRC_TABLE = Int32Array.from({ length: 256 }, (_, index) => {
+  let value = index;
+  for (let bit = 0; bit < 8; bit++) value = (value >>> 1) ^ (0xedb88320 & -(value & 1));
+  return value;
+});
 function crc32(bytes: Buffer): number {
-  let crc = 0xffffffff;
-  for (const byte of bytes) {
-    crc ^= byte;
-    for (let bit = 0; bit < 8; bit++) crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1));
-  }
-  return (crc ^ 0xffffffff) >>> 0;
+  let crc = -1;
+  for (let i = 0; i < bytes.length; i++) crc = CRC_TABLE[(crc ^ bytes[i]!) & 0xff]! ^ (crc >>> 8);
+  return (crc ^ -1) >>> 0;
 }
 // Inspect the central directory first; never materialize archive paths on disk.
 export function unpackPetZip(bytes: Buffer): Map<string, Buffer> {

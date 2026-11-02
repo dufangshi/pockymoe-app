@@ -97,4 +97,5 @@ HTTP and records only owned disposable thread ids outside the repository.
 A pet travels as one zip, imported from Preferences. Its root holds `pet.json`, the atlas it
 names and, optionally, `sleeping.webp` and `clips/*.webp`, and nothing else. Importing a pack
 with an id already imported replaces it; built-in ids are refused. `art/tools/build_clip_pack.py`
-writes such a zip from alpha WebM videos.
+writes such a zip from alpha WebM videos, and `art/tools/build_pose_clips.py` from generated
+pose sheets, turning a few drawings into motion.

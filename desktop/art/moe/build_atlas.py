@@ -50,7 +50,8 @@ def chroma_key(path):
 def slice_sheet(path, cols=4, rows=3, chroma=False):
     im = clean(chroma_key(path) if chroma else Image.open(path))
     alpha = np.array(im)[..., 3] > 0
-    lab, n = ndimage.label(ndimage.binary_dilation(alpha, iterations=3))
+    # A keyed sheet has no separate effects to gather up, and big hair can nearly touch the next pose.
+    lab, n = ndimage.label(alpha if chroma else ndimage.binary_dilation(alpha, iterations=3))
     w, h = im.size
     cells = [[] for _ in range(cols * rows)]
     for i, sl in enumerate(ndimage.find_objects(lab), 1):

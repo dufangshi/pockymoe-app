@@ -105,7 +105,7 @@ Mini 模式：宠物缩到 72px，其余行为不变。
 
 ### 2.8 第二个宠物
 
-宠物包除了图集，还可以带“片段”（`remoteCodex.clips`）：按状态给出若干张多帧图，每段可以有几十帧，循环状态依次播放，一次性反应播完停在末帧。片段按需读取和解码，只保留 6 张；没有片段的状态、解码失败的片段都回退到图集。宠物以一个 ZIP 为单位：根目录放 `pet.json`、图集和片段，别的文件一律拒绝。设置里点导入选这个 ZIP 就会换上全套形象和动作；再导入同 id 的包会替换旧的，内置 id 不能被替换。`desktop/art/tools/build_clip_pack.py` 把带透明通道的 WebM 转成这种包，`--zip` 输出可导入的单个文件。片段还可以覆盖拖动（`dragging`）和落地（`landing`）。
+宠物包除了图集，还可以带“片段”（`remoteCodex.clips`）：按状态给出若干张多帧图，每段可以有几十帧，循环状态依次播放，一次性反应播完停在末帧。片段按需读取和解码，只保留 6 张；没有片段的状态、解码失败的片段都回退到图集。宠物以一个 ZIP 为单位：根目录放 `pet.json`、图集和片段，别的文件一律拒绝。设置里点导入选这个 ZIP 就会换上全套形象和动作；再导入同 id 的包会替换旧的，内置 id 不能被替换。`desktop/art/tools/build_clip_pack.py` 把带透明通道的 WebM 转成这种包，`--zip` 输出可导入的单个文件。`desktop/art/tools/build_pose_clips.py` 则从生成的姿势表做出同样的包：按节拍编排姿势和小幅运动，几张图就能连成动作。片段还可以覆盖拖动（`dragging`）和落地（`landing`）。
 
 **白龙娘**（[jingh12312-rgb/bailong-desktop-pet](https://github.com/jingh12312-rgb/bailong-desktop-pet)）的素材没有授予再分发许可（见其 `ASSETS.md`），本项目已获得授权，但目前仍不内置：不进仓库、不进发布包，由用户导入 ZIP 使用。
 
