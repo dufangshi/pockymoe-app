@@ -19,7 +19,11 @@ export async function recoverUpdateStartup(options: { platform: string; execPath
   const activeOwners = new Set<string>();
   const updates = join(options.userData, 'updates');
   const readOwnedFile = async (path: string, limit: number): Promise<string> => {
-    const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    // Keep explicit link rejection on hosts without O_NOFOLLOW too (Windows
+    // unit tests exercise this Mac recovery path through injected platform).
+    const entry = await lstat(path);
+    if (!entry.isFile() || entry.isSymbolicLink() || entry.size > limit) throw new Error('Invalid helper marker');
+    const file = await open(path, constants.O_RDONLY | (constants.O_NOFOLLOW || 0));
     try {
       const stat = await file.stat();
       if (!stat.isFile() || stat.size > limit) throw new Error('Invalid helper marker');
