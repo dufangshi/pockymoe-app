@@ -736,6 +736,12 @@ test('clips: top and bottom hold a real rest frame at full backing resolution', 
     const canvas = await sprite.locator('#clip').evaluate(c => ({ backing: [(c as HTMLCanvasElement).width, (c as HTMLCanvasElement).height], expected: [Math.round(c.clientWidth * devicePixelRatio), Math.round(c.clientHeight * devicePixelRatio)], visibility: getComputedStyle(c).visibility, atlas: getComputedStyle(document.querySelector('#sprite')!).display, draws: (window as unknown as { dockClipDraws: string[] }).dockClipDraws }));
     expect(canvas.backing).toEqual(canvas.expected); expect(canvas.visibility).toBe('visible'); expect(canvas.atlas).toBe('none');
     expect(canvas.draws.some(kind => kind === 'video-frame' || kind === 'bitmap-frame')).toBe(true);
+    // A held frame must resize too; no animation tick will choose another index.
+    for (const petSize of ['M', 'L'] as const) {
+      await settings({ petSize });
+      await expect.poll(() => sprite.locator('#clip').evaluate(c => (c as HTMLCanvasElement).width === Math.round(c.clientWidth * devicePixelRatio) && (c as HTMLCanvasElement).height === Math.round(c.clientHeight * devicePixelRatio))).toBe(true);
+      await expect(sprite.locator('#clip')).toHaveAttribute('data-media-frame', '0');
+    }
   }
 });
 

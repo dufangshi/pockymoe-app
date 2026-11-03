@@ -250,7 +250,9 @@ function renderSprite(): void {
   }
   const hold = !!state.clips && !!state.edge && state.dockAmount > 0;
   if (hold !== dockClipHeld) { dockClipHeld = hold; if (!moodChanged) playClips(); }
-  paintSprite(); videoPlayer?.invalidate();
+  paintSprite();
+  if (clipPlayer && (dockClipHeld || motion.matches)) { clipPlayer.drawn = 0; drawClip(0); }
+  videoPlayer?.invalidate();
 }
 // A pack's clips replace the atlas for the states they cover; any other state, or a clip that
 // fails to decode, draws from the atlas. Sheets are decoded when needed and few are kept.
