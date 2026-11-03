@@ -26,15 +26,35 @@ export async function playSound(sound: PetSound, gain = .2): Promise<AudioContex
   return context.state;
 }
 let speech: AudioBufferSourceNode | null = null;
+let analyser: AnalyserNode | null = null, samples: Float32Array<ArrayBuffer> | null = null;
+let envelope = 0, sampledAt = 0, speechRequest = 0;
+/** RMS envelope in seconds: a 60 ms attack and 120 ms release. */
+export function smoothSpeech(previous: number, rms: number, elapsed: number): number {
+  return previous + (rms - previous) * (1 - Math.exp(-Math.max(0, elapsed) / (rms > previous ? .06 : .12)));
+}
+export function speechPlaying(): boolean { return speech !== null; }
+export function speechMouth(now: number): 0 | 1 | 2 {
+  if (!speech || !analyser || !samples) return 0;
+  analyser.getFloatTimeDomainData(samples);
+  const rms = Math.sqrt(samples.reduce((sum, value) => sum + value * value, 0) / samples.length);
+  envelope = smoothSpeech(envelope, rms, sampledAt ? (now - sampledAt) / 1000 : 0);
+  sampledAt = now;
+  return envelope < .018 ? 0 : envelope < .055 ? 1 : 2;
+}
 /** Decodes whatever the voice service produced; a newer alert cuts off the one being read. */
 export async function playSpeech(audio: Uint8Array): Promise<void> {
+  const request = ++speechRequest;
   context ??= new AudioContext();
   if (context.state !== 'running') await context.resume();
   const copy = audio.buffer.slice(audio.byteOffset, audio.byteOffset + audio.byteLength) as ArrayBuffer;
   const buffer = await context.decodeAudioData(copy);
+  if (request !== speechRequest) return;
   speech?.stop();
+  analyser?.disconnect();
+  analyser = context.createAnalyser(); analyser.fftSize = 512;
+  samples = new Float32Array(analyser.fftSize); envelope = 0; sampledAt = 0;
   const source = context.createBufferSource();
-  source.buffer = buffer; source.connect(context.destination); source.start();
+  source.buffer = buffer; source.connect(analyser); analyser.connect(context.destination); source.start();
   speech = source;
-  source.onended = () => { if (speech === source) speech = null; };
+  source.onended = () => { source.disconnect(); if (speech === source) { speech = null; analyser?.disconnect(); analyser = null; samples = null; envelope = 0; } };
 }

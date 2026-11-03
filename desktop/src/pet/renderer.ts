@@ -12,8 +12,9 @@ import { getLocale, setLocale, t, type MessageKey } from '../shared/i18n';
 import { showError } from '../local/errorMark';
 import { commandErrorMessage } from './errors';
 import { scrollGeometry } from './scroll';
-import { playSound, playSpeech } from './sounds';
+import { playSound, playSpeech, speechMouth, speechPlaying } from './sounds';
 import { isMuted } from '../shared/mutes';
+import { dockedPose, dockTilt } from './geometry';
 import { ClipSequencer } from './clipSequence';
 import type { PetClip } from './packs';
 import type { ActivityItem, HostCommandResult } from '../shared/contract';
@@ -54,10 +55,13 @@ const title = (item: ActivityItem) => conversationTitle(item, state?.items);
 /** Split the middle of the conversation with CSS so its agent suffix never ellipsizes. */
 function alertHeading(items: ActivityItem[]): string {
   const full = alertTitle(items, state?.items), conversation = conversationTitle(items[0], state?.items);
-  const suffix = full.slice(conversation.length), chars = Array.from(conversation), split = Math.ceil(chars.length / 2);
-  return `<span class="alert-name" title="${escape(full)}"><span class="alert-head">${escape(chars.slice(0, split).join(''))}</span><span class="alert-tail">${escape(chars.slice(split).join(''))}</span></span><span class="alert-suffix">${escape(suffix)}</span>`;
+  const suffix = full.slice(conversation.length);
+  return middleName(conversation, full) + `<span class="alert-suffix">${escape(suffix)}</span>`;
 }
-function elapsed(ms: number): string { const s = Math.floor(Math.max(0, ms) / 1000); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; }
+function middleName(value: string, label = value): string {
+  const chars = Array.from(value), split = Math.ceil(chars.length / 2);
+  return `<span class="alert-name" title="${escape(label)}"><span class="alert-head">${escape(chars.slice(0, split).join(''))}</span><span class="alert-tail">${escape(chars.slice(split).join(''))}</span></span>`;
+}
 function errorSlot(id: string): string { return failures.has(id) ? `<span class="pet-error-slot" data-error-id="${escape(id)}" role="alert"></span>` : ''; }
 function decisions(item: ActivityItem, surface: string): string {
   const disabled = pending.has(`${surface}:${item.key}`) ? ' disabled aria-busy="true"' : '';
@@ -81,22 +85,25 @@ function muteButton(group: PetConversation): string {
   const label = t(muted ? '恢复播报此对话' : '不再播报此对话');
   return button('toggleMute', label, icon(muted ? 'muted' : 'sound'), `aria-pressed="${muted}"`);
 }
-function taskRow(group: PetConversation, duplicateTitle = false): string {
+function taskRow(group: PetConversation): string {
   const item = group.statusItem, waiting = group.requests.length > 0, active = selected === group.key;
   const expanded = active && group.requests.length > 1 && !collapsedRequests.has(group.key), primary = group.requests[0];
   const toggle = group.requests.length > 1 ? button('toggleRequests', t(expanded ? '收起「{title}」的线程' : '展开「{title}」的线程', { title: group.title }), icon('chevron'), `class="request-toggle ${expanded ? 'expanded' : ''}" aria-expanded="${expanded}"`) : '';
-  return `<article class="conversation-row ${waiting ? 'waiting' : ''}" data-conversation-key="${escape(group.key)}"><div class="task-row ${active && !selectedRequest ? 'selected' : ''} ${item.state === 'idle' ? 'recent' : ''}" data-key="${escape(group.key)}" role="option" aria-selected="${active && !selectedRequest}" tabindex="0" title="${escape(`${group.title} · ${petMetadata(group.root)}`)}"><div class="row-main">${toggle}${status(item)}<span class="row-title">${alertHeading([item])}</span><span class="row-meta">${item.state === 'running' && !duplicateTitle ? `<span data-since="${escape(item.since)}">${elapsed(Date.now() - Date.parse(item.since))}</span>` : escape(item.deviceName)}</span><span class="row-actions">${muteButton(group)}${button('open', t('打开'), icon('open'))}${button('revealInMap', t('在地图中显示'), icon('map'))}</span>${robotBadge(group)}${primary && !expanded && primary.request?.kind === 'approval' ? `<span data-key="${escape(primary.key)}">${decisions(primary, 'row')}${errorSlot(`row:${primary.key}`)}</span>` : errorSlot(`row:${group.key}`)}</div></div>${expanded ? `<div class="request-lines">${group.requests.map(request => requestLine(request, group, true)).join('')}</div>` : primary ? requestLine(primary, group, false, group.requests.length > 1 ? button('toggleRequests', `${t('活动面板')} (${group.requests.length})`, `+${group.requests.length - 1}`, 'class="request-more"') : '') : ''}</article>`;
+  return `<article class="conversation-row ${waiting ? 'waiting' : ''}" data-conversation-key="${escape(group.key)}"><div class="task-row ${active && !selectedRequest ? 'selected' : ''} ${item.state === 'idle' ? 'recent' : ''}" data-key="${escape(group.key)}" role="option" aria-selected="${active && !selectedRequest}" tabindex="0" title="${escape(`${group.title} · ${petMetadata(group.root)}`)}"><div class="row-main">${toggle}${status(item)}<span class="row-title">${alertHeading([item])}</span><span class="row-meta"> · ${escape(item.deviceName)}</span><span class="row-actions">${muteButton(group)}${button('open', t('打开'), icon('open'))}${button('revealInMap', t('在地图中显示'), icon('map'))}</span>${robotBadge(group)}${primary && !expanded && primary.request?.kind === 'approval' ? `<span data-key="${escape(primary.key)}">${decisions(primary, 'row')}${errorSlot(`row:${primary.key}`)}</span>` : errorSlot(`row:${group.key}`)}</div></div>${expanded ? `<div class="request-lines">${group.requests.map(request => requestLine(request, group, true)).join('')}</div>` : primary ? requestLine(primary, group, false, group.requests.length > 1 ? button('toggleRequests', `${t('活动面板')} (${group.requests.length})`, `+${group.requests.length - 1}`, 'class="request-more"') : '') : ''}</article>`;
 }
 /** Everything running on the account, one row per conversation. */
 function runningList(): string {
   const groups = petConversations((state?.items ?? []).filter(item => item.state === 'running'), state?.items ?? []);
-  const rows = groups.length ? groups.map(group => `<div data-key="${escape(group.root.key)}"><button type="button" class="running-row" data-action="open" title="${escape(`${group.title} · ${petMetadata(group.root)}`)}" aria-label="${escape(group.title)}">${status(group.statusItem)}<span class="running-title">${escape(group.title)}</span><span class="running-device">${escape(group.root.deviceName)}</span></button></div>`).join('') : `<div class="empty">${icon('check')}${escape(t('没有运行中的线程'))}</div>`;
-  return `<section class="running-list" aria-label="${escape(t('运行中的线程'))}"><div class="scroll-frame" data-scroll-area><div class="task-list scroll-content" id="pet-running-list">${rows}</div><div class="scroll-track" role="scrollbar" aria-label="${escape(t('滚动活动任务'))}" aria-controls="pet-running-list" aria-orientation="vertical" aria-valuemin="0" tabindex="0" hidden><div class="scroll-thumb"></div></div></div></section>`;
+  const rows = groups.length ? groups.slice(0, 4).map(group => `<div data-key="${escape(group.root.key)}"><button type="button" class="running-row" data-action="open" title="${escape(`${group.title} · ${petMetadata(group.root)}`)}" aria-label="${escape(group.title)}">${status(group.statusItem)}<span class="running-title">${middleName(group.title)}</span><span class="running-device"> · ${escape(group.root.deviceName)}</span></button></div>`).join('') : `<div class="empty">${icon('check')}${escape(t('没有运行中的线程'))}</div>`;
+  const more = groups.length > 4 ? button('toggleTray', t('其余 {n} 个', { n: groups.length - 4 }), escape(t('其余 {n} 个', { n: groups.length - 4 })), 'class="running-more"') : '';
+  return `<section class="running-list" aria-label="${escape(t('运行中的线程'))}"><div class="scroll-frame" data-scroll-area><div class="task-list scroll-content" id="pet-running-list">${rows}${more}</div><div class="scroll-track" role="scrollbar" aria-label="${escape(t('滚动活动任务'))}" aria-controls="pet-running-list" aria-orientation="vertical" aria-valuemin="0" tabindex="0" hidden><div class="scroll-thumb"></div></div></div></section>`;
 }
 function renderGlass(): void {
   if (!state || state.surface !== 'glass') return;
   const input = document.querySelector<HTMLInputElement>('#reply-input'), focused = document.activeElement === input;
   const selection = input?.selectionStart ?? null, savedScroll = document.querySelector('.task-list')?.scrollTop ?? 0;
+  const readingSummary = root.querySelector('.bubble-full-text')?.textContent;
+  const summaryFocused = document.activeElement?.matches('.bubble-title');
   const rows = orderedRows();
   if (!rows.some(group => group.key === selected)) { selected = rows[0]?.key ?? null; selectedRequest = null; }
   const selectedGroup = rows.find(group => group.key === selected);
@@ -104,15 +111,15 @@ function renderGlass(): void {
   const target = selectedGroup ? conversationReplyTarget(selectedGroup, selectedRequest) : undefined;
   root.className = `glass mode-${state.mode}${state.mode === 'controls' && state.pinned ? ' has-running' : ''}`;
   let content = state.mode === 'controls' && state.pinned ? runningList() + controls() : controls();
-  if (state.mode === 'panel') content = `<section class="panel" aria-label="${escape(t('活动面板'))}"><header class="panel-header"><span aria-hidden="true">${icon('tasks')}</span>${button('close', t('关闭任务'), icon('close'))}</header><div class="scroll-frame" data-scroll-area><div class="task-list scroll-content" role="listbox" aria-label="${escape(t('活动任务'))}" id="pet-task-list">${rows.length ? rows.map(group => taskRow(group, rows.some(other => other.key !== group.key && other.title === group.title))).join('') : `<div class="empty">${icon('check')}${escape(t('一切就绪'))}</div>`}</div><div class="scroll-track" role="scrollbar" aria-label="${escape(t('滚动活动任务'))}" aria-controls="pet-task-list" aria-orientation="vertical" aria-valuemin="0" tabindex="0" hidden><div class="scroll-thumb"></div></div></div>${target ? `<form id="chat-form" class="chat" data-key="${escape(target?.key ?? '')}"><input id="reply-input" aria-label="${escape(t('发送回复'))}" placeholder="${escape(t('回复 {title}…', { title: title(target) }))}" value="${escape(draft)}" maxlength="16000" autocomplete="off" ${sendState === 'sending' ? 'disabled' : ''}>${errorSlot(`chat:${target?.key}`)}${button('send', sendState === 'sent' ? t('已发送') : sendState === 'sending' ? t('正在发送…') : t('发送回复'), sendState === 'sent' ? icon('check') : icon('send'), `class="send ${sendState === 'sending' ? 'sending' : ''}" ${!target || !draft.trim() || sendState === 'sending' ? 'disabled' : ''}`)}</form>` : ''}<span class="live-announcement" role="status">${sendState === 'error' ? escape(t('未发送')) : sendState === 'sent' ? escape(t('已发送')) : ''}</span></section>`;
-  if (state.mode === 'menu') content = `<section class="more" role="menu" aria-label="${escape(t('宠物偏好'))}">${button('mini', t('Mini 模式'), `${escape(t('Mini 模式'))}${state.settings.petMini ? icon('check') : ''}`, 'role="menuitemcheckbox" aria-checked="'+state.settings.petMini+'"')}<div class="menu-sizes" role="group" aria-label="${escape(t('宠物大小'))}">${(['S', 'M', 'L'] as const).map(size => button(`size-${size}`, size, size, `role="menuitemradio" aria-checked="${state!.settings.petSize === size}"`)).join('')}</div>${button('edgeHide', t('贴边自动隐藏'), `<span class="menu-copy">${escape(t('贴边自动隐藏'))}</span>` + (state.edgeHide ? icon('check') : ''), `role="menuitemcheckbox" aria-checked="${state.edgeHide}"`)}${button('sound', t('提示音'), `<span class="menu-copy">${escape(t('提示音'))}</span>` + (state.settings.petSound ? icon('check') : ''), `role="menuitemcheckbox" aria-checked="${state.settings.petSound}"`)}${button('voice', t('语音播报'), `<span class="menu-copy">${escape(t('语音播报'))}</span>` + (state.settings.petVoice ? icon('check') : ''), `role="menuitemcheckbox" aria-checked="${state.settings.petVoice}"`)}<hr>${button('preferences', t('偏好设置…'), escape(t('偏好设置…')), 'role="menuitem"')}${button('hide', t('隐藏桌宠'), escape(t('隐藏桌宠')), 'role="menuitem"')}</section>`;
+  if (state.mode === 'panel') content = `<section class="panel" aria-label="${escape(t('活动面板'))}"><header class="panel-header"><span aria-hidden="true">${icon('tasks')}</span>${button('close', t('关闭任务'), icon('close'))}</header><div class="scroll-frame" data-scroll-area><div class="task-list scroll-content" role="listbox" aria-label="${escape(t('活动任务'))}" id="pet-task-list">${rows.length ? rows.map(group => taskRow(group)).join('') : `<div class="empty">${icon('check')}${escape(t('一切就绪'))}</div>`}</div><div class="scroll-track" role="scrollbar" aria-label="${escape(t('滚动活动任务'))}" aria-controls="pet-task-list" aria-orientation="vertical" aria-valuemin="0" tabindex="0" hidden><div class="scroll-thumb"></div></div></div>${target ? `<form id="chat-form" class="chat" data-key="${escape(target?.key ?? '')}"><input id="reply-input" aria-label="${escape(t('发送回复'))}" placeholder="${escape(t('回复 {title}…', { title: title(target) }))}" value="${escape(draft)}" maxlength="16000" autocomplete="off" ${sendState === 'sending' ? 'disabled' : ''}>${errorSlot(`chat:${target?.key}`)}${button('send', sendState === 'sent' ? t('已发送') : sendState === 'sending' ? t('正在发送…') : t('发送回复'), sendState === 'sent' ? icon('check') : icon('send'), `class="send ${sendState === 'sending' ? 'sending' : ''}" ${!target || !draft.trim() || sendState === 'sending' ? 'disabled' : ''}`)}</form>` : ''}<span class="live-announcement" role="status">${sendState === 'error' ? escape(t('未发送')) : sendState === 'sent' ? escape(t('已发送')) : ''}</span></section>`;
+  if (state.mode === 'menu') content = `<section class="more" role="menu" aria-label="${escape(t('宠物偏好'))}">${button('mini', t('Mini 模式'), `${escape(t('Mini 模式'))}${state.settings.petMini ? icon('check') : ''}`, 'role="menuitemcheckbox" aria-checked="'+state.settings.petMini+'"')}<div class="menu-sizes" role="group" aria-label="${escape(t('宠物大小'))}">${(['S', 'M', 'L'] as const).map(size => button(`size-${size}`, size, size, `role="menuitemradio" aria-checked="${state!.settings.petSize === size}"`)).join('')}</div>${button('edgeHide', t('贴边时缩到边缘'), `<span class="menu-copy">${escape(t('贴边时缩到边缘'))}</span>` + (state.edgeHide ? icon('check') : ''), `role="menuitemcheckbox" aria-checked="${state.edgeHide}"`)}${button('sound', t('提示音'), `<span class="menu-copy">${escape(t('提示音'))}</span>` + (state.settings.petSound ? icon('check') : ''), `role="menuitemcheckbox" aria-checked="${state.settings.petSound}"`)}${button('voice', t('语音播报'), `<span class="menu-copy">${escape(t('语音播报'))}</span>` + (state.settings.petVoice ? icon('check') : ''), `role="menuitemcheckbox" aria-checked="${state.settings.petVoice}"`)}<hr>${button('preferences', t('偏好设置…'), escape(t('偏好设置…')), 'role="menuitem"')}${button('hide', t('隐藏桌宠'), escape(t('隐藏桌宠')), 'role="menuitem"')}</section>`;
   const bubble = state.bubble;
   const bubbleGroups = bubble ? petConversations(bubble.events.map(event => event.item), state.items) : [];
   const group = bubbleGroups[0];
   if (state.mode === 'bubble' && bubble && group) {
     const item = group.requests[0] ?? group.statusItem, count = bubbleGroups.length, event = bubble.events.find(event => event.item.key === item.key) ?? bubble.events[0];
     const heading = count > 1 ? t('{count} 完成', { count }) : alertTitle(group.items, state.items);
-    content = `<aside class="bubble ${bubble.sticky ? 'sticky' : ''}" data-key="${escape(group.key)}" data-conversation-key="${escape(group.key)}" data-alert-id="${escape(event.alertId)}"><div class="bubble-line">${status(group.statusItem)}${button('open', heading, (count > 1 ? escape(heading) : alertHeading(group.items)), 'class="bubble-title"')}<span class="bubble-device" title="${escape(petMetadata(group.root))}">${escape(item.deviceName)}</span>${bubble.sticky && item.request?.kind === 'approval' ? `<span data-key="${escape(item.key)}">${decisions(item, 'bubble')}${errorSlot(`bubble:${item.key}`)}</span>` : errorSlot(`bubble:${item.key}`)}</div>${bubble.sticky && item.request?.summary ? `<div class="bubble-request-line"><div class="request-summary" title="${escape(item.request.summary)}">${requestSummaryHtml(item.request.summary)}</div>${group.requests.length > 1 ? button('showConversation', `${t('活动面板')} (${group.requests.length})`, `+${group.requests.length - 1}`, 'class="request-more"') : ''}</div>` : ''}</aside>${state.near ? controls() : ''}`;
+    content = `<aside class="bubble ${bubble.sticky ? 'sticky' : ''}" data-key="${escape(group.key)}" data-conversation-key="${escape(group.key)}" data-alert-id="${escape(event.alertId)}"><div class="bubble-line">${status(group.statusItem)}${button('open', heading, (count > 1 ? escape(heading) : alertHeading(group.items)), `class="bubble-title"${bubble.sticky && item.request?.summary ? ' aria-describedby="bubble-summary"' : ''}`)}<span class="bubble-device" title="${escape(petMetadata(group.root))}"> · ${escape(item.deviceName)}</span>${bubble.sticky && item.request?.kind === 'approval' ? `<span data-key="${escape(item.key)}">${decisions(item, 'bubble')}${errorSlot(`bubble:${item.key}`)}</span>` : errorSlot(`bubble:${item.key}`)}</div>${bubble.sticky && item.request?.summary ? `<div class="bubble-request-line"><div class="request-summary" id="bubble-summary" title="${escape(item.request.summary)}" aria-label="${escape(item.request.summary)}">${requestSummaryHtml(item.request.summary)}</div>${group.requests.length > 1 ? button('showConversation', `${t('活动面板')} (${group.requests.length})`, `+${group.requests.length - 1}`, 'class="request-more"') : ''}</div>` : ''}</aside>${state.near ? controls() : ''}`;
   }
   root.innerHTML = content;
   root.querySelectorAll<HTMLElement>('[data-error-id]').forEach(slot => {
@@ -121,8 +128,22 @@ function renderGlass(): void {
   });
   const list = document.querySelector<HTMLElement>('.task-list'); if (list) list.scrollTop = savedScroll;
   if (focused) { const next = document.querySelector<HTMLInputElement>('#reply-input'); next?.focus(); if (selection !== null) next?.setSelectionRange(selection, selection); }
+  if (summaryFocused) root.querySelector<HTMLElement>('.bubble-title')?.focus();
+  if (readingSummary && root.querySelector('.request-summary')?.getAttribute('aria-label') === readingSummary) showFullSummary();
   requestAnimationFrame(() => { updateScrollArea(); measure(); });
 }
+// Reading the clipped summary must not replace DOM, steal focus or move the anchor.
+function showFullSummary(): void {
+  const summary = root.querySelector<HTMLElement>('.request-summary');
+  if (!summary || (summary.scrollHeight <= summary.clientHeight + 1 && summary.scrollWidth <= summary.clientWidth + 1) || root.querySelector('.bubble-full-text')) return;
+  const detail = document.createElement('div'); detail.className = 'bubble-full-text'; detail.setAttribute('role', 'tooltip');
+  detail.textContent = summary.getAttribute('aria-label') || summary.title;
+  root.append(detail);
+}
+root.addEventListener('pointerover', event => { if ((event.target as Element).closest('.request-summary,.bubble-title')) showFullSummary(); });
+root.addEventListener('pointerleave', () => { if (!root.contains(document.activeElement)) root.querySelector('.bubble-full-text')?.remove(); });
+root.addEventListener('focusin', event => { if ((event.target as Element).closest('.bubble-title')) showFullSummary(); });
+root.addEventListener('focusout', event => { if (!root.contains(event.relatedTarget as Node | null)) root.querySelector('.bubble-full-text')?.remove(); });
 function measure(): void {
   const rect = root.getBoundingClientRect(), value = { type: 'surfaceMeasure' as const, width: Math.ceil(rect.width), height: Math.ceil(rect.height) };
   const next = JSON.stringify(value); if (next !== lastMeasure) { lastMeasure = next; void bridge.action(value); }
@@ -171,24 +192,28 @@ root.addEventListener('submit', event => {
 });
 function renderSprite(): void {
   if (!state) return;
-  if (!root.querySelector('#character')) root.innerHTML = `<div id="character" role="button" tabindex="0"><div id="sprite-old"></div><div id="sprite"></div><canvas id="clip"></canvas><svg class="sleep-motes" viewBox="0 0 36 48" aria-hidden="true"><path d="M7 34h6l-6 6h6"/><path d="M17 24h7l-7 7h7"/><path d="M23 13h5l-5 5h5"/></svg></div>`;
+  if (!root.querySelector('#character')) root.innerHTML = `<div id="character" role="button" tabindex="0"><div id="sprite-old"></div><div id="sprite"></div><canvas id="clip"></canvas><canvas id="talk" aria-hidden="true"></canvas><svg class="sleep-motes" viewBox="0 0 36 48" aria-hidden="true"><path d="M7 34h6l-6 6h6"/><path d="M17 24h7l-7 7h7"/><path d="M23 13h5l-5 5h5"/></svg></div>`;
   const character = root.querySelector<HTMLElement>('#character')!;
   character.setAttribute('aria-label', t('桌宠，点击查看任务，拖动以移动'));
   character.style.width = `${state.pet.width}px`; character.style.height = `${state.pet.height}px`;
   // Leaning out from the edge; at the top she hangs upside down, so it is still her head that shows.
-  const tilt = !state.dockAmount || !state.edge ? 0 : state.edge === 'top' ? 180 : state.edge === 'bottom' ? 0 : (state.edge === 'left' ? 16 : -16) * Math.min(1, state.dockAmount * 1.4);
+  const tilt = dockTilt(state.edge, state.dockAmount);
+  const pose = dockedPose(state.pet.width, state.pet.height, state.edge, state.dockAmount, state.faceBox);
+  character.style.transformOrigin = `${pose.pivot.x}px ${pose.pivot.y}px`;
+  character.style.clipPath = pose.clip ? `inset(${pose.clip.y}px ${state.pet.width - pose.clip.x - pose.clip.width}px ${state.pet.height - pose.clip.y - pose.clip.height}px ${pose.clip.x}px)` : '';
   character.style.transform = `translate(${state.pet.x}px,${state.pet.y}px) rotate(${tilt}deg)`;
+  character.classList.toggle('docked-rest', state.dockAmount === 1);
   character.classList.toggle('sleeping', state.mood === 'sleeping');
   character.classList.toggle('peeking', state.dockAmount > 0 && state.dockAmount < 1);
   root.dataset.mood = state.mood; root.dataset.edge = state.edge ?? ''; root.dataset.dockAmount = String(state.dockAmount);
   if (animationState !== state.mood || lastEpoch !== state.moodEpoch) {
     lastEpoch = state.moodEpoch;
     const old = root.querySelector<HTMLElement>('#sprite-old')!, sprite = root.querySelector<HTMLElement>('#sprite')!;
-    old.style.cssText = sprite.style.cssText; old.style.opacity = '1'; sprite.style.opacity = motion.matches ? '1' : '0';
+    old.style.cssText = sprite.style.cssText; old.style.opacity = state.dockAmount === 1 ? '0' : '1'; sprite.style.opacity = motion.matches || state.dockAmount === 1 ? '1' : '0';
     animationState = state.mood; animationStart = performance.now(); frame = 0; paintSprite(); leaveClip();
     requestAnimationFrame(() => { old.style.opacity = '0'; sprite.style.opacity = '1'; });
   }
-  const image = state.mood === 'sleeping' && state.sleeping ? state.sleeping.imageUrl : state.imageUrl;
+  const image = state.dockAmount !== 1 && state.mood === 'sleeping' && state.sleeping ? state.sleeping.imageUrl : state.imageUrl;
   if (image !== lastImage) {
     lastImage = image; alpha = null; const source = spriteImage = new Image();
     source.onload = () => { if (spriteImage !== source) return; canvas.width = source.width; canvas.height = source.height; context.clearRect(0, 0, canvas.width, canvas.height); context.drawImage(source, 0, 0); alpha = context.getImageData(0, 0, source.width, source.height).data; };
@@ -202,10 +227,13 @@ const CLIP_CACHE = 6, ONE_SHOT = ['failed', 'waving', 'jumping', 'poked', 'landi
 const clipCache = new Map<string, Promise<ImageBitmap | null>>();
 let clipSequence: ClipSequencer | null = null;
 let clipPlayer: { clip: PetClip; bitmap: ImageBitmap; start: number; drawn: number; leaving?: { from: number; to: number; start: number; ms: number } } | null = null, clipToken = 0, clipPack = '';
+function decodeClip(path: string): Promise<ImageBitmap | null> {
+  return bridge.clip(path).then(bytes => bytes ? createImageBitmap(new Blob([bytes as BlobPart], { type: 'image/webp' })) : null).catch(() => null);
+}
 function loadClip(path: string): Promise<ImageBitmap | null> {
   let loading = clipCache.get(path);
   if (!loading) {
-    loading = bridge.clip(path).then(bytes => bytes ? createImageBitmap(new Blob([bytes as BlobPart], { type: 'image/webp' })) : null).catch(() => null);
+    loading = decodeClip(path);
     clipCache.set(path, loading);
     if (clipCache.size > CLIP_CACHE) { const [oldest, entry] = clipCache.entries().next().value!; clipCache.delete(oldest); void entry.then(bitmap => { if (clipPlayer?.bitmap !== bitmap) bitmap?.close(); }); }
   }
@@ -236,6 +264,41 @@ function leaveClip(): void {
   const last = clip.frames - 1, to = clip.role === 'intro' || last - drawn <= drawn ? last : 0, distance = Math.abs(to - drawn);
   if (drawn < 0 || distance <= 1) { playClips(); return; }
   clipPlayer.leaving = { from: drawn, to, start: performance.now(), ms: Math.min(LEAVE_MS, distance / (format.fps * 3) * 1000) };
+}
+// Talking uses the closed/rest frame as a stable body. A fixed face box cannot align
+// arbitrary bent/lying poses (paint_face only searches ±8 px), so use the documented
+// rest-pose fallback rather than painting a detached face over those poses.
+const faceCanvas = document.createElement('canvas'), faceMask = document.createElement('canvas');
+let talkBitmap: ImageBitmap | null = null, talkLoading = '', talkFrame = -1;
+function paintTalk(now: number): void {
+  const element = root.querySelector<HTMLCanvasElement>('#talk'), character = root.querySelector('#character');
+  const talk = state?.talk, format = state?.clips?.format, box = state?.faceBox;
+  if (!element) return;
+  const level = speechMouth(now); element.dataset.level = String(level);
+  if (!talk || !format || !box || !speechPlaying()) {
+    element.style.display = 'none'; talkFrame = -1; character?.classList.remove('talking'); return;
+  }
+  const key = `${clipPack}:${talk.path}`;
+  if (talkLoading !== key) {
+    talkLoading = key; talkBitmap = null;
+    void decodeClip(talk.path).then(bitmap => { if (talkLoading === key) talkBitmap = bitmap; else bitmap?.close(); });
+  }
+  if (!talkBitmap) return;
+  character?.classList.add('talking');
+  const index = level === 2 && talk.frames > 3 ? 2 + Math.floor(now / 180) % (talk.frames - 2) : level;
+  if (index === talkFrame) { element.style.display = ''; return; }
+  const { width, height, columns } = format;
+  element.width = faceCanvas.width = faceMask.width = width;
+  element.height = faceCanvas.height = faceMask.height = height;
+  const work = faceCanvas.getContext('2d')!, mask = faceMask.getContext('2d')!;
+  const x0 = Math.floor(box[0] * width), y0 = Math.floor(box[1] * height), x1 = Math.floor(box[2] * width), y1 = Math.floor(box[3] * height);
+  work.drawImage(talkBitmap, index % columns * width, Math.floor(index / columns) * height, width, height, 0, 0, width, height);
+  mask.filter = `blur(${(y1 - y0) / 8}px)`; mask.fillRect(x0, y0, x1 - x0, y1 - y0);
+  work.globalCompositeOperation = 'destination-in'; work.drawImage(faceMask, 0, 0); work.globalCompositeOperation = 'source-over';
+  const context = element.getContext('2d')!;
+  context.drawImage(talkBitmap, 0, 0, width, height, 0, 0, width, height);
+  context.drawImage(faceCanvas, 0, 0);
+  element.style.display = ''; talkFrame = index; updateHit();
 }
 let clipContext: CanvasRenderingContext2D | null = null;
 function drawClip(index: number): void {
@@ -268,24 +331,30 @@ function stepClip(now: number): void {
 }
 function paintSprite(): void {
   const sprite = root.querySelector<HTMLElement>('#sprite'); if (!sprite || !state) return;
-  const sleeping = animationState === 'sleeping' ? state.sleeping : undefined;
+  const docked = state.dockAmount === 1;
+  const sleeping = !docked && animationState === 'sleeping' ? state.sleeping : undefined;
   sprite.style.backgroundImage = `url("${sleeping?.imageUrl ?? state.imageUrl}")`;
   sprite.style.backgroundSize = `${state.pet.width * (sleeping?.frames ?? 8)}px ${state.pet.height * (sleeping ? 1 : state.atlasRows)}px`;
-  sprite.style.backgroundPosition = `${-frame * state.pet.width}px ${sleeping ? 0 : -ANIMATIONS[animationState].row * state.pet.height}px`;
+  sprite.style.backgroundPosition = `${-(docked ? 0 : frame) * state.pet.width}px ${sleeping || docked ? 0 : -ANIMATIONS[animationState].row * state.pet.height}px`;
 }
 function opaqueAt(point: { clientX: number; clientY: number }): boolean {
   if (!state || !(alpha || clipPlayer)) return false;
   const character = root.querySelector<HTMLElement>('#character'); if (!character) return false;
-  const centerX = state.pet.width / 2, centerY = state.pet.height / 2;
+  const [centerX, centerY] = getComputedStyle(character).transformOrigin.split(' ').map(Number.parseFloat);
   const matrix = new DOMMatrix(getComputedStyle(character).transform).inverse();
   const pointInBody = new DOMPoint(point.clientX - centerX, point.clientY - centerY).matrixTransform(matrix);
   const x = Math.floor((pointInBody.x + centerX) / state.pet.width * 192);
   const y = Math.floor((pointInBody.y + centerY) / state.pet.height * 208);
   if (x < 0 || x >= 192 || y < 0 || y >= 208) return false;
-  if (clipPlayer && clipContext) { const element = clipContext.canvas; return clipContext.getImageData(Math.floor(x / 192 * element.width), Math.floor(y / 208 * element.height), 1, 1).data[3]! > 24; }
+  const clip = dockedPose(state.pet.width, state.pet.height, state.edge, state.dockAmount, state.faceBox).clip;
+  const localX = x / 192 * state.pet.width, localY = y / 208 * state.pet.height;
+  if (clip && (localX < clip.x || localX > clip.x + clip.width || localY < clip.y || localY > clip.y + clip.height)) return false;
+  const talk = root.querySelector<HTMLCanvasElement>('#talk');
+  if (character.classList.contains('talking') && talk) return talk.getContext('2d')!.getImageData(Math.floor(x / 192 * talk.width), Math.floor(y / 208 * talk.height), 1, 1).data[3]! > 24;
+  if (state.dockAmount !== 1 && clipPlayer && clipContext) { const element = clipContext.canvas; return clipContext.getImageData(Math.floor(x / 192 * element.width), Math.floor(y / 208 * element.height), 1, 1).data[3]! > 24; }
   if (!alpha) return false;
-  const row = animationState === 'sleeping' && state.sleeping ? 0 : ANIMATIONS[animationState].row;
-  return alpha[((row * 208 + y) * (spriteImage?.width ?? 1536) + frame * 192 + x) * 4 + 3] > 24;
+  const row = state.dockAmount === 1 || animationState === 'sleeping' && state.sleeping ? 0 : ANIMATIONS[animationState].row;
+  return alpha[((row * 208 + y) * (spriteImage?.width ?? 1536) + (state.dockAmount === 1 ? 0 : frame) * 192 + x) * 4 + 3] > 24;
 }
 function updateHit(): void { const next = !!drag || !!lastPointer && opaqueAt(lastPointer); if (next !== hit) { hit = next; bridge.hitTest(hit); } }
 window.addEventListener('pointermove', event => {
@@ -343,7 +412,7 @@ bridge.onState(next => {
   if (next.surface === 'sprite') {
     // Another pack's sheets share nothing with this one's.
     const packKey = `${next.packName}#${next.clips?.epoch ?? 0}`;
-    if (packKey !== clipPack) { clipPack = packKey; for (const entry of clipCache.values()) void entry.then(bitmap => bitmap?.close()); clipCache.clear(); clipSequence = null; clipPlayer = null; clipToken++; lastEpoch = -1; }
+    if (packKey !== clipPack) { talkBitmap?.close(); talkLoading = ''; talkBitmap = null; talkFrame = -1; clipPack = packKey; for (const entry of clipCache.values()) void entry.then(bitmap => bitmap?.close()); clipCache.clear(); clipSequence = null; clipPlayer = null; clipToken++; lastEpoch = -1; }
     renderSprite(); updateHit(); return;
   }
   if (old?.detailOpen && !next.detailOpen) root.querySelector<HTMLButtonElement>('.error-mark[aria-expanded="true"]')?.click();
@@ -353,7 +422,7 @@ bridge.onState(next => {
   if (changedMode && next.mode === 'menu') root.querySelector<HTMLElement>('[role^="menuitem"]')?.focus();
 });
 function animate(now: number): void {
-  if (state?.surface === 'sprite') stepClip(now);
+  if (state?.surface === 'sprite') { stepClip(now); paintTalk(now); }
   if (state?.surface === 'sprite' && !clipPlayer) {
     const elapsedMs = now - animationStart, idleTime = elapsedMs % 46000;
     const cycle = animationState === 'idle' ? idleTime >= 31000 ? idleTime - 31000 : idleTime >= 14000 ? idleTime - 14000 : idleTime : elapsedMs;
@@ -378,7 +447,7 @@ function scrollToPointer(y: number): void {
 }
 root.addEventListener('scroll', updateScrollArea, true);
 root.addEventListener('keydown', event => { if (!(event.target as HTMLElement).closest('.scroll-track')) return; const list = root.querySelector<HTMLElement>('.task-list'); if (!list) return; const delta = event.key === 'ArrowDown' ? 30 : event.key === 'ArrowUp' ? -30 : event.key === 'PageDown' ? list.clientHeight : event.key === 'PageUp' ? -list.clientHeight : 0; if (delta || ['Home', 'End'].includes(event.key)) { event.preventDefault(); list.scrollTop = event.key === 'Home' ? 0 : event.key === 'End' ? list.scrollHeight : list.scrollTop + delta; updateScrollArea(); } });
-setInterval(() => root.querySelectorAll<HTMLElement>('[data-since]').forEach(element => { element.textContent = elapsed(Date.now() - Date.parse(element.dataset.since!)); }), 1000);
+
 bridge.ready(); void bridge.action({ type: 'reducedMotion', value: motion.matches });
 motion.addEventListener('change', () => { void bridge.action({ type: 'reducedMotion', value: motion.matches }); frame = 0; paintSprite(); });
 
@@ -388,8 +457,11 @@ new MutationObserver(() => {
   if (state?.surface !== 'glass') return;
   const popup = document.querySelector<HTMLElement>('.error-popover'), anchor = document.querySelector<HTMLElement>('.error-mark[aria-expanded="true"]');
   if (detailAnnounced !== !!popup) { detailAnnounced = !!popup; void bridge.action({ type: 'detail', value: detailAnnounced }); }
+  const summary = root.querySelector<HTMLElement>('.bubble-full-text');
   const base = root.offsetHeight - (parseFloat(root.style.paddingBottom) || 0);
+  if (summary) summary.style.top = `${base}px`;
   const extra = popup && anchor ? Math.max(0, Math.ceil(anchor.getBoundingClientRect().bottom + 14 + popup.offsetHeight - base)) : 0;
-  const padding = extra ? `${extra}px` : '';
+  const space = Math.max(extra, summary ? summary.offsetHeight : 0);
+  const padding = space ? `${space}px` : '';
   if (root.style.paddingBottom !== padding) { root.style.paddingBottom = padding; requestAnimationFrame(measure); }
 }).observe(document.body, { childList: true, subtree: true });

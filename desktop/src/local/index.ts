@@ -120,7 +120,7 @@ function renderPreferences(): void {
       <div class="setting-row pet-picker-row"><label for="petId">${t('选择宠物')}</label><div class="inline-controls">${picker('petId', t('选择宠物'), !state.petAvailable)}<button id="import-pet" title="${t('导入…')}" aria-label="${t('导入…')}" ${!state.petAvailable ? 'disabled' : ''}>＋</button></div></div>
       ${pack?.thumbnail ? `<div class="pet-credit"><span class="pet-thumbnail"><img src="${escapeHtml(pack.thumbnail)}" style="height:${(pack.rows || 9) * 100}%" alt="${escapeHtml(pack.name)}"/></span><span><strong>${escapeHtml(pack.name)}</strong><small>${escapeHtml(pack.author || '')}${pack.license ? ` · <button class="text-link" data-external="${escapeHtml(pack.licenseUrl!)}">${escapeHtml(pack.license)}</button>` : ''}${pack.source ? ` · <button class="text-link" data-external="${escapeHtml(pack.source)}">${t('来源')}</button>` : ''}</small></span></div>` : ''}
       <div class="setting-row"><label for="petSize">${t('大小')}</label>${picker('petSize', t('宠物大小'))}</div>
-      ${toggle('petEdgeHide', t('贴边自动隐藏'), t('靠近屏幕边缘时收起，指针靠近时探出。'), s.petEdgeHide)}
+      ${toggle('petEdgeHide', t('贴边时缩到边缘'), t('贴边时保留脸部可见，指针靠近时完全探出。'), s.petEdgeHide)}
       ${toggle('petMini', t('Mini 模式'), t('桌宠变小，占更少屏幕。'), s.petMini)}
       ${toggle('petSound', t('提示音'), t('点击桌宠和收到提醒时播放，打开时试听。'), s.petSound)}
       <div class="setting-row"><div><label for="petAgentAlerts">${t('子线程')}</label><p>${t('子线程等待你处理时仍会提醒')}</p></div>${picker('petAgentAlerts', t('子线程'))}</div>

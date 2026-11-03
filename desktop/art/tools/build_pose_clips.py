@@ -34,7 +34,7 @@ import numpy as np
 from PIL import Image
 from scipy import ndimage
 
-FPS, COLUMNS, WIDTH, HEIGHT, FADE = 15, 12, 240, 260, 6
+FPS, COLUMNS, WIDTH, HEIGHT, FADE = 24, 12, 240, 260, 10
 ATLAS_ROWS = [('idle', 6), ('running-right', 8), ('running-left', 8), ('waving', 4), ('jumping', 5), ('failed', 8), ('waiting', 6), ('running', 6), ('review', 6)]
 ATLAS_CELL = (192, 208)
 
@@ -125,15 +125,15 @@ def beat_frames(tools, poses, scale, beat, cache):
     count, pose = beat['frames'], poses[beat['pose']]
     frames = []
     for index in range(count):
-        phase = index / count * 2 * math.pi
+        phase = index / max(1, count - 1) * 2 * math.pi
         wave = math.sin(phase)
         arc = beat.get('arc', 0) * math.sin(index / max(1, count - 1) * math.pi)
         args = {
             'dy': beat.get('dy', 0) - abs(math.sin(phase)) * beat.get('bob', 0) - arc,
             'dx': math.sin(phase) * beat.get('sway', 0) + beat.get('dx', 0),
             'rot': wave * beat.get('rot', 0),
-            'sy': 1 - (0.5 + 0.5 * wave) * 0.012 * beat.get('breathe', 0),
-            'sx': 1 + (0.5 + 0.5 * wave) * 0.006 * beat.get('breathe', 0),
+            'sy': 1 - (0.5 - 0.5 * math.cos(phase)) * 0.012 * beat.get('breathe', 0),
+            'sx': 1 + (0.5 - 0.5 * math.cos(phase)) * 0.006 * beat.get('breathe', 0),
         }
         key = (beat['pose'], beat.get('face'), *(round(value, 2) for value in args.values()))
         if key not in cache:
@@ -183,7 +183,7 @@ def clip_frames(tools, poses, scale, beats, cache):
         next_frames = beat_frames(tools, poses, scale, beat, cache)
         # Move from where the last beat stopped, within this beat's own time.
         steps = min(beat.get('fade', FADE), len(next_frames) - 1)
-        same = previous and all(previous.get(key) == beat.get(key) for key in ('pose', 'face', 'dx', 'dy'))
+        same = previous and all(previous.get(key) == beat.get(key) for key in ('pose', 'face', 'dx', 'dy', 'breathe', 'sway', 'bob', 'rot', 'arc'))
         if frames and steps > 0 and not same:
             next_frames[:steps] = tween(frames[-1], next_frames[steps], steps)
         previous = beat
@@ -197,6 +197,13 @@ def main():
     parser.add_argument('--zip', type=Path)
     args = parser.parse_args()
     plan = json.loads(args.plan.read_text())
+    # Plans authored at 15 fps retain their duration when rendered at 24 fps.
+    source_fps = plan.get('fps', 15)
+    for beats in plan['clips'].values():
+        for beat in beats:
+            beat['frames'] = max(2, round(beat['frames'] * FPS / source_fps))
+            if 'fade' in beat:
+                beat['fade'] = max(1, round(beat['fade'] * FPS / source_fps))
     global WIDTH, HEIGHT, FACE_BOX, HEAD_X
     WIDTH, HEIGHT = plan.get('width', WIDTH), plan.get('height', HEIGHT)
     FACE_BOX = plan.get('faceBox', (.3, .05, .7, .25))
@@ -228,7 +235,7 @@ def main():
         # Whole cycles from phase zero, so every clip starts and ends on the same drift and they join.
         if plan.get('wind') and name not in plan.get('still', ()):
             cycles = max(1, round(len(frames[name]) / (FPS * 3)))
-            frames[name] = [wind(frame, index / len(frames[name]) * cycles * 2 * math.pi, plan['wind']) for index, frame in enumerate(frames[name])]
+            frames[name] = [wind(frame, index / max(1, len(frames[name]) - 1) * cycles * 2 * math.pi, plan['wind']) for index, frame in enumerate(frames[name])]
         # A clip only the atlas samples stays out of the pack, which holds just what it declares.
         if name not in declared:
             continue
@@ -242,11 +249,27 @@ def main():
         for column in range(count):
             atlas.paste(source[column * len(source) // count].resize(ATLAS_CELL, Image.LANCZOS), (column * ATLAS_CELL[0], row * ATLAS_CELL[1]))
     atlas.save(args.out / 'spritesheet.webp', 'WEBP', quality=88, alpha_quality=92, method=4)
-    manifest = {key: plan[key] for key in plan if key not in ('poses', 'clips', 'states', 'atlas', 'grid', 'grids', 'farther', 'still', 'wind', 'width', 'height', 'sizeScale', 'effects', 'faceBox')}
+    manifest = {key: plan[key] for key in plan if key not in ('poses', 'clips', 'states', 'atlas', 'grid', 'grids', 'farther', 'still', 'wind', 'width', 'height', 'sizeScale', 'effects', 'faceBox', 'fps', 'talk')}
     manifest.update({'spritesheetPath': 'spritesheet.webp', 'remoteCodex': {
+        'faceBox': list(FACE_BOX),
         **({'sizeScale': plan['sizeScale']} if 'sizeScale' in plan else {}),
         'clipFormat': {'fps': FPS, 'columns': COLUMNS, 'width': WIDTH, 'height': HEIGHT},
         'clips': {state: [{'path': f"clips/{entry['clip']}.webp", 'frames': len(frames[entry['clip']]), **({'role': entry['role']} if 'role' in entry else {})} for entry in names] for state, names in entries.items()}}})
+    if plan.get('talk'):
+        # Face variants are complete native frames; callers composite only the edited face.
+        talk_frames = [Image.open(args.plan.parent / path).convert('RGBA') for path in plan['talk']]
+        if not 3 <= len(talk_frames) <= 8 or any(frame.size != (WIDTH, HEIGHT) for frame in talk_frames):
+            raise SystemExit('talk needs 3–8 native-size frames ordered closed, half, open, optional open variants')
+        sheet = Image.new('RGBA', (COLUMNS * WIDTH, HEIGHT))
+        for index, frame in enumerate(talk_frames):
+            sheet.paste(frame, (index * WIDTH, 0))
+        sheet.save(args.out / 'clips' / 'talk.webp', 'WEBP', quality=86, alpha_quality=92, method=4)
+        manifest['remoteCodex']['talk'] = {'path': 'clips/talk.webp', 'frames': len(talk_frames)}
+    declared_files = list((args.out / 'clips').glob('*.webp'))
+    if any(path.stat().st_size > 8 * 1024 * 1024 for path in declared_files) or sum(path.stat().st_size for path in declared_files) > 160 * 1024 * 1024:
+        raise SystemExit('clip byte limits exceeded')
+    if any(len(frames[name]) > 512 for name in declared):
+        raise SystemExit('clip frame limit exceeded')
     (args.out / 'pet.json').write_text(json.dumps(manifest, ensure_ascii=False, indent=1) + '\n')
     if args.zip:
         with zipfile.ZipFile(args.zip, 'w', zipfile.ZIP_STORED) as bundle:
