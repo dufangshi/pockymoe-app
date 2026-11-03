@@ -51,7 +51,7 @@ export interface UpdateDependencies {
   failureMessage?: (reason?: unknown) => string;
   now?: () => number;
 }
-export type CheckResult = 'latest' | 'downloading' | 'ready' | 'unverified' | 'failed';
+export type CheckResult = 'latest' | 'downloading' | 'ready' | 'unverified' | 'failed' | 'deferred';
 export class UpdateService {
   private current: UpdateState = { status: 'idle' };
   private listeners = new Set<(state: UpdateState) => void>();
@@ -63,7 +63,7 @@ export class UpdateService {
   private stopped = false;
   private unverifiedVersion = '';
   private installFailures = new Map<string, number>();
-  private retry = { lastCheckAt: 0, versions: {} as Record<string, { failures: number; retryAfter: number }> };
+  private retry = { lastCheckAt: 0, checkAfter: 0, rateLimits: 0, versions: {} as Record<string, { failures: number; retryAfter: number }> };
   private now = (): number => this.deps.now?.() ?? Date.now();
   unverified = (): string => this.unverifiedVersion;
   private async saveRetry(): Promise<void> {
@@ -77,6 +77,8 @@ export class UpdateService {
       const saved = JSON.parse(await readFile(join(this.deps.directory, '.retry.json'), 'utf8'));
       const now = this.now();
       if (Number.isFinite(saved.lastCheckAt)) this.retry.lastCheckAt = Math.max(0, Math.min(now, saved.lastCheckAt));
+      if (Number.isFinite(saved.checkAfter)) this.retry.checkAfter = Math.max(0, Math.min(now + 24 * 3600_000, saved.checkAfter));
+      if (Number.isInteger(saved.rateLimits)) this.retry.rateLimits = Math.max(0, Math.min(10, saved.rateLimits));
       for (const [version, value] of Object.entries(saved.versions || {}).slice(-64)) {
         const item = value as { failures: number; retryAfter: number };
         if (parseVersion(version) && isNewerVersion(version, this.deps.version) && Number.isInteger(item.failures) && item.failures > 0 && Number.isFinite(item.retryAfter)) {
@@ -113,13 +115,15 @@ export class UpdateService {
   state = (): UpdateState => ({ ...this.current });
   onChange = (listener: (state: UpdateState) => void): (() => void) => { this.listeners.add(listener); return () => this.listeners.delete(listener); };
   private set(state: UpdateState): void { this.current = state; for (const listener of this.listeners) listener(this.state()); }
-  check = (source: 'manual' | 'startup' | 'timer' | 'wake' = 'manual'): Promise<CheckResult> => {
+  check = (source: 'manual' | 'startup' | 'timer' | 'wake' | 'focus' = 'manual'): Promise<CheckResult> => {
     if (this.stopped || !this.deps.allowed()) return Promise.resolve('latest');
     if (this.current.status === 'installing') return Promise.resolve('ready');
     if (this.download) return Promise.resolve('downloading');
     if (this.pending) return this.pending;
     this.pending = (async () => {
       await this.restoring;
+      if (this.now() < this.retry.checkAfter) return 'deferred' as const;
+      if (source === 'focus' && this.now() - this.retry.lastCheckAt < 15 * 60_000) return this.ready ? 'ready' as const : 'latest' as const;
       if (source === 'wake' && this.now() - this.retry.lastCheckAt < 3600_000) return this.ready ? 'ready' as const : 'latest' as const;
       this.retry.lastCheckAt = this.now();
       await this.saveRetry();
@@ -130,6 +134,25 @@ export class UpdateService {
   private async checkRelease(): Promise<CheckResult> {
     await this.restoring;
     const response = await this.deps.fetch(this.deps.feed, { credentials: 'omit', headers: { Accept: 'application/vnd.github+json', ...(this.etag ? { 'If-None-Match': this.etag } : {}) }, signal: AbortSignal.timeout(20_000) });
+    if (response.status === 403 || response.status === 429) {
+      await response.body?.cancel();
+      const now = this.now();
+      const retryAfter = response.headers.get('retry-after');
+      const seconds = retryAfter === null || retryAfter.trim() === '' ? NaN : Number(retryAfter);
+      const retryAt = Number.isFinite(seconds) ? now + seconds * 1000 : Date.parse(retryAfter || '');
+      const reset = response.headers.get('x-ratelimit-reset');
+      const resetAt = reset ? Number(reset) * 1000 : NaN;
+      this.retry.rateLimits = Math.min(10, this.retry.rateLimits + 1);
+      const fallback = now + Math.min(24, 2 ** (this.retry.rateLimits - 1)) * 3600_000;
+      const deadline = Math.max(Number.isFinite(retryAt) ? retryAt : 0, Number.isFinite(resetAt) ? resetAt : 0);
+      this.retry.checkAfter = Math.min(now + 24 * 3600_000, Math.max(now + 60_000, deadline > now ? deadline : fallback));
+      await this.saveRetry();
+      return 'deferred';
+    }
+    if (response.ok || response.status === 304) {
+      this.retry.checkAfter = 0; this.retry.rateLimits = 0;
+      await this.saveRetry();
+    }
     if (response.status === 304) await response.body?.cancel();
     else {
       if (!response.ok) { await response.body?.cancel(); return 'failed'; }

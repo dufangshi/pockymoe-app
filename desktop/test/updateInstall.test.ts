@@ -41,12 +41,12 @@ it.each(['darwin', 'win32'])('rechecks %s space at commit without quitting into 
   await expect(prepared.commit()).rejects.toBeInstanceOf(InsufficientSpace); await prepared.cancel();
   expect(f.spawn).not.toHaveBeenCalled(); expect(f.quit).not.toHaveBeenCalled();
 });
-it('writes Windows attempt before installer launch, only at commit', async () => {
-  const f = fixture('win32'); const prepared = await prepareInstall('/verified.exe', entry, f.deps);
+it.each(['/fixture', '/Users/John Smith/AppData/Local/Programs/Pockymoe'])('pins Windows install to unquoted %s, writing attempt only at commit', async directory => {
+  const f = fixture('win32'); f.deps.execPath = join(directory, 'Pockymoe.exe'); const prepared = await prepareInstall('/verified.exe', entry, f.deps);
   expect(f.write).not.toHaveBeenCalled(); expect(f.spawn).not.toHaveBeenCalled(); await prepared.commit();
   expect(f.calls).toEqual(['marker', 'spawn', 'quit']);
   expect(f.write).toHaveBeenCalledWith(join(profile, 'updates', 'install-attempt.json'), JSON.stringify({ currentVersion: '1.2.2', targetVersion: '1.2.3' }));
-  expect(f.spawn).toHaveBeenCalledWith('/verified.exe', ['/S', '--updated', '--force-run'], { windowsHide: true });
+  expect(f.spawn).toHaveBeenCalledWith('/verified.exe', ['/S', '--updated', '--force-run', `/D=${join(directory)}`], { windowsHide: true, windowsVerbatimArguments: true });
 });
 it('stays running if Windows attempt marker cannot be recorded', async () => {
   const f = fixture('win32'); f.write.mockRejectedValue(new Error('disk write')); const prepared = await prepareInstall('/verified.exe', entry, f.deps);
