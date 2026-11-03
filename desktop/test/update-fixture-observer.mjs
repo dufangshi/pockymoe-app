@@ -24,10 +24,14 @@ void app.whenReady().then(async () => {
     packaged: app.isPackaged, shellVersion: null, cookie: false, encryptedSecret: false, profile: false };
   writeFileSync(`${fixture.result}.startup`, JSON.stringify({ version: checks.version, pid: checks.pid, executable: checks.executable, packaged: checks.packaged }, null, 2));
   try {
-    for (const window of BrowserWindow.getAllWindows()) {
-      if (new URL(window.webContents.getURL()).origin !== fixture.origin) continue;
-      checks.shellVersion = await window.webContents.executeJavaScript('window.pockymoeHost.capabilities().then(c => c.shellVersion)');
-      break;
+    const deadline = Date.now() + 20_000;
+    while (!checks.shellVersion && Date.now() < deadline) {
+      for (const window of BrowserWindow.getAllWindows()) {
+        if (!window.webContents.getURL().startsWith(fixture.origin + '/')) continue;
+        checks.shellVersion = await window.webContents.executeJavaScript('window.pockymoeHost?.capabilities().then(c => c.shellVersion)').catch(() => null);
+        if (checks.shellVersion) break;
+      }
+      if (!checks.shellVersion) await new Promise(resolve => setTimeout(resolve, 100));
     }
     checks.profile = app.getPath('userData') === fixture.profile;
     const stored = readFileSync(join(fixture.profile, 'update-fixture-secret.bin'));

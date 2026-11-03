@@ -12,13 +12,16 @@ it('checks at startup, hourly, resume and window focus; cleans all listeners on 
   for (const name of ['__UPDATER_PUBLIC_KEY__', '__UPDATER_FEED__']) vi.stubGlobal(name, 'fixture');
   vi.stubGlobal('__UPDATER_TEST_BUILD__', true);
   const { app, powerMonitor } = await import('electron');
-  const { configureUpdates } = await import('../src/main/updates');
+  const { checkUpdate, configureUpdates } = await import('../src/main/updates');
   configureUpdates(); configureUpdates();
   expect(mocks.check.mock.calls).toEqual([['startup']]);
   await vi.advanceTimersByTimeAsync(3600_000 - 1); expect(mocks.check).toHaveBeenCalledTimes(1);
   await vi.advanceTimersByTimeAsync(1); expect(mocks.check).toHaveBeenLastCalledWith('timer');
   (app as unknown as EventEmitter).emit('browser-window-focus'); expect(mocks.check).toHaveBeenLastCalledWith('focus');
   (powerMonitor as unknown as EventEmitter).emit('resume'); expect(mocks.check).toHaveBeenLastCalledWith('wake');
+  mocks.check.mockResolvedValueOnce('deferred');
+  const showMessage = vi.fn();
+  await checkUpdate(showMessage); expect(showMessage).not.toHaveBeenCalled();
   (app as unknown as EventEmitter).emit('before-quit');
   const count = mocks.check.mock.calls.length;
   await vi.advanceTimersByTimeAsync(3600_000);
