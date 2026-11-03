@@ -4,6 +4,7 @@ import contextlib
 import importlib.util
 import io
 import json
+import subprocess
 from pathlib import Path
 import tempfile
 import unittest
@@ -143,6 +144,30 @@ class ArtifactGateTests(unittest.TestCase):
             self.assertNotIn(key, captured[0])
         self.assertEqual(captured[0]['CSC_IDENTITY_AUTO_DISCOVERY'], 'false')
 
+    def test_final_dmg_checks_pinned_app_and_scans_volume_root(self):
+        work = self.root / 'dmg-work'
+        work.mkdir()
+        with patch.object(release, 'run') as run, patch.object(release, 'extract_asar') as extract, patch.object(release, 'scan') as scan:
+            release.verify_mac_dmg(self.root / 'final.dmg', work, {'certificateSha1': 'a' * 40})
+        mount = work / 'dmg-mount'
+        self.assertEqual(run.call_args_list[1].args, ('codesign', '--verify', '--deep', '--strict', '-R', '=certificate leaf = H"' + 'a' * 40 + '"', mount / 'Pockymoe.app'))
+        extract.assert_called_once_with(mount / 'Pockymoe.app/Contents/Resources', work / 'scan-mac-asar')
+        scan.assert_called_once_with(mount, work / 'scan-mac-asar')
+        self.assertEqual(run.call_args_list[-1].args, ('hdiutil', 'detach', mount))
+
+    def test_final_dmg_invalid_pinned_signature_stops_scan_and_still_detaches(self):
+        work = self.root / 'dmg-invalid'
+        work.mkdir()
+        def run(*args, **_kwargs):
+            if args[0] == 'codesign':
+                raise RuntimeError('pinned signature rejected')
+        with patch.object(release, 'run', side_effect=run) as command, patch.object(release, 'extract_asar') as extract, patch.object(release, 'scan') as scan:
+            with self.assertRaisesRegex(RuntimeError, 'pinned signature rejected'):
+                release.verify_mac_dmg(self.root / 'final.dmg', work, {'certificateSha1': 'a' * 40})
+        extract.assert_not_called()
+        scan.assert_not_called()
+        self.assertEqual(command.call_args_list[-1].args, ('hdiutil', 'detach', work / 'dmg-mount'))
+
     def test_new_sdk_scheme_signer_output_is_normalized_and_deduplicated(self):
         output = b'V2 Signer: certificate SHA-256 digest: ' + b'C' * 64 + b'\nV3 Signer: certificate SHA-256 digest: ' + b'C' * 64 + b'\n'
         with patch.object(release, 'sdk_tool', return_value='/fixture/apksigner'), patch.object(release, 'run', return_value=output):
@@ -172,18 +197,20 @@ class CommandTests(unittest.TestCase):
 
             def run(*args, **kwargs):
                 calls.append(args)
-                if args[:2] == ('node', release.ROOT / 'scripts/update-signatures.cjs'):
-                    Path(args[-1]).write_text('<!-- pockymoe-updates-v1\n[{"signature":"fixture-signature"}]\n-->\n')
+                if args[:3] in [('node', release.ROOT / 'scripts/update-signatures.cjs', 'sign'), ('node', release.ROOT / 'scripts/update-signatures.cjs', 'sign-validation')]:
+                    Path(args[5]).write_text('<!-- pockymoe-updates-v1\n[{"signature":"fixture-signature"}]\n-->\n')
+                    if args[2] == 'sign-validation':
+                        Path(args[6]).write_text('fixture-validation-public-key\n')
                 return b''
 
             argv = ['release-client.sh', '1.2.3', '--output', str(output), '--notes-file', str(notes), *arguments]
             source = [SHA, OTHER_SHA] if changed_source else [SHA, SHA]
             with patch('sys.argv', argv), patch.object(release.platform, 'system', return_value='Darwin'), patch.object(release.platform, 'machine', return_value='arm64'), patch.object(release, 'source_gate', side_effect=source) as gate, patch.object(release, 'versions', return_value=8), patch.object(release, 'build', side_effect=build), patch.object(release, 'run', side_effect=run), patch.object(release, 'scan') as scan, contextlib.redirect_stdout(io.StringIO()):
                 release.main()
-            prepared = (root / '1.2.3-release-notes.md').read_text()
+            prepared = (root / ('1.2.3-release-notes.md' if '--publish' in arguments else 'output-validation-notes.md')).read_text()
             return prepared, calls, gate.call_args_list, scan.call_args_list
 
-    def test_validation_prepares_one_signed_comment_outside_three_file_folder(self):
+    def test_validation_prepares_throwaway_signed_comment_outside_three_file_folder(self):
         prepared, calls, gates, scans = self.invoke(['--validate'])
         self.assertEqual(prepared.count('<!-- pockymoe-updates-v1'), 1)
         self.assertIn('Reviewed notes', prepared)
@@ -192,6 +219,13 @@ class CommandTests(unittest.TestCase):
         self.assertFalse(any(call[:3] == ('gh', 'release', 'create') for call in calls))
         self.assertTrue(all(call.args == (True,) for call in gates))
         self.assertEqual(len(scans), 1)
+        self.assertEqual([call[2] for call in calls], ['sign-validation', 'verify'])
+        self.assertTrue(str(calls[-1][-1]).endswith('output-validation-public-key.pem'))
+
+    def test_nonpublishing_main_also_uses_throwaway_signing(self):
+        _, calls, gates, _ = self.invoke([])
+        self.assertEqual([call[2] for call in calls], ['sign-validation', 'verify'])
+        self.assertTrue(all(call.args == (False,) for call in gates))
 
     def test_publish_explicitly_targets_full_sha_latest_notes_and_exact_three_assets(self):
         _, calls, gates, _ = self.invoke(['--publish'])
@@ -203,6 +237,10 @@ class CommandTests(unittest.TestCase):
         self.assertEqual(Path(command[command.index('--notes-file') + 1]).name, '1.2.3-release-notes.md')
         self.assertEqual([Path(arg).name for arg in command[-3:]], release.asset_names('1.2.3'))
         self.assertTrue(all(call.args == (False,) for call in gates))
+        sign = [call for call in calls if call[:3] == ('node', release.ROOT / 'scripts/update-signatures.cjs', 'sign')]
+        self.assertEqual(len(sign), 1)
+        self.assertEqual(sign[0][-1], '--publish')
+        self.assertFalse(any(call[2] == 'sign-validation' for call in calls))
 
     def test_source_change_after_build_prevents_signing_or_publishing(self):
         with self.assertRaisesRegex(RuntimeError, 'Source changed'):
@@ -213,6 +251,48 @@ class CommandTests(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 release.main()
             gate.assert_not_called()
+
+
+class ValidationSigningTests(unittest.TestCase):
+    def test_real_validation_signing_never_accesses_production_key_and_uses_fresh_key_each_run(self):
+        tool = Path(__file__).with_name('update-signatures.cjs').resolve()
+        with tempfile.TemporaryDirectory(prefix='pockymoe-signing-unit-') as temporary:
+            root = Path(temporary)
+            folder = root / 'assets'
+            folder.mkdir()
+            for name in release.asset_names('0.3.0'):
+                (folder / name).write_bytes(b'disposable-artifact')
+            marker = root / 'production-key-accessed'
+            trap = root / 'forbid-production-key.cjs'
+            trap.write_text("const fs=require('node:fs');\n" +
+                            "for(const method of ['readFileSync','statSync','existsSync']){const original=fs[method];fs[method]=function(file,...args){if(String(file).endsWith('client-update-ed25519.pem')){fs.writeFileSync(" + json.dumps(str(marker)) + ",method);throw new Error('Production key access forbidden in validation');}return original.call(this,file,...args);};}\n")
+            keys = []
+            for index in range(2):
+                notes, public = root / f'notes-{index}.md', root / f'public-{index}.pem'
+                subprocess.run(['node', '--require', str(trap), str(tool), 'sign-validation', '0.3.0', str(folder), str(notes), str(public)], check=True, capture_output=True)
+                self.assertFalse(marker.exists(), 'Validation touched the production private-key path')
+                keys.append(public.read_text())
+                # Verify in an independent Node program, without importing the signer.
+                verifier = """const fs=require('node:fs'),crypto=require('node:crypto'),path=require('node:path');
+const [notes,key,folder]=process.argv.slice(1);
+const entries=JSON.parse(fs.readFileSync(notes,'utf8').match(/<!-- pockymoe-updates-v1\\n([^]*?)\\n-->/)[1]);
+if(entries.length!==2)process.exit(1);
+for(const e of entries){const bytes=fs.readFileSync(path.join(folder,e.fileName));const data=JSON.stringify({version:e.version,platform:e.platform,fileName:e.fileName,sha256:e.sha256,size:e.size});
+if(e.version!=='0.3.0'||e.size!==bytes.length||e.sha256!==crypto.createHash('sha256').update(bytes).digest('hex')||!crypto.verify(null,Buffer.from(data),fs.readFileSync(key),Buffer.from(e.signature,'base64')))process.exit(1);}
+"""
+                subprocess.run(['node', '-e', verifier, str(notes), str(public), str(folder)], check=True, capture_output=True)
+                subprocess.run(['node', '--require', str(trap), str(tool), 'verify', '0.3.0', str(folder), str(notes), str(public)], check=True, capture_output=True)
+            self.assertNotEqual(keys[0], keys[1])
+            wrong_key = subprocess.run(['node', '--require', str(trap), str(tool), 'verify', '0.3.0', str(folder), str(root / 'notes-0.md'), str(root / 'public-1.pem')], capture_output=True)
+            self.assertNotEqual(wrong_key.returncode, 0)
+            (folder / 'Pockymoe-0.3.0-win-x64.exe').write_bytes(b'tampered-artifact')
+            tampered = subprocess.run(['node', '--require', str(trap), str(tool), 'verify', '0.3.0', str(folder), str(root / 'notes-0.md'), str(root / 'public-0.pem')], capture_output=True)
+            self.assertNotEqual(tampered.returncode, 0)
+            self.assertEqual(sorted(file.name for file in folder.iterdir()), sorted(release.asset_names('0.3.0')))
+            self.assertFalse(marker.exists())
+            rejected = subprocess.run(['node', '--require', str(trap), str(tool), 'sign', '0.3.0', str(folder), str(root / 'forbidden.md')], capture_output=True)
+            self.assertNotEqual(rejected.returncode, 0, 'Production signing requires explicit --publish')
+            self.assertFalse(marker.exists())
 
 
 if __name__ == '__main__':

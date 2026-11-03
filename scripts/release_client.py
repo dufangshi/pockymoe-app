@@ -133,6 +133,21 @@ def mac_smoke(app, work):
     print('Built Mac app started; isolated smoke process closed')
 
 
+def verify_mac_dmg(dmg, work, signing):
+    mount = work / 'dmg-mount'
+    mount.mkdir()
+    run('hdiutil', 'attach', dmg, '-readonly', '-nobrowse', '-mountpoint', mount, capture=True)
+    try:
+        mounted_app = mount / 'Pockymoe.app'
+        run('codesign', '--verify', '--deep', '--strict', '-R', '=certificate leaf = H"' + signing['certificateSha1'] + '"', mounted_app, capture=True)
+        resources = mounted_app / 'Contents/Resources'
+        extract_asar(resources, work / 'scan-mac-asar')
+        # Include volume-root files such as .DS_Store and background artwork.
+        scan(mount, work / 'scan-mac-asar')
+    finally:
+        run('hdiutil', 'detach', mount, capture=True)
+
+
 def build(version, code, output, work):
     previous = previous_apk(work, code)
     run('python3', ROOT / 'scripts/check-production-address.py')
@@ -179,15 +194,7 @@ def build(version, code, output, work):
     scan_apk = work / 'scan-apk'
     with zipfile.ZipFile(apk) as archive:
         archive.extractall(scan_apk)
-    mount = work / 'dmg-mount'
-    mount.mkdir()
-    run('hdiutil', 'attach', artifacts / asset_names(version)[1], '-readonly', '-nobrowse', '-mountpoint', mount, capture=True)
-    try:
-        resources = mount / 'Pockymoe.app/Contents/Resources'
-        extract_asar(resources, work / 'scan-mac-asar')
-        scan(mount / 'Pockymoe.app', work / 'scan-mac-asar')
-    finally:
-        run('hdiutil', 'detach', mount, capture=True)
+    verify_mac_dmg(artifacts / asset_names(version)[1], work, signing)
     # Extract the actual NSIS installer, including its compressed app payload.
     seven = run('node', DESKTOP / 'scripts/7zip-path.cjs', cwd=DESKTOP, capture=True).decode().splitlines()[-1].strip()
     installer = work / 'scan-installer'
@@ -236,14 +243,22 @@ def main():
     for file in sorted(output.iterdir()):
         print(f'{file.name}\t{file.stat().st_size} bytes')
     print(f'Output: {output}\nCommit: {sha}')
-    notes = output.parent / f'{args.version}-release-notes.md'
+    notes = output.parent / f'{args.version}-release-notes.md' if args.publish else output.parent / f'{output.name}-validation-notes.md'
+    public_key = DESKTOP / 'build/update-public-key.pem' if args.publish else output.parent / f'{output.name}-validation-public-key.pem'
     with tempfile.TemporaryDirectory(prefix='pockymoe-update-notes-') as temporary:
         metadata = Path(temporary) / 'metadata.md'
-        run('node', ROOT / 'scripts/update-signatures.cjs', 'sign', args.version, output, metadata)
+        if args.publish:
+            run('node', ROOT / 'scripts/update-signatures.cjs', 'sign', args.version, output, metadata, '--publish')
+        else:
+            temporary_public = Path(temporary) / 'validation-public-key.pem'
+            run('node', ROOT / 'scripts/update-signatures.cjs', 'sign-validation', args.version, output, metadata, temporary_public)
+            public_key.write_bytes(temporary_public.read_bytes())
         original = args.notes_file.read_text() if args.notes_file else f'Pockymoe {args.version}\n'
         original = re.sub(r'<!-- pockymoe-updates-v1\n[\s\S]*?\n-->\n?', '', original)
         notes.write_text(original.rstrip() + '\n\n' + metadata.read_text())
     scan(notes)
+    run('node', ROOT / 'scripts/update-signatures.cjs', 'verify', args.version, output, notes, public_key)
+    print(f'Metadata: {notes}\nVerification public key: {public_key}')
     if args.publish:
         run('gh', 'release', 'create', f'v{args.version}', '--repo', REPO, '--target', sha,
             '--latest', '--notes-file', notes, *(output / name for name in asset_names(args.version)))
