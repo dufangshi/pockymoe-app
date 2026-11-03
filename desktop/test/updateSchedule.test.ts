@@ -1,0 +1,28 @@
+import { EventEmitter } from 'node:events';
+import { afterEach, expect, it, vi } from 'vitest';
+const mocks = vi.hoisted(() => ({ check: vi.fn().mockResolvedValue('latest'), dispose: vi.fn() }));
+vi.mock('electron', async () => {
+  const { EventEmitter } = await import('node:events');
+  return { app: Object.assign(new EventEmitter(), { getVersion: () => '0.3.1', getPath: () => '/fixture', isPackaged: true }), powerMonitor: new EventEmitter(), dialog: {}, net: {}, shell: {} };
+});
+vi.mock('../src/main/updateCore', () => ({ UpdateService: class { check = mocks.check; dispose = mocks.dispose; } }));
+afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); vi.resetModules(); vi.clearAllMocks(); });
+it('checks at startup, hourly, resume and window focus; cleans all listeners on quit', async () => {
+  vi.useFakeTimers();
+  for (const name of ['__UPDATER_PUBLIC_KEY__', '__UPDATER_FEED__']) vi.stubGlobal(name, 'fixture');
+  vi.stubGlobal('__UPDATER_TEST_BUILD__', true);
+  const { app, powerMonitor } = await import('electron');
+  const { configureUpdates } = await import('../src/main/updates');
+  configureUpdates(); configureUpdates();
+  expect(mocks.check.mock.calls).toEqual([['startup']]);
+  await vi.advanceTimersByTimeAsync(3600_000 - 1); expect(mocks.check).toHaveBeenCalledTimes(1);
+  await vi.advanceTimersByTimeAsync(1); expect(mocks.check).toHaveBeenLastCalledWith('timer');
+  (app as unknown as EventEmitter).emit('browser-window-focus'); expect(mocks.check).toHaveBeenLastCalledWith('focus');
+  (powerMonitor as unknown as EventEmitter).emit('resume'); expect(mocks.check).toHaveBeenLastCalledWith('wake');
+  (app as unknown as EventEmitter).emit('before-quit');
+  const count = mocks.check.mock.calls.length;
+  await vi.advanceTimersByTimeAsync(3600_000);
+  (app as unknown as EventEmitter).emit('browser-window-focus');
+  (powerMonitor as unknown as EventEmitter).emit('resume');
+  expect(mocks.check).toHaveBeenCalledTimes(count); expect(mocks.dispose).toHaveBeenCalledOnce();
+});

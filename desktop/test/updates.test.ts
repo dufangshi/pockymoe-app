@@ -100,3 +100,42 @@ it('persists exponential download backoff and throttles wake checks across launc
   }
   expect(downloads).toBe(7);
 });
+
+it('throttles focus for 15 minutes and shares one in-flight request across triggers', async () => {
+  let now = 1_000_000_000;
+  let respond!: (response: Response) => void;
+  const fetch = vi.fn().mockImplementation(() => new Promise<Response>(resolve => { respond = resolve; }));
+  const { updates } = service({ fetch, now: () => now });
+  const pending = updates.check('startup');
+  await vi.waitFor(() => expect(fetch).toHaveBeenCalledOnce());
+  expect(updates.check('focus')).toBe(pending); expect(updates.check('timer')).toBe(pending);
+  respond(new Response(JSON.stringify(release(entry(), { tag_name: 'v0.1.0' })), { headers: { etag: 'focus' } }));
+  await pending;
+  now += 15 * 60_000 - 1;
+  await updates.check('focus'); expect(fetch).toHaveBeenCalledOnce();
+  now++;
+  const focused = updates.check('focus');
+  await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
+  respond(new Response(null, { status: 304 })); await focused;
+  await updates.check('focus'); expect(fetch).toHaveBeenCalledTimes(2);
+});
+it.each([
+  [403, { 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': '1000003600' }, 3600_000],
+  [429, { 'retry-after': '120' }, 120_000],
+  [429, { 'retry-after': new Date(1_000_000_120_000).toUTCString() }, 120_000],
+  [403, {}, 3600_000]
+])('quietly backs off %s responses across triggers and restarts', async (status, headers, duration) => {
+  let now = 1_000_000_000_000;
+  const fetch = vi.fn().mockImplementation(async () => new Response(null, { status, headers: headers as Record<string, string> }));
+  const first = service({ fetch, now: () => now });
+  expect(await first.updates.check()).toBe('deferred');
+  expect(first.updates.state()).toEqual({ status: 'idle' });
+  const second = service({ fetch, now: () => now });
+  now += duration - 1;
+  for (const source of ['manual', 'startup', 'focus', 'wake', 'timer'] as const) expect(await second.updates.check(source)).toBe('deferred');
+  expect(fetch).toHaveBeenCalledOnce();
+  now++;
+  await second.updates.check(); expect(fetch).toHaveBeenCalledTimes(2);
+  const policy = JSON.parse(await readFile(join(directory, '.retry.json'), 'utf8'));
+  if (Object.keys(headers).length === 0) expect(policy.checkAfter - now).toBe(2 * 3600_000);
+});

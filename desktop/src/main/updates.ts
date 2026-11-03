@@ -37,16 +37,18 @@ export function configureUpdates(allowed = (): boolean => true): void {
   const updates = createUpdates(allowed);
   if (stop) return;
   void updates.check('startup');
-  const interval = setInterval(() => { void updates.check('timer'); }, 6 * 3600_000); interval.unref();
+  const interval = setInterval(() => { void updates.check('timer'); }, 3600_000); interval.unref();
   const wake = (): void => { void updates.check('wake'); };
+  const focus = (): void => { void updates.check('focus'); };
   powerMonitor.on('resume', wake);
-  stop = () => { clearInterval(interval); powerMonitor.removeListener('resume', wake); updates.dispose(); };
+  app.on('browser-window-focus', focus);
+  stop = () => { clearInterval(interval); powerMonitor.removeListener('resume', wake); app.removeListener('browser-window-focus', focus); updates.dispose(); };
   app.once('before-quit', () => stop?.());
 }
 export async function checkUpdate(showMessage: ShowMessage = nativeMessage): Promise<void> {
   if (!app.isPackaged) { await showMessage({ title: 'Pockymoe', message: t('开发版本不检查更新'), detail: t('安装打包版本后可从 GitHub Releases 获取更新。'), buttons: [t('好')] }); return; }
   const result = await service?.check();
-  if (!result) return;
+  if (!result || result === 'deferred') return;
   if (result === 'unverified') {
     await showMessage({ title: 'Pockymoe', message: t('发现版本 {version}，但无法验证它的签名，不提供更新', { version: service!.unverified() }), buttons: [t('好')] });
   } else await showMessage({ title: 'Pockymoe', message: t(result === 'failed' ? '暂时无法检查更新' : result === 'latest' ? '已是最新版本' : result === 'ready' ? '更新已就绪' : '正在下载'), buttons: [t('好')] });

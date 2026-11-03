@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { createHash, generateKeyPairSync, randomBytes, sign, verify } from 'node:crypto';
 import { execFileSync, spawn } from 'node:child_process';
-import { createReadStream, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { cpSync, createReadStream, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { delimiter, join, resolve } from 'node:path';
@@ -13,6 +13,7 @@ import { _electron as electron } from '@playwright/test';
 const desktop = fileURLToPath(new URL('../', import.meta.url));
 const versionA = '0.0.900';
 const versionB = '0.0.901';
+const fixtureGuid = 'b7d6dc27-2927-4b7e-a7b7-e936939c0691';
 const fileName = `Pockymoe-${versionB}-win-x64.exe`;
 const canonical = row => JSON.stringify({ version: row.version, platform: row.platform, fileName: row.fileName, sha256: row.sha256, size: row.size });
 export function signedRelease(file, origin, privateKey) {
@@ -200,6 +201,8 @@ async function roundtrip() {
   const profile = join(temporary, 'profile'); mkdirSync(profile);
   const install = join(temporary, 'installed');
   const executable = join(install, 'PockymoeUpdaterFixture.exe');
+  const stray = join(temporary, 'older-copy');
+  const strayExecutable = join(stray, 'PockymoeUpdaterFixture.exe');
   const resultPath = join(temporary, 'relaunch.json');
   const mainPath = join(desktop, 'src/main/index.ts');
   const packagePath = join(desktop, 'package.json');
@@ -251,7 +254,7 @@ async function roundtrip() {
       appId: 'com.pockymoe.updater-fixture', productName: 'Pockymoe Updater Fixture',
       artifactName: 'Pockymoe-${version}-${os}-${arch}.${ext}', protocols: [],
       directories: { output }, win: { executableName: 'PockymoeUpdaterFixture' },
-      nsis: { shortcutName: 'Pockymoe Updater Fixture', createDesktopShortcut: false, createStartMenuShortcut: false } }));
+      nsis: { guid: fixtureGuid, shortcutName: 'Pockymoe Updater Fixture', createDesktopShortcut: false, createStartMenuShortcut: true } }));
     pnpm(['build'], env);
     pnpm(['exec', 'electron-builder', '--win', 'nsis', '--x64', '--publish', 'never', '--config', configPath], env);
     return join(output, `Pockymoe-${version}-win-x64.exe`);
@@ -276,6 +279,17 @@ async function roundtrip() {
     snapshot('exited');
     await until(() => existsSync(executable), 'Initial NSIS install must produce the fixture executable', 90_000);
     report.checks.installedA = true;
+    // Disposable older installation and a preserved shortcut to it reproduce
+    // the wrong-copy relaunch. No second installer registration is necessary.
+    cpSync(install, stray, { recursive: true });
+    const ps = join(process.env.SystemRoot || 'C:\\Windows', 'System32/WindowsPowerShell/v1.0/powershell.exe');
+    const seed = powershellProbe(ps, `$ErrorActionPreference='Stop';
+      $link=Join-Path ([Environment]::GetFolderPath('Programs')) 'Pockymoe Updater Fixture.lnk';
+      $shortcut=(New-Object -ComObject WScript.Shell).CreateShortcut($link);
+      $shortcut.TargetPath=${powershellLiteral(strayExecutable)}; $shortcut.Save();
+      @{staleShortcutSeeded=($shortcut.TargetPath -eq ${powershellLiteral(strayExecutable)})} | ConvertTo-Json -Compress`, env);
+    assert.equal(seed.result?.staleShortcutSeeded, true);
+    report.checks.staleShortcutSeeded = true;
     // Prove the first install before spending time packaging B. This is setup
     // ordering, not an assumption about the reason an installer might stall.
     stage('buildB'); fileB = build(versionB);
@@ -306,10 +320,20 @@ async function roundtrip() {
     try { readFileSync(`${downloaded}:Zone.Identifier`); motw = true; } catch (error) { if (error.code !== 'ENOENT') throw error; }
     assert.equal(motw, false, 'Electron net download unexpectedly has Mark of the Web');
     report.checks.downloadHasNoMarkOfTheWeb = true;
+    // Registry disagreement must not redirect an in-app update away from A.
+    const seedRegistry = powershellProbe(ps, `$ErrorActionPreference='Stop';
+      $key='HKCU:\\Software\\${fixtureGuid}';
+      if(!(Test-Path $key)){throw 'Fixture install registration absent'};
+      Set-ItemProperty $key InstallLocation ${powershellLiteral(stray)};
+      @{staleRegistrySeeded=((Get-ItemProperty $key).InstallLocation -eq ${powershellLiteral(stray)})} | ConvertTo-Json -Compress`, env);
+    assert.equal(seedRegistry.result?.staleRegistrySeeded, true);
+    report.checks.staleRegistrySeeded = true;
     stage('installB');
     await app.evaluate(() => { void globalThis.__pockymoeDesktopTest.updates.install(); });
     const relaunched = await until(() => existsSync(resultPath) && JSON.parse(readFileSync(resultPath, 'utf8')), 'Installer did not genuinely relaunch B with the isolated data', 180_000);
     assert.equal(relaunched.version, versionB);
+    assert.equal(relaunched.shellVersion, versionB, 'Page bridge must report the running B version');
+    report.checks.pageReportsRunningVersion = true;
     assert.equal(relaunched.packaged, true);
     assert.equal(relaunched.profile, true);
     assert.equal(relaunched.cookie, true);

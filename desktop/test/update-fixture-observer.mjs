@@ -2,7 +2,7 @@
 // Values are replaced with disposable paths/origins before bundling. Compiling
 // the profile also covers NSIS relaunch through Explorer, which need not inherit
 // the installer's environment.
-import { app, safeStorage, session } from 'electron';
+import { app, BrowserWindow, safeStorage, session } from 'electron';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -16,13 +16,19 @@ process.env.POCKYMOE_DESKTOP_E2E = '1';
 process.env.POCKYMOE_DESKTOP_APNS = '0';
 
 void app.whenReady().then(async () => {
+  writeFileSync(`${fixture.result}.startup`, JSON.stringify({ version: app.getVersion(), pid: process.pid, executable: process.execPath, packaged: app.isPackaged }, null, 2));
   if (app.getVersion() !== fixture.versionB) return;
   // Main's own ready continuation creates the persistent partition first.
   await new Promise(resolve => setTimeout(resolve, 1000));
   const checks = { version: app.getVersion(), pid: process.pid, executable: process.execPath,
-    packaged: app.isPackaged, cookie: false, encryptedSecret: false, profile: false };
+    packaged: app.isPackaged, shellVersion: null, cookie: false, encryptedSecret: false, profile: false };
   writeFileSync(`${fixture.result}.startup`, JSON.stringify({ version: checks.version, pid: checks.pid, executable: checks.executable, packaged: checks.packaged }, null, 2));
   try {
+    for (const window of BrowserWindow.getAllWindows()) {
+      if (new URL(window.webContents.getURL()).origin !== fixture.origin) continue;
+      checks.shellVersion = await window.webContents.executeJavaScript('window.pockymoeHost.capabilities().then(c => c.shellVersion)');
+      break;
+    }
     checks.profile = app.getPath('userData') === fixture.profile;
     const stored = readFileSync(join(fixture.profile, 'update-fixture-secret.bin'));
     checks.encryptedSecret = safeStorage.isEncryptionAvailable() && safeStorage.decryptString(stored) === fixture.secret;

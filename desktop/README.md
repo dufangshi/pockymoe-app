@@ -441,10 +441,13 @@ pnpm dist:win  # x64 NSIS only, --publish never
 
 ### In-app updates
 
-Packaged apps check the public GitHub Releases API at startup, every six hours,
+Packaged apps check the public GitHub Releases API at startup, every hour,
+on window focus (if the last check was at least 15 minutes ago),
 and on wake (at most once per hour), through Electron `net` with ETag and the system proxy. Checks remain
 gated until a connection is configured. Rate limits/network failures stay quiet
-and retry at the next check; preview tags are never stable updates. Versions are
+and rate-limit responses defer all checks, including manual ones, across launches.
+Backoff honors Retry-After and GitHub reset headers, otherwise grows from one hour
+to 24 hours. Preview tags are never stable updates. Versions are
 compared numerically. `0.2.0` has no updater: download the next release manually
 once to enter this update path.
 
@@ -485,7 +488,10 @@ disk-image or differently signed copies
 Tests never replace `/Applications/Pockymoe.app`.
 
 On Windows the verified x64 one-click per-user NSIS installer runs detached with
-`/S --updated --force-run`; `--updated` allows the old process to close gracefully
+`/S --updated --force-run /D=<running executable directory>`; the final `/D=`
+argument pins the install destination even with stale registry state. Relaunch
+uses the installed executable directly, never a preserved Start-menu shortcut
+that could target an older copy. `--updated` allows the old process to close gracefully
 and `--force-run` relaunches even in silent mode. An attempt marker is written
 before launching it; an old-version restart after an incomplete attempt shows
 **上次更新没有完成** with retry/download actions. User data remains in place.

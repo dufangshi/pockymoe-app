@@ -55,8 +55,9 @@ export async function prepareInstall(file: string, entry: SignedUpdate, deps: In
         // Recheck after document confirmation; do not quit into a full disk.
         await sufficientSpace(dirname(deps.execPath), entry, deps);
         await deps.write(join(deps.userData, 'updates/install-attempt.json'), JSON.stringify({ currentVersion: deps.version, targetVersion: entry.version }));
-        // oneClick NSIS honors /S --force-run for silent per-user installation.
-        const child = deps.spawn(file, ['/S', '--updated', '--force-run'], { windowsHide: true });
+        // Pin the destination to this running copy, even if registry state points elsewhere.
+        // NSIS requires its unquoted /D= override to be the final argument.
+        const child = deps.spawn(file, ['/S', '--updated', '--force-run', `/D=${dirname(deps.execPath)}`], { windowsHide: true });
         await launched(child); state = 'committed'; child.unref(); deps.quit();
       }
     };
