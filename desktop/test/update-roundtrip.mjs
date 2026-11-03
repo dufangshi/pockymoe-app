@@ -286,8 +286,8 @@ async function roundtrip() {
     const seed = powershellProbe(ps, `$ErrorActionPreference='Stop';
       $link=Join-Path ([Environment]::GetFolderPath('Programs')) 'Pockymoe Updater Fixture.lnk';
       $shortcut=(New-Object -ComObject WScript.Shell).CreateShortcut($link);
-      $shortcut.TargetPath=${powershellLiteral(strayExecutable)}; $shortcut.Save();
-      @{staleShortcutSeeded=($shortcut.TargetPath -eq ${powershellLiteral(strayExecutable)})} | ConvertTo-Json -Compress`, env);
+      $shortcut.TargetPath=${powershellLiteral(realpathSync(strayExecutable))}; $shortcut.Save();
+      @{staleShortcutSeeded=($shortcut.TargetPath -eq ${powershellLiteral(realpathSync(strayExecutable))})} | ConvertTo-Json -Compress`, env);
     assert.equal(seed.result?.staleShortcutSeeded, true);
     report.checks.staleShortcutSeeded = true;
     // Prove the first install before spending time packaging B. This is setup
