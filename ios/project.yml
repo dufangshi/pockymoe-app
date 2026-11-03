@@ -17,7 +17,7 @@ settings:
     CODE_SIGNING_ALLOWED: "YES"
     CODE_SIGNING_REQUIRED: "NO"
     CODE_SIGN_IDENTITY: ""
-    DEVELOPMENT_TEAM: ""
+    DEVELOPMENT_TEAM: $(POCKYMOE_DEVELOPMENT_TEAM)
     APS_ENVIRONMENT: development
   configs:
     Release:
@@ -32,6 +32,8 @@ targets:
       - path: Shared
       - path: ../web/pockymoe-host.js
         buildPhase: resources
+      - path: ../web/ios-viewport.js
+        buildPhase: resources
       - path: LiveActivity/Assets.xcassets
       - path: RemoteCodex/Resources
     preBuildScripts:
@@ -44,14 +46,10 @@ targets:
       base:
         INFOPLIST_FILE: $(DERIVED_FILE_DIR)/Shell-Info.plist
         GENERATE_INFOPLIST_FILE: false
-        PRODUCT_BUNDLE_IDENTIFIER: com.remotecodex.app
+        PRODUCT_BUNDLE_IDENTIFIER: $(POCKYMOE_BUNDLE_ID)
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         PRODUCT_NAME: Pockymoe
-    entitlements:
-      path: Shell/RemoteCodex.entitlements
-      properties:
-        aps-environment: $(APS_ENVIRONMENT)
-        com.apple.security.application-groups: [group.com.remotecodex.app]
+        CODE_SIGN_ENTITLEMENTS: $(POCKYMOE_APP_ENTITLEMENTS)
     dependencies:
       - target: PockymoeLiveActivity
   PockymoeLiveActivity:
@@ -63,15 +61,12 @@ targets:
       - path: Shared
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.remotecodex.app.liveactivity
+        PRODUCT_BUNDLE_IDENTIFIER: $(POCKYMOE_WIDGET_BUNDLE_ID)
         GENERATE_INFOPLIST_FILE: false
         INFOPLIST_FILE: LiveActivity/Info.plist
+        CODE_SIGN_ENTITLEMENTS: $(POCKYMOE_WIDGET_ENTITLEMENTS)
         SKIP_INSTALL: true
         APPLICATION_EXTENSION_API_ONLY: true
-    entitlements:
-      path: LiveActivity/LiveActivity.entitlements
-      properties:
-        com.apple.security.application-groups: [group.com.remotecodex.app]
   RemoteCodexUITests:
     type: bundle.ui-testing
     platform: iOS

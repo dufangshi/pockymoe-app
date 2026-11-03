@@ -8,12 +8,18 @@ struct ActivityMetadata: Codable {
 }
 
 enum ActivityMetadataCache {
-    static let suite = "group.com.remotecodex.app"
-    static func clear(in defaults: UserDefaults? = UserDefaults(suiteName: suite)) {
+    // A free-team build has no group entitlement. Never open an unauthorized
+    // suite: the widget intentionally renders generic titles without this cache.
+    static var sharedDefaults: UserDefaults? {
+        guard let suite = Bundle.main.object(forInfoDictionaryKey: "PockymoeAppGroup") as? String,
+              !suite.isEmpty, !suite.contains("$(") else { return nil }
+        return UserDefaults(suiteName: suite)
+    }
+    static func clear(in defaults: UserDefaults? = sharedDefaults) {
         defaults?.removeObject(forKey: "activityMetadata")
         defaults?.removeObject(forKey: "activityAccount")
     }
-    static func save(_ snapshot: ActivitySnapshot, in defaults: UserDefaults? = UserDefaults(suiteName: suite)) {
+    static func save(_ snapshot: ActivitySnapshot, in defaults: UserDefaults? = sharedDefaults) {
         if defaults?.string(forKey: "activityAccount") != snapshot.accountId {
             defaults?.removeObject(forKey: "activityMetadata")
             defaults?.set(snapshot.accountId, forKey: "activityAccount")
@@ -31,7 +37,7 @@ enum ActivityMetadataCache {
         if values.count > 500 { values = values.filter { key, _ in snapshot.items.contains { $0.conversationKey == key } } }
         if let data = try? JSONEncoder().encode(values) { defaults?.set(data, forKey: "activityMetadata") }
     }
-    static func load(in defaults: UserDefaults? = UserDefaults(suiteName: suite)) -> [String: ActivityMetadata] {
+    static func load(in defaults: UserDefaults? = sharedDefaults) -> [String: ActivityMetadata] {
         guard let data = defaults?.data(forKey: "activityMetadata") else { return [:] }
         return (try? JSONDecoder().decode([String: ActivityMetadata].self, from: data)) ?? [:]
     }

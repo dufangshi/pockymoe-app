@@ -15,11 +15,11 @@ final class NativeWebView: WKWebView {
     // The full-screen SwiftUI host has no inherited safe area; WebKit still
     // needs the physical window insets for the page's CSS env() values.
     var hostSafeArea = UIEdgeInsets.zero
-    override var safeAreaInsets: UIEdgeInsets { hostSafeArea }
+    override var safeAreaInsets: UIEdgeInsets { window?.safeAreaInsets ?? hostSafeArea }
 }
 
 @MainActor
-final class ShellController: UIViewController, WKNavigationDelegate, WKUIDelegate, ASWebAuthenticationPresentationContextProviding, UIDocumentPickerDelegate {
+final class ShellController: UIViewController, WKNavigationDelegate, WKUIDelegate, ASWebAuthenticationPresentationContextProviding, UIDocumentPickerDelegate, UIScrollViewDelegate {
     #if DEBUG
     private let debugHarness = DebugHarness()
     func runDebugHarness() { loadViewIfNeeded(); debugHarness.run(web: web) }
@@ -42,6 +42,9 @@ final class ShellController: UIViewController, WKNavigationDelegate, WKUIDelegat
     private var dark: Bool?
     private var offline: UIView?
     private var ready = false
+    private var launchLogo: UIImageView?
+    private var keyboardVisible = false
+    private var fullHeight: NSLayoutConstraint?
     private var documentGeneration = UUID()
     private var commandQueue: [[String: Any]] = []
     private var routeObservation: NSKeyValueObservation?
@@ -53,7 +56,16 @@ final class ShellController: UIViewController, WKNavigationDelegate, WKUIDelegat
     override func viewDidLoad() {
         super.viewDidLoad()
         let background = UserDefaults.standard.string(forKey: "shell.background").flatMap(Self.color) ?? Self.systemBackground
+        if let savedDark = UserDefaults.standard.object(forKey: "shell.dark") as? Bool {
+            dark = savedDark; overrideUserInterfaceStyle = savedDark ? .dark : .light
+        }
         view.backgroundColor = background
+        let logo = UIImageView(image: UIImage(named: "PockymoeLogo"))
+        logo.translatesAutoresizingMaskIntoConstraints = false
+        logo.layer.cornerRadius = 20; logo.clipsToBounds = true
+        view.addSubview(logo)
+        NSLayoutConstraint.activate([logo.centerXAnchor.constraint(equalTo: view.centerXAnchor), logo.centerYAnchor.constraint(equalTo: view.centerYAnchor), logo.widthAnchor.constraint(equalToConstant: 88), logo.heightAnchor.constraint(equalToConstant: 88)])
+        launchLogo = logo
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .default()
         // Encrypted routing needs Service Workers, which iOS only enables for
@@ -65,19 +77,30 @@ final class ShellController: UIViewController, WKNavigationDelegate, WKUIDelegat
             configuration.userContentController.addUserScript(WKUserScript(source: source.replacingOccurrences(of: "__POCKYMOE_ORIGIN__", with: encoded), injectionTime: .atDocumentStart, forMainFrameOnly: true))
         }
         configuration.userContentController.addUserScript(WKUserScript(source: "if (window === window.top) { const viewport = document.querySelector('meta[name=viewport]'); if (viewport && !viewport.content.includes('viewport-fit')) viewport.content += ', viewport-fit=cover'; }", injectionTime: .atDocumentEnd, forMainFrameOnly: true))
+        if let url = Bundle.main.url(forResource: "ios-viewport", withExtension: "js"), let source = try? String(contentsOf: url) {
+            configuration.userContentController.addUserScript(WKUserScript(source: source, injectionTime: .atDocumentEnd, forMainFrameOnly: true))
+        }
         web = NativeWebView(frame: .zero, configuration: configuration)
+        #if DEBUG
+        web.isInspectable = true
+        #endif
         web.hostSafeArea = hostSafeArea
         web.isOpaque = false; web.backgroundColor = background; web.scrollView.backgroundColor = background
         web.alpha = 0
         web.navigationDelegate = self; web.uiDelegate = self
         web.allowsLinkPreview = false
         web.scrollView.bounces = false
+        web.scrollView.delegate = self
+        NotificationCenter.default.addObserver(self, selector: #selector(keyboardChanged(_:)), name: UIResponder.keyboardWillChangeFrameNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(keyboardChanged(_:)), name: UIResponder.keyboardDidHideNotification, object: nil)
         web.scrollView.contentInsetAdjustmentBehavior = .never
         web.inputAssistantItem.leadingBarButtonGroups = []; web.inputAssistantItem.trailingBarButtonGroups = []
         web.accessibilityIdentifier = "productWebView"
         web.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(web)
-        NSLayoutConstraint.activate([web.topAnchor.constraint(equalTo: view.topAnchor), web.bottomAnchor.constraint(equalTo: view.bottomAnchor), web.leadingAnchor.constraint(equalTo: view.leadingAnchor), web.trailingAnchor.constraint(equalTo: view.trailingAnchor)])
+        NSLayoutConstraint.activate([web.topAnchor.constraint(equalTo: view.topAnchor), web.leadingAnchor.constraint(equalTo: view.leadingAnchor), web.trailingAnchor.constraint(equalTo: view.trailingAnchor)])
+        let height = web.heightAnchor.constraint(equalToConstant: view.bounds.height)
+        height.isActive = true; fullHeight = height
         let edge = UIScreenEdgePanGestureRecognizer(target: self, action: #selector(backGesture(_:)))
         edge.edges = .left; web.addGestureRecognizer(edge)
         routeObservation = web.observe(\.url, options: [.new]) { [weak self] _, _ in
@@ -103,6 +126,40 @@ final class ShellController: UIViewController, WKNavigationDelegate, WKUIDelegat
         } }
         #endif
     }
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        // SwiftUI may propose a safe-area/keyboard-reduced controller height.
+        // Keep the product WebView at the physical window height; WebKit owns
+        // the visible viewport when the keyboard appears.
+        if let window = view.window {
+            fullHeight?.constant = max(0, window.bounds.height - view.convert(.zero, to: window).y)
+        }
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("--debug-harness") {
+            let value: [String: Any] = ["webHeight": web.bounds.height, "controllerHeight": view.bounds.height, "windowHeight": view.window?.bounds.height ?? 0, "scrollHeight": web.scrollView.bounds.height, "insetBottom": web.scrollView.contentInset.bottom, "offsetY": web.scrollView.contentOffset.y]
+            let directory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            if let data = try? JSONSerialization.data(withJSONObject: value) { try? data.write(to: directory.appendingPathComponent("native-geometry.json"), options: .atomic) }
+        }
+        #endif
+        if let insets = view.window?.safeAreaInsets, web.hostSafeArea != insets {
+            web.hostSafeArea = insets
+            web.setNeedsLayout()
+        }
+    }
+    @objc private func keyboardChanged(_ notification: Notification) {
+        guard let window = view.window else { return }
+        if notification.name == UIResponder.keyboardDidHideNotification { keyboardVisible = false }
+        else if let frame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect {
+            keyboardVisible = window.bounds.intersection(window.convert(frame, from: nil)).height > 100
+        }
+        // WebKit pans its outer UIScrollView to a focused DOM field even when
+        // the SPA has already positioned its composer in the visible viewport.
+        // Only inner DOM scrollers should move while the keyboard is present.
+        web.scrollView.setContentOffset(.zero, animated: false)
+    }
+    func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        if keyboardVisible && scrollView.contentOffset != .zero { scrollView.setContentOffset(.zero, animated: false) }
+    }
     func navigate(_ route: String) {
         guard route.hasPrefix("/"), !route.hasPrefix("//"), let url = URL(string: origin + route), trusted(url) else { return }
         path = route
@@ -111,6 +168,7 @@ final class ShellController: UIViewController, WKNavigationDelegate, WKUIDelegat
         web.load(URLRequest(url: url))
     }
     func close() {
+        NotificationCenter.default.removeObserver(self)
         #if DEBUG
         debugHarness.stop()
         #endif
@@ -154,15 +212,18 @@ final class ShellController: UIViewController, WKNavigationDelegate, WKUIDelegat
     private func showOffline(_ error: Error) {
         guard (error as NSError).code != NSURLErrorCancelled, offline == nil else { return }
         web.alpha = 0
+        launchLogo?.isHidden = true
         #if DEBUG
         debugHarness.record(state: "offline", path: path)
         #endif
-        let label = UILabel(); label.text = "无法连接服务"; label.textColor = .label
+        let label = UILabel(); label.text = "无法连接服务"; label.textColor = UserDefaults.standard.string(forKey: "shell.foreground").flatMap(Self.color) ?? .label
         let retry = UIButton(type: .system); retry.setTitle("重试", for: .normal); retry.accessibilityIdentifier = "retryConnection"
         retry.configuration = .filled()
+        retry.tintColor = UserDefaults.standard.string(forKey: "shell.accent").flatMap(Self.color) ?? .systemTeal
         retry.heightAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
         retry.addTarget(self, action: #selector(retryLoad), for: .touchUpInside)
         let change = UIButton(type: .system); change.setTitle("更改地址", for: .normal)
+        change.tintColor = retry.tintColor
         change.accessibilityIdentifier = "changeAddress"
         change.heightAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
         change.addTarget(self, action: #selector(changeAddress), for: .touchUpInside)
@@ -221,14 +282,16 @@ final class ShellController: UIViewController, WKNavigationDelegate, WKUIDelegat
             #if DEBUG
             debugHarness.record(state: "online", path: path)
             #endif
-            UIView.animate(withDuration: 0.12) { self.web.alpha = 1 }
+            UIView.animate(withDuration: 0.12, animations: { self.web.alpha = 1; self.launchLogo?.alpha = 0 }) { _ in
+                self.launchLogo?.removeFromSuperview(); self.launchLogo = nil
+            }
         case "ready":
             ready = true
             let queue = commandQueue; commandQueue = []
             for value in queue { evaluate("window.__pockymoeCommand(\(Self.json(value) ?? "{}"))") }
             live.resendToken()
         case "capabilities":
-            reply(["surface": "mobile", "platform": "ios", "bridgeVersion": 2, "shellVersion": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0", "liveActivity": ActivityAuthorizationInfo().areActivitiesEnabled, "nativePush": true, "haptics": true])
+            reply(["surface": "mobile", "platform": "ios", "bridgeVersion": 2, "shellVersion": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0", "liveActivity": ActivityAuthorizationInfo().areActivitiesEnabled, "nativePush": Bundle.main.object(forInfoDictionaryKey: "PockymoeNativePush") as? Bool ?? false, "haptics": true])
         case "session.clear":
             live.clear()
             #if DEBUG
@@ -289,6 +352,7 @@ final class ShellController: UIViewController, WKNavigationDelegate, WKUIDelegat
             if started { authRecord("started") }
             #endif
         case "push.register":
+            guard Bundle.main.object(forInfoDictionaryKey: "PockymoeNativePush") as? Bool == true else { reply(NSNull()); return }
             Task {
                 guard let token = await NativePush.shared.register() else { reply(NSNull()); return }
                 #if DEBUG
@@ -330,35 +394,34 @@ final class ShellController: UIViewController, WKNavigationDelegate, WKUIDelegat
         dark = (appearance["effective"] as? String) == "dark"
         overrideUserInterfaceStyle = dark == true ? .dark : .light
         setNeedsStatusBarAppearanceUpdate()
-        if let raw = appearance["background"] as? String, Self.color(raw) != nil {
-            applyBackground(raw)
-            return
-        }
-        let requested = Self.json(appearance["background"] as? String ?? "") ?? "\"\""
+        UserDefaults.standard.set(dark, forKey: "shell.dark")
         let generation = documentGeneration
-        // Theme packs use CSS Color 4 (including oklch). Let WebKit resolve the
-        // page's color space and convert one canvas pixel to native sRGB.
-        let resolveColor = """
+        // Convert the actual Web theme tokens (including CSS Color 4) to sRGB
+        // for the local screens and the next launch, without recreating a theme.
+        let resolveColors = """
         (() => {
           const surface = [...document.querySelectorAll('.thread-ui-shell, .auth-shell')].find(node => node.getClientRects().length) || document.documentElement;
-          const raw = \(requested);
-          const probe = document.createElement('i');
-          probe.style.display = 'none';
-          probe.style.color = raw && CSS.supports('color', raw) ? raw : getComputedStyle(surface).backgroundColor;
-          surface.append(probe);
-          const color = getComputedStyle(probe).color;
-          probe.remove();
+          const style = getComputedStyle(surface);
           const canvas = document.createElement('canvas'); canvas.width = canvas.height = 1;
-          const context = canvas.getContext('2d'); context.fillStyle = color; context.fillRect(0, 0, 1, 1);
-          const pixel = context.getImageData(0, 0, 1, 1).data;
-          return pixel[3] ? '#' + [...pixel.slice(0, 3)].map(n => n.toString(16).padStart(2, '0')).join('') : null;
+          const context = canvas.getContext('2d');
+          const colors = {};
+          for (const [name, token] of Object.entries({background:'--app-bg', foreground:'--theme-fg', panel:'--theme-panel', border:'--theme-border', accent:'--theme-accent-solid', accentForeground:'--theme-accent-solid-fg'})) {
+            const value = style.getPropertyValue(token).trim();
+            if (!value || !CSS.supports('color', value)) continue;
+            context.clearRect(0, 0, 1, 1); context.fillStyle = value; context.fillRect(0, 0, 1, 1);
+            const pixel = context.getImageData(0, 0, 1, 1).data;
+            if (pixel[3]) colors[name] = '#' + [...pixel.slice(0, 3)].map(n => n.toString(16).padStart(2, '0')).join('');
+          }
+          return colors;
         })()
         """
-        web.evaluateJavaScript(resolveColor) { [weak self] value, _ in
-            guard let self, self.documentGeneration == generation, let raw = value as? String else { return }
-            self.applyBackground(raw)
+        web.evaluateJavaScript(resolveColors) { [weak self] value, _ in
+            guard let self, self.documentGeneration == generation, let colors = value as? [String: String] else { return }
+            for (name, raw) in colors where Self.color(raw) != nil { UserDefaults.standard.set(raw, forKey: "shell." + name) }
+            if let raw = colors["background"] { self.applyBackground(raw) }
         }
     }
+
     private func applyBackground(_ raw: String) {
         guard let color = Self.color(raw) else { return }
         view.backgroundColor = color; web.backgroundColor = color; web.scrollView.backgroundColor = color

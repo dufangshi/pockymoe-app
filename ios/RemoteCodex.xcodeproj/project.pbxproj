@@ -33,6 +33,7 @@
 		AD3903EA9E47A4842A1A8585 /* ActivityViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 07A4E5B86D3DBAE2FA3F2313 /* ActivityViews.swift */; };
 		B1070108A7F0800A381E2AAD /* ActivityPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 035C7B10E9EF4FF34C3B7001 /* ActivityPolicy.swift */; };
 		C9AE4BF75E174C7B786C48F0 /* SystemAuthPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D79ED75DA4ADBB00EBD4E86 /* SystemAuthPolicy.swift */; };
+		D0C2A3C63D58CEA5019A649F /* ios-viewport.js in Resources */ = {isa = PBXBuildFile; fileRef = CE7ED652176C9044292C9D0B /* ios-viewport.js */; };
 		DD103EE72FEF3C4C48FE40BE /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = E73A168D7BF987C354EE4D65 /* Assets.xcassets */; };
 		E5E3C22F104AE21A42C5155F /* ActivityPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 035C7B10E9EF4FF34C3B7001 /* ActivityPolicy.swift */; };
 /* End PBXBuildFile section */
@@ -85,6 +86,7 @@
 		998245FEBFC45F287E6EFE6E /* MobileApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileApp.swift; sourceTree = "<group>"; };
 		9A8EEAEF9EA797113B854549 /* ActivityMetadataCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityMetadataCache.swift; sourceTree = "<group>"; };
 		AAB66863196DD3C9904D04C6 /* LiveActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveActivityAttributes.swift; sourceTree = "<group>"; };
+		CE7ED652176C9044292C9D0B /* ios-viewport.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = "ios-viewport.js"; sourceTree = "<group>"; };
 		D67D00DBC5982FA5D9BADB3F /* ShellController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShellController.swift; sourceTree = "<group>"; };
 		DA6A15864472521881E74D70 /* ServiceConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServiceConfiguration.swift; sourceTree = "<group>"; };
 		E73A168D7BF987C354EE4D65 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
@@ -163,6 +165,7 @@
 		90A6E431F481C924A0290C36 /* web */ = {
 			isa = PBXGroup;
 			children = (
+				CE7ED652176C9044292C9D0B /* ios-viewport.js */,
 				3F7B69E276D5CB39C6A582A3 /* pockymoe-host.js */,
 			);
 			path = web;
@@ -273,14 +276,14 @@
 				LastUpgradeCheck = 1430;
 				TargetAttributes = {
 					BC3980D6E1F9CC5DFE347B2D = {
-						DevelopmentTeam = "";
+						DevelopmentTeam = "$(POCKYMOE_DEVELOPMENT_TEAM)";
 						TestTargetID = C182733512020F08EF9A30A0;
 					};
 					BCE1AEF055D5A18C5A0B7633 = {
-						DevelopmentTeam = "";
+						DevelopmentTeam = "$(POCKYMOE_DEVELOPMENT_TEAM)";
 					};
 					C182733512020F08EF9A30A0 = {
-						DevelopmentTeam = "";
+						DevelopmentTeam = "$(POCKYMOE_DEVELOPMENT_TEAM)";
 					};
 				};
 			};
@@ -320,6 +323,7 @@
 			files = (
 				5D77C28F4FA6EB4924918755 /* Assets.xcassets in Resources */,
 				DD103EE72FEF3C4C48FE40BE /* Assets.xcassets in Resources */,
+				D0C2A3C63D58CEA5019A649F /* ios-viewport.js in Resources */,
 				9D310DBC5B691B839B53B02E /* pockymoe-host.js in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -453,7 +457,7 @@
 				COPY_PHASE_STRIP = NO;
 				CURRENT_PROJECT_VERSION = 2;
 				DEBUG_INFORMATION_FORMAT = dwarf;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = "$(POCKYMOE_DEVELOPMENT_TEAM)";
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
@@ -505,7 +509,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CODE_SIGN_ENTITLEMENTS = Shell/RemoteCodex.entitlements;
+				CODE_SIGN_ENTITLEMENTS = "$(POCKYMOE_APP_ENTITLEMENTS)";
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = "$(DERIVED_FILE_DIR)/Shell-Info.plist";
@@ -513,7 +517,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.remotecodex.app;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(POCKYMOE_BUNDLE_ID)";
 				PRODUCT_NAME = Pockymoe;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -524,7 +528,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CODE_SIGN_ENTITLEMENTS = Shell/RemoteCodex.entitlements;
+				CODE_SIGN_ENTITLEMENTS = "$(POCKYMOE_APP_ENTITLEMENTS)";
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = "$(DERIVED_FILE_DIR)/Shell-Info.plist";
@@ -532,7 +536,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.remotecodex.app;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(POCKYMOE_BUNDLE_ID)";
 				PRODUCT_NAME = Pockymoe;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -543,7 +547,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				APPLICATION_EXTENSION_API_ONLY = YES;
-				CODE_SIGN_ENTITLEMENTS = LiveActivity/LiveActivity.entitlements;
+				CODE_SIGN_ENTITLEMENTS = "$(POCKYMOE_WIDGET_ENTITLEMENTS)";
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = LiveActivity/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -551,7 +555,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.remotecodex.app.liveactivity;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(POCKYMOE_WIDGET_BUNDLE_ID)";
 				SDKROOT = iphoneos;
 				SKIP_INSTALL = YES;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -579,7 +583,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				APPLICATION_EXTENSION_API_ONLY = YES;
-				CODE_SIGN_ENTITLEMENTS = LiveActivity/LiveActivity.entitlements;
+				CODE_SIGN_ENTITLEMENTS = "$(POCKYMOE_WIDGET_ENTITLEMENTS)";
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = LiveActivity/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -587,7 +591,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.remotecodex.app.liveactivity;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(POCKYMOE_WIDGET_BUNDLE_ID)";
 				SDKROOT = iphoneos;
 				SKIP_INSTALL = YES;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -635,7 +639,7 @@
 				COPY_PHASE_STRIP = NO;
 				CURRENT_PROJECT_VERSION = 2;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = "$(POCKYMOE_DEVELOPMENT_TEAM)";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu11;

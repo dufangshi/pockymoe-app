@@ -1,2 +1,10 @@
-// Optional private configuration; never commit deployment hosts.
+// Defaults retain the distributable identity; local phone settings override them.
+POCKYMOE_BUNDLE_ID = com.remotecodex.app
+POCKYMOE_WIDGET_BUNDLE_ID = com.remotecodex.app.liveactivity
+POCKYMOE_DEVELOPMENT_TEAM =
+POCKYMOE_APP_ENTITLEMENTS = $(SRCROOT)/Shell/RemoteCodex.entitlements
+POCKYMOE_WIDGET_ENTITLEMENTS = $(SRCROOT)/LiveActivity/LiveActivity.entitlements
+POCKYMOE_APP_GROUP = group.com.remotecodex.app
+POCKYMOE_NATIVE_PUSH = YES
+// Optional private configuration; never commit deployment hosts or origins.
 #include? "../Local.xcconfig"

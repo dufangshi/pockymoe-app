@@ -9,6 +9,28 @@ final class ServiceConfigurationTests: XCTestCase {
         XCTAssertNil(ServiceConfiguration.stored(in: defaults))
         XCTAssertNil(ServiceConfiguration(service: ""))
     }
+    func testEmbeddedDefaultsRepairOnlyMatchingDirectWebPair() throws {
+        let suite = "ios-defaults-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let embedded = try XCTUnwrap(ServiceConfiguration.embedded(in: [
+            "PockymoeDefaultWebOrigin": "https://web.example.test",
+            "PockymoeDefaultRelayOrigin": "https://relay.example.test"
+        ]))
+        XCTAssertEqual(ServiceConfiguration.initial(in: defaults, embedded: embedded), embedded)
+        ServiceConfiguration(service: embedded.webOrigin)!.save(in: defaults)
+        XCTAssertEqual(ServiceConfiguration.initial(in: defaults, embedded: embedded), embedded)
+        let explicit = ServiceConfiguration(service: embedded.webOrigin, relay: "https://other.example.test")!
+        explicit.save(in: defaults)
+        XCTAssertEqual(ServiceConfiguration.initial(in: defaults, embedded: embedded), explicit)
+        let different = ServiceConfiguration(service: "https://different.example.test")!
+        different.save(in: defaults)
+        XCTAssertEqual(ServiceConfiguration.initial(in: defaults, embedded: embedded), different)
+        defaults.removeObject(forKey: "relay_url"); defaults.removeObject(forKey: "shell.relayOrigin")
+        XCTAssertNil(ServiceConfiguration.initial(in: defaults, embedded: nil))
+        XCTAssertNil(ServiceConfiguration.embedded(in: ["PockymoeDefaultWebOrigin": embedded.webOrigin]))
+        XCTAssertNil(ServiceConfiguration.embedded(in: ["PockymoeDefaultWebOrigin": "https://user:secret@example.test", "PockymoeDefaultRelayOrigin": embedded.relayOrigin]))
+    }
     func testStoredLegacyAddressIsPreservedAndSeparateRelayPersists() throws {
         let suite = "ios-service-test-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))

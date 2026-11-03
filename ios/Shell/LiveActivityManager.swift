@@ -60,7 +60,7 @@ final class LiveActivityManager {
         }
         if activity == nil, ActivityPolicy.shouldStart(state, foreground: UIApplication.shared.applicationState == .active) {
             do {
-                var pushType: PushType? = .token
+                var pushType: PushType? = (Bundle.main.object(forInfoDictionaryKey: "PockymoeNativePush") as? Bool == true) ? .token : nil
                 #if DEBUG
                 if ProcessInfo.processInfo.environment["E2E_ACTIVITY_STATE"] != nil { pushType = nil }
                 #endif

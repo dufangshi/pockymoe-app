@@ -8,8 +8,10 @@ struct RemoteCodexApp: App {
     var body: some Scene {
         WindowGroup {
             GeometryReader { geometry in
-                ShellView(model: model, safeArea: geometry.safeAreaInsets).ignoresSafeArea()
+                ShellView(model: model, safeArea: geometry.safeAreaInsets)
             }
+            .ignoresSafeArea(.container)
+            .ignoresSafeArea(.keyboard, edges: model.origin.isEmpty ? [] : .bottom)
             .onOpenURL { model.open($0) }
             .task { await model.prepare() }
         }
@@ -63,6 +65,12 @@ final class ShellModel: ObservableObject {
         revocation = LegacySessionCleanup.take(from: defaults)
         serviceInput = defaults.string(forKey: "relay_url") ?? ""
         relayInput = defaults.string(forKey: "shell.relayOrigin") ?? ""
+        let embedded = ServiceConfiguration.embedded(in: Bundle.main.infoDictionary ?? [:])
+        if let initial = ServiceConfiguration.initial(in: defaults, embedded: embedded),
+           initial != ServiceConfiguration.stored(in: defaults) {
+            initial.save(in: defaults)
+            serviceInput = initial.webOrigin; relayInput = initial.relayOrigin
+        }
         if let stored = ServiceConfiguration.stored(in: defaults), let savedRelay = defaults.string(forKey: "shell.relayOrigin"), !savedRelay.isEmpty {
             origin = stored.webOrigin; relayOrigin = stored.relayOrigin
         } else if !serviceInput.isEmpty {
@@ -158,31 +166,54 @@ struct ShellView: View {
     var body: some View {
         if model.silentProbe { Color(uiColor: ShellController.systemBackground) }
         else if model.origin.isEmpty {
-            VStack(alignment: .leading, spacing: 16) {
-                Text("连接服务").font(.headline)
-                TextField("https://app.example.com", text: $model.serviceInput).textContentType(.URL).keyboardType(.URL)
-                    .textInputAutocapitalization(.never).autocorrectionDisabled()
-                    .padding(12).overlay(RoundedRectangle(cornerRadius: 8).stroke(.secondary))
-                    .accessibilityIdentifier("serviceAddress")
-                DisclosureGroup("高级", isExpanded: $advanced) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("单独的 Relay 地址").font(.subheadline)
-                        TextField("留空以使用服务地址", text: $model.relayInput)
-                            .textContentType(.URL).keyboardType(.URL)
-                            .textInputAutocapitalization(.never).autocorrectionDisabled()
-                            .padding(12).overlay(RoundedRectangle(cornerRadius: 8).stroke(.secondary))
-                           .accessibilityIdentifier("separateRelayAddress")
-                    }.padding(.top, 8)
-                }
-                if let error = model.errorMessage { Text(error).font(.footnote).foregroundStyle(.red) }
-                Button(model.busy ? "正在连接…" : "连接") { Task { await model.connect() } }
-                    .disabled(model.busy).frame(minHeight: 44).accessibilityIdentifier("connectRelay")
-            }.padding(24).frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Color(uiColor: ShellController.systemBackground))
+            GeometryReader { bounds in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 20) {
+                        Image("PockymoeLogo").resizable().frame(width: 64, height: 64)
+                            .clipShape(RoundedRectangle(cornerRadius: 16)).frame(maxWidth: .infinity)
+                        Text("连接服务").font(.title2.weight(.semibold)).frame(maxWidth: .infinity)
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("服务地址").font(.subheadline.weight(.medium))
+                            addressField("https://app.example.com", text: $model.serviceInput, id: "serviceAddress")
+                        }
+                        DisclosureGroup("高级", isExpanded: $advanced) {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("单独的 Relay 地址").font(.subheadline)
+                                addressField("留空以使用服务地址", text: $model.relayInput, id: "separateRelayAddress")
+                            }.padding(.top, 12)
+                        }.tint(palette("foreground", fallback: .label))
+                        if let error = model.errorMessage { Text(error).font(.footnote).foregroundStyle(.red).accessibilityAddTraits(.updatesFrequently) }
+                        Button { Task { await model.connect() } } label: {
+                            HStack {
+                                if model.busy { ProgressView().tint(.white) }
+                                Text(model.busy ? "正在连接…" : "连接").fontWeight(.semibold)
+                            }.frame(maxWidth: .infinity, minHeight: 48)
+                        }.buttonStyle(.borderedProminent).tint(palette("accent", fallback: .systemTeal))
+                            .foregroundStyle(palette("accentForeground", fallback: .white))
+                            .disabled(model.busy).accessibilityIdentifier("connectRelay")
+                    }
+                    .padding(24).frame(maxWidth: 448)
+                    .frame(maxWidth: .infinity, minHeight: max(0, bounds.size.height - safeArea.top - safeArea.bottom))
+                }.safeAreaPadding(.top, safeArea.top).safeAreaPadding(.bottom, safeArea.bottom)
+            }
+            .foregroundStyle(palette("foreground", fallback: .label))
+            .background(palette("background", fallback: ShellController.systemBackground))
+            .preferredColorScheme((UserDefaults.standard.object(forKey: "shell.dark") as? Bool).map { $0 ? .dark : .light })
                 #if DEBUG
                 .onAppear { advanced = ProcessInfo.processInfo.arguments.contains("--debug-connection-advanced") }
                 #endif
-        } else { ShellWebView(model: model, safeArea: safeArea).id(model.origin) }
+        } else { ShellWebView(model: model, safeArea: safeArea).ignoresSafeArea(.keyboard).id(model.origin) }
+    }
+    private func palette(_ key: String, fallback: UIColor) -> Color {
+        Color(uiColor: UserDefaults.standard.string(forKey: "shell." + key).flatMap(ShellController.color) ?? fallback)
+    }
+    private func addressField(_ placeholder: String, text: Binding<String>, id: String) -> some View {
+        TextField(placeholder, text: text).textContentType(.URL).keyboardType(.URL)
+            .textInputAutocapitalization(.never).autocorrectionDisabled()
+            .padding(12).frame(minHeight: 48)
+            .background(palette("panel", fallback: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).stroke(palette("border", fallback: .separator)))
+            .accessibilityIdentifier(id)
     }
 }
 
