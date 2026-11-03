@@ -1,11 +1,13 @@
 import { app, BrowserWindow, nativeTheme, screen } from 'electron';
 import { join } from 'node:path';
-import { mkdtempSync } from 'node:fs';
+import { cpSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { createPetController } from '../controller';
 import type { Appearance, ActivityEvent, ActivityHubLike, ActivitySnapshot, DesktopSettings, HostCommand, SettingsStoreLike } from '../../shared/contract';
 app.getLocale = () => 'zh-CN';
 app.setPath('userData', mkdtempSync(join(tmpdir(), 'rc-pet-harness-')));
+// Optional local art stays in this isolated profile, never in bundled assets.
+if (process.env.POCKYMOE_CLIP_PACK) cpSync(process.env.POCKYMOE_CLIP_PACK, join(app.getPath('userData'), 'pets', 'clip-fixture'), { recursive: true });
 const snapshotListeners = new Set<(value: ActivitySnapshot) => void>(), eventListeners = new Set<(value: ActivityEvent) => void>(), ackListeners = new Set<(id: string, source: string) => void>(), settingsListeners = new Set<(value: DesktopSettings) => void>();
 let snapshot: ActivitySnapshot = { version: 1, accountId: 'pet-fixture', generatedAt: new Date().toISOString(), focusedThreadKey: null, items: [] };
 let settings: DesktopSettings = { webOrigin: 'https://example.invalid', relayOrigin: 'https://example.invalid', alertMode: 'petFirst', petVisible: true, petId: 'moe', petSize: 'M', petMini: false, petSound: false, petVoice: false, petVoiceProvider: 'local', petVoiceSpeaker: 3, petVoiceSpeed: 1, petVoiceRemotes: {}, petVoiceSummary: false, petSummaryConnection: null, petSummaryLanguage: 'auto', petMutes: [], petMuteAlerts: false, petAgentAlerts: 'all', petEdgeHide: true, launchAtLogin: false, quickWindowShortcut: 'Alt+Space', snoozeUntil: null };

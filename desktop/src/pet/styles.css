@@ -135,3 +135,10 @@ hr { border:0;border-top:1px solid var(--theme-border);margin:4px; }
 .alert-head { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .alert-tail { min-width:0; overflow:hidden; white-space:nowrap; direction:rtl; text-align:left; }
 .alert-suffix { flex-shrink:0; white-space:pre; }
+
+#talk { position:absolute;inset:0;width:100%;height:100%;pointer-events:none; }
+
+.talking #clip,.talking #sprite,.talking #sprite-old { visibility:hidden; }
+/* Keep the declared rest face at the edge even during lying/bending clips. */
+.docked-rest #clip,.docked-rest #sprite-old { visibility:hidden; }
+#character.clips.docked-rest #sprite { display:block; }

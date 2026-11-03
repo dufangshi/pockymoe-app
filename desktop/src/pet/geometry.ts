@@ -5,8 +5,14 @@ export interface PetPosition { displayId: number; x: number; y: number; edge: Do
 export const PET_HEIGHT = { S: 96, M: 128, L: 160 } as const;
 /** Mini mode: the pet stays, just small. */
 export const MINI_HEIGHT = 72;
-/** How far a docked pet stays tucked when an alert brings its head out; 1 is fully tucked. */
+/** How far a docked pet stays tucked when an alert brings its head out; 1 is the resting half-face peek. */
 export const HEAD_PEEK = .6;
+export type FaceBox = [number, number, number, number];
+/** MOE's head; imported slender figures should declare their own face box. */
+export const DEFAULT_FACE_BOX: FaceBox = [.22, .4, .78, .8];
+export function dockTilt(edge: DockEdge | null, amount: number): number {
+  return !edge || !amount ? 0 : edge === 'top' ? 180 : edge === 'bottom' ? 0 : (edge === 'left' ? 16 : -16) * Math.min(1, amount * 1.4);
+}
 const clamp = (value: number, min: number, max: number): number => Math.max(min, Math.min(Math.max(min, max), value));
 export function clampRect(rect: Rect, area: Rect): Rect {
   const width = Math.min(rect.width, area.width), height = Math.min(rect.height, area.height);
@@ -34,12 +40,19 @@ export function dockPosition(position: PetPosition, area: Rect, height: number):
     y: edge === 'top' ? area.y : edge === 'bottom' ? area.y + area.height - height : Math.min(bounded.y, area.y + area.height - height - CONTROLS_CLEARANCE), edge };
 }
 /** Fixed sprite bounds: panel, menu, bubble and hover state never affect this window. */
-export function petLayout(position: PetPosition, area: Rect, height: number, options: { panel?: boolean; bubble?: boolean; chat?: boolean; mini?: boolean; peek?: boolean; menu?: boolean; dockAmount?: number; measured?: { tray: number; bubble: number; chat: number } } = {}) {
+export function petLayout(position: PetPosition, area: Rect, height: number, options: { panel?: boolean; bubble?: boolean; chat?: boolean; mini?: boolean; peek?: boolean; menu?: boolean; dockAmount?: number; faceBox?: FaceBox; measured?: { tray: number; bubble: number; chat: number } } = {}) {
   const width = Math.round(height * 192 / 208);
   const window = clampRect({ x: Math.round(position.x), y: Math.round(position.y), width, height }, area);
   const amount = options.dockAmount ?? (options.peek ? 0 : 1);
-  const x = position.edge === 'left' ? -width * .75 * amount : position.edge === 'right' ? width * .75 * amount : 0;
-  const y = position.edge === 'top' ? -height * .75 * amount : position.edge === 'bottom' ? height * .75 * amount : 0;
+  const face = options.faceBox ?? DEFAULT_FACE_BOX, angle = dockTilt(position.edge, amount) * Math.PI / 180;
+  const fx = (face[0] + face[2]) / 2 * width - width / 2;
+  const fy = (face[1] + face[3]) / 2 * height - height / 2;
+  const cx = width / 2 + fx * Math.cos(angle) - fy * Math.sin(angle);
+  const cy = height / 2 + fx * Math.sin(angle) + fy * Math.cos(angle);
+  // At rest the edge bisects the face. Alerts travel farther out; hover reveals all.
+  const x = position.edge === 'left' ? -cx * amount : position.edge === 'right' ? (width - cx) * amount : 0;
+  const eyes = (face[1] + (face[3] - face[1]) * .6) * height;
+  const y = position.edge === 'top' ? -cy * amount : position.edge === 'bottom' ? (height - eyes) * amount : 0;
   return { window, pet: { x, y, width, height }, panelAbove: window.y - area.y >= area.y + area.height - window.y - height, panelHeight: Math.min(258, area.height - 16) };
 }
 /** The strip of a tucked pet still on screen; hovering only this brings it out. */

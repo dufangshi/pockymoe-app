@@ -431,3 +431,33 @@ test('agent alerts: picker, names and six theme appearances', async () => {
   await sync([{ ...b, state: 'needsInput', request: { id: 'agent-input', kind: 'input', summary: 'Please choose' } }]);
   await expect(glass.locator('.bubble-title')).toContainText('.tests');
 });
+
+test('clips: speech uses the audio envelope on the fixed rest face and resumes the action', async () => {
+  test.skip(!clipPack, 'POCKYMOE_CLIP_PACK is not set');
+  const manifest = JSON.parse(readFileSync(join(clipPack!, 'pet.json'), 'utf8')) as { remoteCodex?: { talk?: unknown } };
+  test.skip(!manifest.remoteCodex?.talk, 'Pack has no speech faces');
+  await settings({ petId: clipPackId(), petEdgeHide: false }); await baseline(); await sync([item()]);
+  const sprite = await pet('sprite');
+  await expect(sprite.locator('#character')).toHaveClass(/clips/);
+  const rate = 24000, count = rate * 3, audio = Buffer.alloc(44 + count * 2);
+  audio.write('RIFF'); audio.writeUInt32LE(36 + count * 2, 4); audio.write('WAVEfmt ', 8); audio.writeUInt32LE(16, 16); audio.writeUInt16LE(1, 20); audio.writeUInt16LE(1, 22); audio.writeUInt32LE(rate, 24); audio.writeUInt32LE(rate * 2, 28); audio.writeUInt16LE(2, 32); audio.writeUInt16LE(16, 34); audio.write('data', 36); audio.writeUInt32LE(count * 2, 40);
+  for (let i = 0; i < count; i++) { const t = i / rate, amplitude = t < .3 || t > 2.3 ? 0 : t < 1.3 ? .045 : .3; audio.writeInt16LE(Math.round(Math.sin(i / rate * 2 * Math.PI * 220) * amplitude * 32767), 44 + i * 2); }
+  await app.evaluate(({ BrowserWindow }, bytes) => {
+    BrowserWindow.getAllWindows().find(w => w.webContents.getURL().includes('pet/index.html') && !w.getParentWindow())!.webContents.send('rcDesktop:pet:speech', Uint8Array.from(bytes));
+  }, [...audio]);
+  const samples = await sprite.evaluate(async () => {
+    const result: { face: string; body: string; visible: boolean; level: string | undefined; restBody: string }[] = [];
+    const hash = (id: string, bodyOnly = false): string => { const c = document.querySelector<HTMLCanvasElement>(id)!; const data = c.getContext('2d')!.getImageData(0, bodyOnly ? Math.floor(c.height / 2) : 0, c.width, bodyOnly ? Math.floor(c.height / 2) : c.height).data; let hash = 0; for (let i = 0; i < data.length; i += 16) hash = (hash * 31 + data[i]!) | 0; return String(hash); };
+    for (let i = 0; i < 100; i++) { result.push({ face: hash('#talk'), body: hash('#clip'), restBody: hash('#talk', true), visible: document.querySelector<HTMLElement>('#talk')!.style.display !== 'none', level: document.querySelector<HTMLElement>('#talk')!.dataset.level }); await new Promise(resolve => setTimeout(resolve, 35)); }
+    return result;
+  });
+  const visible = samples.filter(s => s.visible);
+  expect(visible.length).toBeGreaterThan(30);
+  expect(new Set(visible.map(s => s.restBody)).size).toBe(1);
+  expect(new Set(visible.map(s => s.level))).toEqual(new Set(['0', '1', '2']));
+  expect(new Set(visible.map(s => s.face)).size).toBeGreaterThanOrEqual(3);
+  expect(new Set(visible.map(s => s.body)).size).toBeGreaterThan(20);
+  expect(samples.at(-1)?.visible).toBe(false);
+  await expect(sprite.locator('#character')).not.toHaveClass(/talking/);
+  await expect(sprite.locator('#character')).toHaveClass(/clips/);
+});

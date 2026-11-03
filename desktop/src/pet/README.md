@@ -30,8 +30,10 @@ missing-item grace period. The pet never generates reactions from snapshots:
 only new hub events trigger one-shot failure/completion reactions. Sustained
 poses are waiting/running/idle, with a two-second minimum dwell and 160ms sprite
 crossfade. Snooze uses the full-colour optional sleeping strip. `petEdgeHide`
-defaults to true; docking translates 75% of the sprite inside an on-screen fixed
-window, slides out after 150ms hover and tucks after 800ms away. Cursor proximity
+defaults to true; docking bisects the pack’s face inside an on-screen fixed
+window (bottom: head and eyes), using the idle/rest atlas pose while tucked, slides out after 150ms hover and tucks after 800ms away. Alerts expose more of the head. `remoteCodex.faceBox` supplies fractional
+`[x0,y0,x1,y1]` bounds; MOE and older packs use `[.22,.4,.78,.8]`. Only
+the visible sprite pixels accept clicks. Cursor proximity
 is polled in main at 100ms, independent of alpha hit testing.
 
 The activity panel has a text-free 26px icon/close strip. Each conversation has
@@ -141,3 +143,22 @@ Preferences → Pet → Agent threads stores `petAgentAlerts` (`all` by default,
 summary requests. Waiting-for-input alerts keep their existing delivery. Stricter
 mute/focus/snooze rules still apply. The setting is validated, persisted and
 excluded from both Web PageSettings reads and writes.
+
+Optional speech faces use `remoteCodex.talk: {"path":"clips/talk.webp","frames":4}`
+with `remoteCodex.faceBox` and `clipFormat`. Frames use the clip grid: closed,
+half open, open; up to five additional open variants (for example rounded “o”)
+can follow. The renderer samples the playing speech through a Web Audio analyser,
+uses RMS with 60 ms attack / 120 ms release and thresholds .018 / .055, then
+switches visually to a `talking` rest pose, painting only the feathered face
+over the closed frame’s fixed body. The underlying action resumes after speech. Open variants
+alternate every 180 ms. Silence paints the closed frame; speech end removes the overlay. The pose tool’s
+±8 pixel translation search cannot align arbitrary bent/lying heads, so the
+rest-pose fallback avoids detached faces; feather sigma is face height / 8. Packs without talk retain their existing
+visual behavior. This is loudness-driven mouth motion, not phoneme recognition.
+Face boxes must be finite, ordered fractions in [0,1]; talk requires 3–8 frames,
+a safe declared clip path, and a format. Talk bytes count toward the same 8 MiB
+per-sheet / 160 MiB total clip limits, including ZIP import. Clips allow up to
+512 frames and 60 fps. The pose builder renders at 24 fps with eased ten-frame
+transitions, scaling 15 fps plan durations; an explicit plan `fps` changes that
+source time base. Existing WebP qualities stay unchanged. The pet renderer disables
+Electron background throttling; clip frame selection follows elapsed time via rAF.

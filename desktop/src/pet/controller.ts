@@ -10,7 +10,7 @@ import { conversationKey, conversationTitle, spokenActivityTitle } from '../shar
 import { isMuted, type MuteRule } from '../shared/mutes';
 import { ANIMATIONS } from './animation';
 import { BUBBLE_MS, BubbleQueue } from './bubbles';
-import { dockPosition, exposedRect, HEAD_PEEK, MINI_HEIGHT, PET_HEIGHT, petLayout, restorePosition, surfaceLayout, surfaceSide, type PetPosition, type SurfaceSide } from './geometry';
+import { dockPosition, HEAD_PEEK, MINI_HEIGHT, PET_HEIGHT, petLayout, restorePosition, surfaceLayout, surfaceSide, type PetPosition, type SurfaceSide } from './geometry';
 import { importPetPack as importPack, listPetPacks, imageDimensions, readClip, type ClipState, type PetPack } from './packs';
 import { petConversations } from './conversations';
 import { StableMood, withoutResolvedRequest } from './stability';
@@ -57,7 +57,7 @@ export function createPetController(deps: PetControllerDeps): PetController {
   let position = restorePosition(positions[String(lastDisplayId ?? primary.id)], screen.getAllDisplays(), primary, petHeight(settings));
   dockAmount = position.edge && settings.petEdgeHide !== false ? 1 : 0;
   const preload = join(__dirname, '../preload/pet.js');
-  const security = { preload, contextIsolation: true, sandbox: true, nodeIntegration: false, webSecurity: true, autoplayPolicy: 'no-user-gesture-required' as const };
+  const security = { preload, contextIsolation: true, sandbox: true, nodeIntegration: false, webSecurity: true, autoplayPolicy: 'no-user-gesture-required' as const, backgroundThrottling: false };
   const window = new BrowserWindow({ ...petLayout(position, (screen.getAllDisplays().find(candidate => candidate.id === position.displayId) ?? primary).workArea, petHeight(settings)).window, show: false, transparent: true, frame: false,
     focusable: false, hasShadow: false, skipTaskbar: true, resizable: false, maximizable: false, minimizable: false,
     ...(process.platform === 'darwin' ? { type: 'panel' as const } : {}), webPreferences: security });
@@ -163,10 +163,11 @@ export function createPetController(deps: PetControllerDeps): PetController {
     const bubble = snoozed ? null : bubbles.current;
     mode = panel ? 'panel' : menu ? 'menu' : bubble && !controlsPinned ? 'bubble' : 'controls';
     const controlsShown = near || controlsPinned;
-    const layout = petLayout(position, display().workArea, petHeight(settings), { dockAmount });
+    const layout = petLayout(position, display().workArea, petHeight(settings), { dockAmount, faceBox: pack?.manifest.remoteCodex?.faceBox });
     const effectiveTargets = [...new Map([...items, ...targets.values(), ...recent.map(item => ({ ...item, workspaceId: '', state: 'idle' as const, since: new Date(0).toISOString(), unread: false }))].map(item => [item.key, item])).values()];
     const sleeping = pack?.manifest.remoteCodex?.sleeping;
     const shared = { appearance, glassFallback: process.platform === 'win32' && windowsGlassMaterial(release(), process.env.POCKYMOE_WINDOWS_GLASS === 'solid') === 'solid', accountId, items, recent, targets: effectiveTargets, mood: drag?.moved && pack?.manifest.remoteCodex?.clips?.dragging ? 'dragging' : moods.value(items, now, snoozed), moodEpoch, pinned: controlsPinned && !panel && !menu,
+      faceBox: pack?.manifest.remoteCodex?.faceBox, talk: pack?.manifest.remoteCodex?.talk,
       clips: pack?.manifest.remoteCodex?.clips && pack.manifest.remoteCodex.clipFormat ? { format: pack.manifest.remoteCodex.clipFormat, states: pack.manifest.remoteCodex.clips, epoch: packEpoch } : null,
       // Timing stays here: while the pointer holds a bubble, its restart must not reach the renderer as a change.
       bubble: bubble && { ...bubble, createdAt: 0, shownAt: null },
@@ -363,11 +364,19 @@ export function createPetController(deps: PetControllerDeps): PetController {
   })];
   const displayChanged = (): void => { position = restorePosition(position, screen.getAllDisplays(), screen.getPrimaryDisplay(), petHeight(settings)); placeSprite(); savePosition(); emit(); };
   screen.on('display-removed', displayChanged); screen.on('display-metrics-changed', displayChanged);
+  function visiblePetRect() {
+    const layout = petLayout(position, display().workArea, petHeight(settings), { dockAmount, faceBox: pack?.manifest.remoteCodex?.faceBox });
+    const { pet } = layout, bounds = window.getBounds();
+    // Use the actual visible face strip, not a fraction of a tall figure's window.
+    const x = position.edge === 'right' ? Math.max(0, pet.x) : 0;
+    const y = position.edge === 'bottom' ? Math.max(0, pet.y) : 0;
+    return { x: bounds.x + x, y: bounds.y + y, width: Math.max(0, bounds.width - Math.abs(pet.x)), height: Math.max(0, bounds.height - Math.abs(pet.y)) };
+  }
   const pollPointer = (): void => {
     const now = Date.now(), cursor = screen.getCursorScreenPoint(), bounds = window.getBounds(), child = glass.getBounds();
     const within = (r: Electron.Rectangle, margin = 0) => cursor.x >= r.x - margin && cursor.x <= r.x + r.width + margin && cursor.y >= r.y - margin && cursor.y <= r.y + r.height + margin;
     const tucked = position.edge && settings.petEdgeHide !== false && dockAmount > 0;
-    const close = (tucked ? within(exposedRect(bounds, position.edge!, 1 - .75 * dockAmount), 12) : within(bounds, 60)) || glass.isVisible() && within(child, 8);
+    const close = (tucked ? within(visiblePetRect(), 0) : within(bounds, 60)) || glass.isVisible() && within(child, 8);
     if (controlsPinned && !close && now - awaySince >= 4000) controlsPinned = false;
     if (close) bubbles.hold(now); // Reading it keeps it there.
     if (close) { if (!near) glassDismissed = false; near = true; awaySince = 0; if (!hoverSince) hoverSince = now; }

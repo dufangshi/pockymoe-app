@@ -12,8 +12,9 @@ import { getLocale, setLocale, t, type MessageKey } from '../shared/i18n';
 import { showError } from '../local/errorMark';
 import { commandErrorMessage } from './errors';
 import { scrollGeometry } from './scroll';
-import { playSound, playSpeech } from './sounds';
+import { playSound, playSpeech, speechMouth, speechPlaying } from './sounds';
 import { isMuted } from '../shared/mutes';
+import { dockTilt } from './geometry';
 import { ClipSequencer } from './clipSequence';
 import type { PetClip } from './packs';
 import type { ActivityItem, HostCommandResult } from '../shared/contract';
@@ -105,7 +106,7 @@ function renderGlass(): void {
   root.className = `glass mode-${state.mode}${state.mode === 'controls' && state.pinned ? ' has-running' : ''}`;
   let content = state.mode === 'controls' && state.pinned ? runningList() + controls() : controls();
   if (state.mode === 'panel') content = `<section class="panel" aria-label="${escape(t('活动面板'))}"><header class="panel-header"><span aria-hidden="true">${icon('tasks')}</span>${button('close', t('关闭任务'), icon('close'))}</header><div class="scroll-frame" data-scroll-area><div class="task-list scroll-content" role="listbox" aria-label="${escape(t('活动任务'))}" id="pet-task-list">${rows.length ? rows.map(group => taskRow(group, rows.some(other => other.key !== group.key && other.title === group.title))).join('') : `<div class="empty">${icon('check')}${escape(t('一切就绪'))}</div>`}</div><div class="scroll-track" role="scrollbar" aria-label="${escape(t('滚动活动任务'))}" aria-controls="pet-task-list" aria-orientation="vertical" aria-valuemin="0" tabindex="0" hidden><div class="scroll-thumb"></div></div></div>${target ? `<form id="chat-form" class="chat" data-key="${escape(target?.key ?? '')}"><input id="reply-input" aria-label="${escape(t('发送回复'))}" placeholder="${escape(t('回复 {title}…', { title: title(target) }))}" value="${escape(draft)}" maxlength="16000" autocomplete="off" ${sendState === 'sending' ? 'disabled' : ''}>${errorSlot(`chat:${target?.key}`)}${button('send', sendState === 'sent' ? t('已发送') : sendState === 'sending' ? t('正在发送…') : t('发送回复'), sendState === 'sent' ? icon('check') : icon('send'), `class="send ${sendState === 'sending' ? 'sending' : ''}" ${!target || !draft.trim() || sendState === 'sending' ? 'disabled' : ''}`)}</form>` : ''}<span class="live-announcement" role="status">${sendState === 'error' ? escape(t('未发送')) : sendState === 'sent' ? escape(t('已发送')) : ''}</span></section>`;
-  if (state.mode === 'menu') content = `<section class="more" role="menu" aria-label="${escape(t('宠物偏好'))}">${button('mini', t('Mini 模式'), `${escape(t('Mini 模式'))}${state.settings.petMini ? icon('check') : ''}`, 'role="menuitemcheckbox" aria-checked="'+state.settings.petMini+'"')}<div class="menu-sizes" role="group" aria-label="${escape(t('宠物大小'))}">${(['S', 'M', 'L'] as const).map(size => button(`size-${size}`, size, size, `role="menuitemradio" aria-checked="${state!.settings.petSize === size}"`)).join('')}</div>${button('edgeHide', t('贴边自动隐藏'), `<span class="menu-copy">${escape(t('贴边自动隐藏'))}</span>` + (state.edgeHide ? icon('check') : ''), `role="menuitemcheckbox" aria-checked="${state.edgeHide}"`)}${button('sound', t('提示音'), `<span class="menu-copy">${escape(t('提示音'))}</span>` + (state.settings.petSound ? icon('check') : ''), `role="menuitemcheckbox" aria-checked="${state.settings.petSound}"`)}${button('voice', t('语音播报'), `<span class="menu-copy">${escape(t('语音播报'))}</span>` + (state.settings.petVoice ? icon('check') : ''), `role="menuitemcheckbox" aria-checked="${state.settings.petVoice}"`)}<hr>${button('preferences', t('偏好设置…'), escape(t('偏好设置…')), 'role="menuitem"')}${button('hide', t('隐藏桌宠'), escape(t('隐藏桌宠')), 'role="menuitem"')}</section>`;
+  if (state.mode === 'menu') content = `<section class="more" role="menu" aria-label="${escape(t('宠物偏好'))}">${button('mini', t('Mini 模式'), `${escape(t('Mini 模式'))}${state.settings.petMini ? icon('check') : ''}`, 'role="menuitemcheckbox" aria-checked="'+state.settings.petMini+'"')}<div class="menu-sizes" role="group" aria-label="${escape(t('宠物大小'))}">${(['S', 'M', 'L'] as const).map(size => button(`size-${size}`, size, size, `role="menuitemradio" aria-checked="${state!.settings.petSize === size}"`)).join('')}</div>${button('edgeHide', t('贴边时缩到边缘'), `<span class="menu-copy">${escape(t('贴边时缩到边缘'))}</span>` + (state.edgeHide ? icon('check') : ''), `role="menuitemcheckbox" aria-checked="${state.edgeHide}"`)}${button('sound', t('提示音'), `<span class="menu-copy">${escape(t('提示音'))}</span>` + (state.settings.petSound ? icon('check') : ''), `role="menuitemcheckbox" aria-checked="${state.settings.petSound}"`)}${button('voice', t('语音播报'), `<span class="menu-copy">${escape(t('语音播报'))}</span>` + (state.settings.petVoice ? icon('check') : ''), `role="menuitemcheckbox" aria-checked="${state.settings.petVoice}"`)}<hr>${button('preferences', t('偏好设置…'), escape(t('偏好设置…')), 'role="menuitem"')}${button('hide', t('隐藏桌宠'), escape(t('隐藏桌宠')), 'role="menuitem"')}</section>`;
   const bubble = state.bubble;
   const bubbleGroups = bubble ? petConversations(bubble.events.map(event => event.item), state.items) : [];
   const group = bubbleGroups[0];
@@ -171,24 +172,25 @@ root.addEventListener('submit', event => {
 });
 function renderSprite(): void {
   if (!state) return;
-  if (!root.querySelector('#character')) root.innerHTML = `<div id="character" role="button" tabindex="0"><div id="sprite-old"></div><div id="sprite"></div><canvas id="clip"></canvas><svg class="sleep-motes" viewBox="0 0 36 48" aria-hidden="true"><path d="M7 34h6l-6 6h6"/><path d="M17 24h7l-7 7h7"/><path d="M23 13h5l-5 5h5"/></svg></div>`;
+  if (!root.querySelector('#character')) root.innerHTML = `<div id="character" role="button" tabindex="0"><div id="sprite-old"></div><div id="sprite"></div><canvas id="clip"></canvas><canvas id="talk" aria-hidden="true"></canvas><svg class="sleep-motes" viewBox="0 0 36 48" aria-hidden="true"><path d="M7 34h6l-6 6h6"/><path d="M17 24h7l-7 7h7"/><path d="M23 13h5l-5 5h5"/></svg></div>`;
   const character = root.querySelector<HTMLElement>('#character')!;
   character.setAttribute('aria-label', t('桌宠，点击查看任务，拖动以移动'));
   character.style.width = `${state.pet.width}px`; character.style.height = `${state.pet.height}px`;
   // Leaning out from the edge; at the top she hangs upside down, so it is still her head that shows.
-  const tilt = !state.dockAmount || !state.edge ? 0 : state.edge === 'top' ? 180 : state.edge === 'bottom' ? 0 : (state.edge === 'left' ? 16 : -16) * Math.min(1, state.dockAmount * 1.4);
+  const tilt = dockTilt(state.edge, state.dockAmount);
   character.style.transform = `translate(${state.pet.x}px,${state.pet.y}px) rotate(${tilt}deg)`;
+  character.classList.toggle('docked-rest', state.dockAmount === 1);
   character.classList.toggle('sleeping', state.mood === 'sleeping');
   character.classList.toggle('peeking', state.dockAmount > 0 && state.dockAmount < 1);
   root.dataset.mood = state.mood; root.dataset.edge = state.edge ?? ''; root.dataset.dockAmount = String(state.dockAmount);
   if (animationState !== state.mood || lastEpoch !== state.moodEpoch) {
     lastEpoch = state.moodEpoch;
     const old = root.querySelector<HTMLElement>('#sprite-old')!, sprite = root.querySelector<HTMLElement>('#sprite')!;
-    old.style.cssText = sprite.style.cssText; old.style.opacity = '1'; sprite.style.opacity = motion.matches ? '1' : '0';
+    old.style.cssText = sprite.style.cssText; old.style.opacity = state.dockAmount === 1 ? '0' : '1'; sprite.style.opacity = motion.matches || state.dockAmount === 1 ? '1' : '0';
     animationState = state.mood; animationStart = performance.now(); frame = 0; paintSprite(); leaveClip();
     requestAnimationFrame(() => { old.style.opacity = '0'; sprite.style.opacity = '1'; });
   }
-  const image = state.mood === 'sleeping' && state.sleeping ? state.sleeping.imageUrl : state.imageUrl;
+  const image = state.dockAmount !== 1 && state.mood === 'sleeping' && state.sleeping ? state.sleeping.imageUrl : state.imageUrl;
   if (image !== lastImage) {
     lastImage = image; alpha = null; const source = spriteImage = new Image();
     source.onload = () => { if (spriteImage !== source) return; canvas.width = source.width; canvas.height = source.height; context.clearRect(0, 0, canvas.width, canvas.height); context.drawImage(source, 0, 0); alpha = context.getImageData(0, 0, source.width, source.height).data; };
@@ -202,10 +204,13 @@ const CLIP_CACHE = 6, ONE_SHOT = ['failed', 'waving', 'jumping', 'poked', 'landi
 const clipCache = new Map<string, Promise<ImageBitmap | null>>();
 let clipSequence: ClipSequencer | null = null;
 let clipPlayer: { clip: PetClip; bitmap: ImageBitmap; start: number; drawn: number; leaving?: { from: number; to: number; start: number; ms: number } } | null = null, clipToken = 0, clipPack = '';
+function decodeClip(path: string): Promise<ImageBitmap | null> {
+  return bridge.clip(path).then(bytes => bytes ? createImageBitmap(new Blob([bytes as BlobPart], { type: 'image/webp' })) : null).catch(() => null);
+}
 function loadClip(path: string): Promise<ImageBitmap | null> {
   let loading = clipCache.get(path);
   if (!loading) {
-    loading = bridge.clip(path).then(bytes => bytes ? createImageBitmap(new Blob([bytes as BlobPart], { type: 'image/webp' })) : null).catch(() => null);
+    loading = decodeClip(path);
     clipCache.set(path, loading);
     if (clipCache.size > CLIP_CACHE) { const [oldest, entry] = clipCache.entries().next().value!; clipCache.delete(oldest); void entry.then(bitmap => { if (clipPlayer?.bitmap !== bitmap) bitmap?.close(); }); }
   }
@@ -236,6 +241,41 @@ function leaveClip(): void {
   const last = clip.frames - 1, to = clip.role === 'intro' || last - drawn <= drawn ? last : 0, distance = Math.abs(to - drawn);
   if (drawn < 0 || distance <= 1) { playClips(); return; }
   clipPlayer.leaving = { from: drawn, to, start: performance.now(), ms: Math.min(LEAVE_MS, distance / (format.fps * 3) * 1000) };
+}
+// Talking uses the closed/rest frame as a stable body. A fixed face box cannot align
+// arbitrary bent/lying poses (paint_face only searches ±8 px), so use the documented
+// rest-pose fallback rather than painting a detached face over those poses.
+const faceCanvas = document.createElement('canvas'), faceMask = document.createElement('canvas');
+let talkBitmap: ImageBitmap | null = null, talkLoading = '', talkFrame = -1;
+function paintTalk(now: number): void {
+  const element = root.querySelector<HTMLCanvasElement>('#talk'), character = root.querySelector('#character');
+  const talk = state?.talk, format = state?.clips?.format, box = state?.faceBox;
+  if (!element) return;
+  const level = speechMouth(now); element.dataset.level = String(level);
+  if (!talk || !format || !box || !speechPlaying()) {
+    element.style.display = 'none'; talkFrame = -1; character?.classList.remove('talking'); return;
+  }
+  const key = `${clipPack}:${talk.path}`;
+  if (talkLoading !== key) {
+    talkLoading = key; talkBitmap = null;
+    void decodeClip(talk.path).then(bitmap => { if (talkLoading === key) talkBitmap = bitmap; else bitmap?.close(); });
+  }
+  if (!talkBitmap) return;
+  character?.classList.add('talking');
+  const index = level === 2 && talk.frames > 3 ? 2 + Math.floor(now / 180) % (talk.frames - 2) : level;
+  if (index === talkFrame) { element.style.display = ''; return; }
+  const { width, height, columns } = format;
+  element.width = faceCanvas.width = faceMask.width = width;
+  element.height = faceCanvas.height = faceMask.height = height;
+  const work = faceCanvas.getContext('2d')!, mask = faceMask.getContext('2d')!;
+  const x0 = Math.floor(box[0] * width), y0 = Math.floor(box[1] * height), x1 = Math.floor(box[2] * width), y1 = Math.floor(box[3] * height);
+  work.drawImage(talkBitmap, index % columns * width, Math.floor(index / columns) * height, width, height, 0, 0, width, height);
+  mask.filter = `blur(${(y1 - y0) / 8}px)`; mask.fillRect(x0, y0, x1 - x0, y1 - y0);
+  work.globalCompositeOperation = 'destination-in'; work.drawImage(faceMask, 0, 0); work.globalCompositeOperation = 'source-over';
+  const context = element.getContext('2d')!;
+  context.drawImage(talkBitmap, 0, 0, width, height, 0, 0, width, height);
+  context.drawImage(faceCanvas, 0, 0);
+  element.style.display = ''; talkFrame = index; updateHit();
 }
 let clipContext: CanvasRenderingContext2D | null = null;
 function drawClip(index: number): void {
@@ -268,10 +308,11 @@ function stepClip(now: number): void {
 }
 function paintSprite(): void {
   const sprite = root.querySelector<HTMLElement>('#sprite'); if (!sprite || !state) return;
-  const sleeping = animationState === 'sleeping' ? state.sleeping : undefined;
+  const docked = state.dockAmount === 1;
+  const sleeping = !docked && animationState === 'sleeping' ? state.sleeping : undefined;
   sprite.style.backgroundImage = `url("${sleeping?.imageUrl ?? state.imageUrl}")`;
   sprite.style.backgroundSize = `${state.pet.width * (sleeping?.frames ?? 8)}px ${state.pet.height * (sleeping ? 1 : state.atlasRows)}px`;
-  sprite.style.backgroundPosition = `${-frame * state.pet.width}px ${sleeping ? 0 : -ANIMATIONS[animationState].row * state.pet.height}px`;
+  sprite.style.backgroundPosition = `${-(docked ? 0 : frame) * state.pet.width}px ${sleeping || docked ? 0 : -ANIMATIONS[animationState].row * state.pet.height}px`;
 }
 function opaqueAt(point: { clientX: number; clientY: number }): boolean {
   if (!state || !(alpha || clipPlayer)) return false;
@@ -282,10 +323,12 @@ function opaqueAt(point: { clientX: number; clientY: number }): boolean {
   const x = Math.floor((pointInBody.x + centerX) / state.pet.width * 192);
   const y = Math.floor((pointInBody.y + centerY) / state.pet.height * 208);
   if (x < 0 || x >= 192 || y < 0 || y >= 208) return false;
-  if (clipPlayer && clipContext) { const element = clipContext.canvas; return clipContext.getImageData(Math.floor(x / 192 * element.width), Math.floor(y / 208 * element.height), 1, 1).data[3]! > 24; }
+  const talk = root.querySelector<HTMLCanvasElement>('#talk');
+  if (character.classList.contains('talking') && talk) return talk.getContext('2d')!.getImageData(Math.floor(x / 192 * talk.width), Math.floor(y / 208 * talk.height), 1, 1).data[3]! > 24;
+  if (state.dockAmount !== 1 && clipPlayer && clipContext) { const element = clipContext.canvas; return clipContext.getImageData(Math.floor(x / 192 * element.width), Math.floor(y / 208 * element.height), 1, 1).data[3]! > 24; }
   if (!alpha) return false;
-  const row = animationState === 'sleeping' && state.sleeping ? 0 : ANIMATIONS[animationState].row;
-  return alpha[((row * 208 + y) * (spriteImage?.width ?? 1536) + frame * 192 + x) * 4 + 3] > 24;
+  const row = state.dockAmount === 1 || animationState === 'sleeping' && state.sleeping ? 0 : ANIMATIONS[animationState].row;
+  return alpha[((row * 208 + y) * (spriteImage?.width ?? 1536) + (state.dockAmount === 1 ? 0 : frame) * 192 + x) * 4 + 3] > 24;
 }
 function updateHit(): void { const next = !!drag || !!lastPointer && opaqueAt(lastPointer); if (next !== hit) { hit = next; bridge.hitTest(hit); } }
 window.addEventListener('pointermove', event => {
@@ -343,7 +386,7 @@ bridge.onState(next => {
   if (next.surface === 'sprite') {
     // Another pack's sheets share nothing with this one's.
     const packKey = `${next.packName}#${next.clips?.epoch ?? 0}`;
-    if (packKey !== clipPack) { clipPack = packKey; for (const entry of clipCache.values()) void entry.then(bitmap => bitmap?.close()); clipCache.clear(); clipSequence = null; clipPlayer = null; clipToken++; lastEpoch = -1; }
+    if (packKey !== clipPack) { talkBitmap?.close(); talkLoading = ''; talkBitmap = null; talkFrame = -1; clipPack = packKey; for (const entry of clipCache.values()) void entry.then(bitmap => bitmap?.close()); clipCache.clear(); clipSequence = null; clipPlayer = null; clipToken++; lastEpoch = -1; }
     renderSprite(); updateHit(); return;
   }
   if (old?.detailOpen && !next.detailOpen) root.querySelector<HTMLButtonElement>('.error-mark[aria-expanded="true"]')?.click();
@@ -353,7 +396,7 @@ bridge.onState(next => {
   if (changedMode && next.mode === 'menu') root.querySelector<HTMLElement>('[role^="menuitem"]')?.focus();
 });
 function animate(now: number): void {
-  if (state?.surface === 'sprite') stepClip(now);
+  if (state?.surface === 'sprite') { stepClip(now); paintTalk(now); }
   if (state?.surface === 'sprite' && !clipPlayer) {
     const elapsedMs = now - animationStart, idleTime = elapsedMs % 46000;
     const cycle = animationState === 'idle' ? idleTime >= 31000 ? idleTime - 31000 : idleTime >= 14000 ? idleTime - 14000 : idleTime : elapsedMs;
