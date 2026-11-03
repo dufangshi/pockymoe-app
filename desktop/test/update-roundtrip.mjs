@@ -104,6 +104,21 @@ function windowsPreflight(evidence) {
   console.log('Windows installer preflight saved (CIM/policy timing, no environment values)');
   return result;
 }
+function seedShortcut(target, link, env) {
+  const ps = join(process.env.SystemRoot || 'C:\\Windows', 'System32/WindowsPowerShell/v1.0/powershell.exe');
+  const seed = powershellProbe(ps, `$ErrorActionPreference='Stop';
+    $shell=New-Object -ComObject WScript.Shell;
+    $link=${powershellLiteral(link)};
+    $shortcut=$shell.CreateShortcut($link);
+    $shortcut.TargetPath=${powershellLiteral(target)}; $shortcut.Save();
+    $saved=$shell.CreateShortcut($link);
+    @{target=$saved.TargetPath; saved=(Test-Path -LiteralPath $link)} | ConvertTo-Json -Compress`, env);
+  assert.equal(seed.ok, true, 'Fixture shortcut probe must complete');
+  assert.equal(seed.result?.saved, true, 'Fixture shortcut must be saved');
+  // Shell resolves DOS 8.3 aliases. Compare filesystem identity, not its spelling.
+  assert.equal(statSync(seed.result.target).ino, statSync(target).ino, 'Saved shortcut must target the stray file');
+  return seed.result;
+}
 function installedProgress(directory) {
   let files = 0, bytes = 0;
   const visit = (folder, depth = 0) => {
@@ -188,6 +203,7 @@ async function selfTest() {
     assert.equal(verify(null, Buffer.from(canonical({ ...records[0], size: records[0].size + 1 })), publicKey, Buffer.from(records[0].signature, 'base64')), false);
     assert.equal(records[0].size, statSync(file).size);
     assert.equal(release.assets[0].name, fileName);
+    if (process.platform === 'win32') seedShortcut(file, join(temporary, 'probe.lnk'), fixtureEnvironment());
     console.log('Updater fixture serialization/signature self-test passed (no installer executed)');
   } finally { rmSync(temporary, { recursive: true, force: true }); }
 }
@@ -283,12 +299,8 @@ async function roundtrip() {
     // the wrong-copy relaunch. No second installer registration is necessary.
     cpSync(install, stray, { recursive: true });
     const ps = join(process.env.SystemRoot || 'C:\\Windows', 'System32/WindowsPowerShell/v1.0/powershell.exe');
-    const seed = powershellProbe(ps, `$ErrorActionPreference='Stop';
-      $link=Join-Path ([Environment]::GetFolderPath('Programs')) 'Pockymoe Updater Fixture.lnk';
-      $shortcut=(New-Object -ComObject WScript.Shell).CreateShortcut($link);
-      $shortcut.TargetPath=${powershellLiteral(realpathSync(strayExecutable))}; $shortcut.Save();
-      @{staleShortcutSeeded=($shortcut.TargetPath -eq ${powershellLiteral(realpathSync(strayExecutable))})} | ConvertTo-Json -Compress`, env);
-    assert.equal(seed.result?.staleShortcutSeeded, true);
+    const programs = execFileSync(ps, ['-NoProfile', '-NonInteractive', '-Command', "[Environment]::GetFolderPath('Programs')"], { env, encoding: 'utf8', windowsHide: true }).trim();
+    report.shortcut = seedShortcut(strayExecutable, join(programs, 'Pockymoe Updater Fixture.lnk'), env);
     report.checks.staleShortcutSeeded = true;
     // Prove the first install before spending time packaging B. This is setup
     // ordering, not an assumption about the reason an installer might stall.
