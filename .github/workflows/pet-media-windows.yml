@@ -13,7 +13,7 @@ jobs:
         working-directory: desktop
         shell: pwsh
     env:
-      POCKYMOE_DESKTOP_EVIDENCE: ${{ runner.temp }}/pet-media
+      POCKYMOE_DESKTOP_EVIDENCE: ${{ github.workspace }}/.local/pet-media
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
