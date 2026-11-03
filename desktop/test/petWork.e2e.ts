@@ -300,11 +300,16 @@ test('panel opening waits for delayed glass state instead of toggling it closed'
       else send(channel, ...args);
     };
   });
+  await glass.evaluate(() => {
+    Object.assign(window, { panelDeliveredModes: [] as string[] });
+    (window as unknown as { rcDesktop: { pet: { onState(listener: (state: { mode: string }) => void): unknown } } }).rcDesktop.pet.onState(state => { (window as unknown as { panelDeliveredModes: string[] }).panelDeliveredModes.push(state.mode); });
+  });
   const toggle = () => sprite.evaluate(() => (window as unknown as { rcDesktop: { pet: { action(value: unknown): Promise<unknown> } } }).rcDesktop.pet.action({ type: 'toggleTray' }));
   // Reproduce the old acceptance fixture: main has opened, glass DOM is stale,
   // and a second toggle closes main again. This is the captured controls state.
   await toggle(); expect(await glass.locator('.panel').count()).toBe(0); await toggle();
   await app.evaluate(() => (globalThis as unknown as { panelReplay: { flush(): void } }).panelReplay.flush());
+  await expect.poll(() => glass.evaluate(() => (window as unknown as { panelDeliveredModes: string[] }).panelDeliveredModes.at(-1))).toBe('controls');
   await expect(glass.locator('.panel')).toHaveCount(0);
   const oldModes = await app.evaluate(() => (globalThis as unknown as { panelReplay: { modes: string[] } }).panelReplay.modes);
   expect(oldModes).toContain('panel'); expect(oldModes.at(-1)).toBe('controls');
