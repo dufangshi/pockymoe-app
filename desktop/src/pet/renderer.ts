@@ -14,7 +14,7 @@ import { commandErrorMessage } from './errors';
 import { scrollGeometry } from './scroll';
 import { playSound, playSpeech, speechMouth, speechPlaying } from './sounds';
 import { isMuted } from '../shared/mutes';
-import { dockTilt } from './geometry';
+import { dockedPose, dockTilt } from './geometry';
 import { ClipSequencer } from './clipSequence';
 import type { PetClip } from './packs';
 import type { ActivityItem, HostCommandResult } from '../shared/contract';
@@ -198,6 +198,9 @@ function renderSprite(): void {
   character.style.width = `${state.pet.width}px`; character.style.height = `${state.pet.height}px`;
   // Leaning out from the edge; at the top she hangs upside down, so it is still her head that shows.
   const tilt = dockTilt(state.edge, state.dockAmount);
+  const pose = dockedPose(state.pet.width, state.pet.height, state.edge, state.dockAmount, state.faceBox);
+  character.style.transformOrigin = `${pose.pivot.x}px ${pose.pivot.y}px`;
+  character.style.clipPath = pose.clip ? `inset(${pose.clip.y}px ${state.pet.width - pose.clip.x - pose.clip.width}px ${state.pet.height - pose.clip.y - pose.clip.height}px ${pose.clip.x}px)` : '';
   character.style.transform = `translate(${state.pet.x}px,${state.pet.y}px) rotate(${tilt}deg)`;
   character.classList.toggle('docked-rest', state.dockAmount === 1);
   character.classList.toggle('sleeping', state.mood === 'sleeping');
@@ -337,12 +340,15 @@ function paintSprite(): void {
 function opaqueAt(point: { clientX: number; clientY: number }): boolean {
   if (!state || !(alpha || clipPlayer)) return false;
   const character = root.querySelector<HTMLElement>('#character'); if (!character) return false;
-  const centerX = state.pet.width / 2, centerY = state.pet.height / 2;
+  const [centerX, centerY] = getComputedStyle(character).transformOrigin.split(' ').map(Number.parseFloat);
   const matrix = new DOMMatrix(getComputedStyle(character).transform).inverse();
   const pointInBody = new DOMPoint(point.clientX - centerX, point.clientY - centerY).matrixTransform(matrix);
   const x = Math.floor((pointInBody.x + centerX) / state.pet.width * 192);
   const y = Math.floor((pointInBody.y + centerY) / state.pet.height * 208);
   if (x < 0 || x >= 192 || y < 0 || y >= 208) return false;
+  const clip = dockedPose(state.pet.width, state.pet.height, state.edge, state.dockAmount, state.faceBox).clip;
+  const localX = x / 192 * state.pet.width, localY = y / 208 * state.pet.height;
+  if (clip && (localX < clip.x || localX > clip.x + clip.width || localY < clip.y || localY > clip.y + clip.height)) return false;
   const talk = root.querySelector<HTMLCanvasElement>('#talk');
   if (character.classList.contains('talking') && talk) return talk.getContext('2d')!.getImageData(Math.floor(x / 192 * talk.width), Math.floor(y / 208 * talk.height), 1, 1).data[3]! > 24;
   if (state.dockAmount !== 1 && clipPlayer && clipContext) { const element = clipContext.canvas; return clipContext.getImageData(Math.floor(x / 192 * element.width), Math.floor(y / 208 * element.height), 1, 1).data[3]! > 24; }

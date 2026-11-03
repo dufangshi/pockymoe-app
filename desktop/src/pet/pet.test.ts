@@ -256,16 +256,23 @@ describe('v3 atlas and fixed-window regressions', () => {
       const rest = petLayout(position, area, height, { dockAmount: 1, faceBox });
       const alert = petLayout(position, area, height, { dockAmount: HEAD_PEEK, faceBox });
       const { width, height: h, x, y } = rest.pet, angle = dockTilt(edge, 1) * Math.PI / 180;
-      const fx = (faceBox[0] + faceBox[2]) / 2 * width - width / 2;
-      const fy = (faceBox[1] + faceBox[3]) / 2 * h - h / 2;
-      const cx = width / 2 + fx * Math.cos(angle) - fy * Math.sin(angle) + x;
-      const cy = h / 2 + fx * Math.sin(angle) + fy * Math.cos(angle) + y;
+      const fx = (faceBox[0] + faceBox[2]) / 2 * width - rest.pivot.x;
+      const fy = (faceBox[1] + faceBox[3]) / 2 * h - rest.pivot.y;
+      const cx = rest.pivot.x + fx * Math.cos(angle) - fy * Math.sin(angle) + x;
+      const cy = rest.pivot.y + fx * Math.sin(angle) + fy * Math.cos(angle) + y;
       if (edge === 'left') expect(cx).toBeCloseTo(0);
       if (edge === 'right') expect(cx).toBeCloseTo(width);
       if (edge === 'top') expect(cy).toBeCloseTo(0);
       if (edge === 'bottom') expect(y + (faceBox[1] + (faceBox[3] - faceBox[1]) * .6) * h).toBeCloseTo(h);
       expect(Math.abs(alert.pet.x) + Math.abs(alert.pet.y)).toBeLessThan(Math.abs(x) + Math.abs(y));
       expect(rest.window).toEqual(alert.window);
+      if (rest.clip) {
+        expect(cy).toBeCloseTo((faceBox[1] + faceBox[3]) / 2 * h);
+        expect(rest.visible.height).toBeLessThan(h * .5);
+        expect(rest.visible.width).toBeLessThan(width * .4);
+        expect(rest.pivot.y).toBeGreaterThan(faceBox[3] * h);
+        expect(open.clip).toBeNull();
+      }
     }
   });
 });

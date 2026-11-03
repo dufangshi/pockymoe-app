@@ -366,11 +366,8 @@ export function createPetController(deps: PetControllerDeps): PetController {
   screen.on('display-removed', displayChanged); screen.on('display-metrics-changed', displayChanged);
   function visiblePetRect() {
     const layout = petLayout(position, display().workArea, petHeight(settings), { dockAmount, faceBox: pack?.manifest.remoteCodex?.faceBox });
-    const { pet } = layout, bounds = window.getBounds();
-    // Use the actual visible face strip, not a fraction of a tall figure's window.
-    const x = position.edge === 'right' ? Math.max(0, pet.x) : 0;
-    const y = position.edge === 'bottom' ? Math.max(0, pet.y) : 0;
-    return { x: bounds.x + x, y: bounds.y + y, width: Math.max(0, bounds.width - Math.abs(pet.x)), height: Math.max(0, bounds.height - Math.abs(pet.y)) };
+    const { visible } = layout, bounds = window.getBounds();
+    return { ...visible, x: bounds.x + visible.x, y: bounds.y + visible.y };
   }
   const pollPointer = (): void => {
     const now = Date.now(), cursor = screen.getCursorScreenPoint(), bounds = window.getBounds(), child = glass.getBounds();

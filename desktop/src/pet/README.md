@@ -173,3 +173,8 @@ Windows Acrylic is 85% / hover 95%, while the solid fallback remains opaque.
 The `compact surfaces` Electron tests cover layout, focus, CSS contrast and an
 optional Windows CI desktop-capture probe. See the Windows design doc for the
 measured CSS values and the distinction from native Acrylic measurements.
+
+Slender packs side-peek through a face-derived head crop, with a neck pivot and
+fixed face height. Rendering, clipped alpha hit testing and hover bounds share
+`dockedPose`; MOE retains its existing body-centered peek. Compact surfaces use
+the shared status shapes at 10px, including the running ring and waiting bubble.

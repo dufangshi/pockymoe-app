@@ -51,7 +51,7 @@ svg { width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.5;stro
 .task-row.selected { background:var(--theme-hover); }
 .task-row.waiting { box-shadow:inset 2px 0 var(--theme-warning); }
 .row-main { display:flex;align-items:center;gap:6px;height:28px; }
-.row-main>.pockymoe-status-mark { width:8px;height:8px;flex:none; }
+.row-main>.pockymoe-status-mark { width:10px;height:10px;flex:none; }
 .row-title { min-width:0;flex:0 1 auto;font-size:12px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis; }
 .row-meta { flex:0 0 auto;color:var(--theme-muted);font-size:11px;max-width:58px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums; }
 .row-actions { display:none;align-items:center;gap:0;flex:none; }
@@ -75,7 +75,7 @@ button.primary { background:var(--theme-accent-solid);color:var(--accent-fg); }
 .bubble.sticky { padding:8px 10px; }
 .bubble-line { height:27px;max-width:279px;display:flex;align-items:center;gap:6px;padding:0 10px; }
 .bubble.sticky .bubble-line { height:28px;padding:0;max-width:259px; }
-.bubble-line>.pockymoe-status-mark { width:8px;height:8px;flex:none; }
+.bubble-line>.pockymoe-status-mark { width:10px;height:10px;flex:none; }
 .bubble-title { min-width:0;flex:0 1 auto;display:flex;justify-content:flex-start;font-weight:500;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:12px;height:28px; }
 .bubble-device { flex:none;color:var(--theme-muted);font-size:11px;max-width:72px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis; }
 .bubble .decisions button { width:24px;height:24px; }
@@ -104,7 +104,7 @@ hr { border:0;border-top:1px solid var(--theme-border);margin:4px; }
 .running-list .task-list { display:flex;flex-direction:column;gap:2px;max-height:none;padding:0; }
 .running-list .scroll-frame { max-height:none; }
 .running-row { display:flex;justify-content:flex-start;align-items:center;gap:6px;width:100%;max-width:279px;height:28px;padding:0 10px;text-align:left;font-size:12px;border-radius:var(--pet-radius); }
-.running-row>.pockymoe-status-mark { width:8px;height:8px;flex:none; }
+.running-row>.pockymoe-status-mark { width:10px;height:10px;flex:none; }
 .running-title { display:flex;min-width:0;flex:0 1 auto;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis; }
 .running-device { flex:none;max-width:72px;color:var(--theme-muted);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis; }
 .running-more { height:22px;width:100%;justify-content:flex-start;padding:0 10px;font-size:11px;color:var(--theme-muted); }

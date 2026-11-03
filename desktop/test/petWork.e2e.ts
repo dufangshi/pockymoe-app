@@ -475,7 +475,7 @@ test('compact surfaces: four 28px rows keep metadata adjacent and open the remai
     const rect = (s: string) => document.querySelector(s)!.getBoundingClientRect().toJSON();
     return { root: rect('#app'), row: rect('.running-row'), title: rect('.running-title'), device: rect('.running-device'), more: rect('.running-more'), control: rect('.controls button'), status: rect('.running-row .pockymoe-status-mark') };
   });
-  expect(measured.root.width).toBeLessThanOrEqual(280); expect(measured.row.height).toBe(28); expect(measured.more.height).toBe(22); expect(measured.control.height).toBe(28); expect(measured.status.width).toBe(8);
+  expect(measured.root.width).toBeLessThanOrEqual(280); expect(measured.row.height).toBe(28); expect(measured.more.height).toBe(22); expect(measured.control.height).toBe(28); expect(measured.status.width).toBe(10);
   expect(measured.device.x - measured.title.right).toBeLessThanOrEqual(6.5);
   await glass.locator('.running-more').click();
   await expect(glass.locator('.task-row')).toHaveCount(6);
@@ -592,4 +592,59 @@ test('compact surfaces: native Windows CI acrylic contrast when desktop capture 
     await writeFile(join(evidence, 'pet-native-acrylic-contrast.json'), JSON.stringify({ kind: 'Native Windows composited desktop background, CSS foreground colors', status: unavailable || measurements.length !== 12 ? 'unverified' : 'measured', reason: unavailable, measurements }, null, 2));
   }
   test.skip(!!unavailable, unavailable);
+});
+
+test('review: compact statuses retain the running ring and waiting bubble at 10px', async () => {
+  await baseline(); await settings({ petEdgeHide: false }); await sync([item()]);
+  const sprite = await pet('sprite'), glass = await pet('glass');
+  const act = (value: unknown) => sprite.evaluate(value => (window as unknown as { rcDesktop: { pet: { action(value: unknown): Promise<unknown> } } }).rcDesktop.pet.action(value), value);
+  await act({ type: 'click' });
+  const running = glass.locator('.running-row .pockymoe-status-mark[data-status="running"]');
+  await expect(running).toHaveCSS('width', '10px'); await expect(running.locator('circle')).toHaveCount(2); await expect(running.locator('.status-mark-orbit')).toHaveCount(1);
+  await act({ type: 'close' });
+  await sync([item({ state: 'needsInput', request: { id: 'review-mark', kind: 'approval', summary: 'Review the result' } })]);
+  const waiting = glass.locator('.bubble-line .pockymoe-status-mark[data-status="waiting"]');
+  await expect(waiting).toHaveCSS('width', '10px'); await expect(waiting.locator('path')).toHaveCount(1); await expect(waiting.locator('circle')).toHaveCount(0);
+  await expect(waiting).toHaveAttribute('aria-label', 'Waiting for you');
+});
+
+test('clips: slender side peeks crop the body and hit only the visible head', async () => {
+  test.skip(!clipPack, 'POCKYMOE_CLIP_PACK is not set');
+  const manifest = JSON.parse(readFileSync(join(clipPack!, 'pet.json'), 'utf8')) as { remoteCodex?: { faceBox?: number[] } };
+  const face = manifest.remoteCodex?.faceBox;
+  test.skip(!face || face[3]! - face[1]! >= .28, 'Requires a slender pack face box');
+  await settings({ petId: clipPackId(), petEdgeHide: true }); await baseline();
+  const sprite = await pet('sprite');
+  await expect(sprite.locator('#character')).toHaveClass(/clips/);
+  await app.evaluate(({ BrowserWindow, screen }) => {
+    screen.getCursorScreenPoint = () => ({ x: -10000, y: -10000 });
+    const w = BrowserWindow.getAllWindows().find(w => w.webContents.getURL().includes('pet/index.html') && !w.getParentWindow())!;
+    const original = w.setIgnoreMouseEvents.bind(w);
+    Object.assign(globalThis, { reviewIgnored: true });
+    w.setIgnoreMouseEvents = (value, options) => { Object.assign(globalThis, { reviewIgnored: value }); original(value, options); };
+  });
+  const ignored = () => app.evaluate(() => (globalThis as unknown as { reviewIgnored: boolean }).reviewIgnored);
+  const act = (value: unknown) => sprite.evaluate(value => (window as unknown as { rcDesktop: { pet: { action(value: unknown): Promise<unknown> } } }).rcDesktop.pet.action(value), value);
+  for (const edge of ['left', 'right'] as const) {
+    const { bounds, area } = await app.evaluate(({ BrowserWindow, screen }) => ({ bounds: BrowserWindow.getAllWindows().find(w => w.webContents.getURL().includes('pet/index.html') && !w.getParentWindow())!.getBounds(), area: screen.getPrimaryDisplay().workArea }));
+    // Stay inside this display: overshooting can legitimately select a neighboring monitor.
+    const x = edge === 'left' ? area.x : area.x + area.width - bounds.width, y = area.y + 120;
+    await act({ type: 'dragStart', x: bounds.x, y: bounds.y }); await act({ type: 'dragMove', x, y }); await act({ type: 'dragEnd', x, y });
+    await expect(sprite.locator('#app')).toHaveAttribute('data-edge', edge); await expect(sprite.locator('#app')).toHaveAttribute('data-dock-amount', '1');
+    // Wait for the existing slide to settle before measuring painted pixels.
+    await sprite.waitForTimeout(250);
+    const transform = await sprite.locator('#character').evaluate(e => new DOMMatrix(getComputedStyle(e).transform).b);
+    expect(edge === 'left' ? transform : -transform).toBeGreaterThan(.2);
+    const png = PNG.sync.read(await sprite.screenshot({ omitBackground: true, scale: 'css' }));
+    const opaque: { x: number; y: number }[] = []; let belowHead = 0;
+    for (let y = 0; y < png.height; y++) for (let x = 0; x < png.width; x++) if (png.data[(y * png.width + x) * 4 + 3]! > 200) { opaque.push({ x, y }); if (y > png.height / 2) belowHead++; }
+    expect(opaque.length).toBeGreaterThan(30); expect(belowHead).toBe(0);
+    const head = opaque[Math.floor(opaque.length / 2)]!;
+    await sprite.mouse.move(head.x + .5, head.y + .5); await expect.poll(ignored).toBe(false);
+    await sprite.mouse.move(5, png.height * .75); await expect.poll(ignored).toBe(true);
+    if (edge === 'right') {
+      await sprite.mouse.click(head.x + .5, head.y + .5);
+      await expect(sprite.locator('#app')).toHaveAttribute('data-mood', 'poked');
+    }
+  }
 });

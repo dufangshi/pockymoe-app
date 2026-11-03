@@ -44,16 +44,31 @@ export function petLayout(position: PetPosition, area: Rect, height: number, opt
   const width = Math.round(height * 192 / 208);
   const window = clampRect({ x: Math.round(position.x), y: Math.round(position.y), width, height }, area);
   const amount = options.dockAmount ?? (options.peek ? 0 : 1);
-  const face = options.faceBox ?? DEFAULT_FACE_BOX, angle = dockTilt(position.edge, amount) * Math.PI / 180;
-  const fx = (face[0] + face[2]) / 2 * width - width / 2;
-  const fy = (face[1] + face[3]) / 2 * height - height / 2;
-  const cx = width / 2 + fx * Math.cos(angle) - fy * Math.sin(angle);
-  const cy = height / 2 + fx * Math.sin(angle) + fy * Math.cos(angle);
-  // At rest the edge bisects the face. Alerts travel farther out; hover reveals all.
-  const x = position.edge === 'left' ? -cx * amount : position.edge === 'right' ? (width - cx) * amount : 0;
+  const pose = dockedPose(width, height, position.edge, amount, options.faceBox);
+  return { window, pet: { x: pose.x, y: pose.y, width, height }, ...pose, panelAbove: window.y - area.y >= area.y + area.height - window.y - height, panelHeight: Math.min(258, area.height - 16) };
+}
+/** Render and hover geometry share one transform, including a slender pack's neck pivot. */
+export function dockedPose(width: number, height: number, edge: DockEdge | null, amount: number, face: FaceBox = DEFAULT_FACE_BOX) {
+  const headOnly = amount > 0 && (edge === 'left' || edge === 'right') && face[3] - face[1] < .28;
+  const faceX = (face[0] + face[2]) / 2 * width, faceY = (face[1] + face[3]) / 2 * height;
+  const pivot = headOnly ? { x: faceX, y: Math.min(1, face[3] + (face[3] - face[1]) * .35) * height } : { x: width / 2, y: height / 2 };
+  const angle = dockTilt(edge, amount) * Math.PI / 180;
+  const rotate = (x: number, y: number) => ({ x: pivot.x + (x - pivot.x) * Math.cos(angle) - (y - pivot.y) * Math.sin(angle), y: pivot.y + (x - pivot.x) * Math.sin(angle) + (y - pivot.y) * Math.cos(angle) });
+  const center = rotate(faceX, faceY);
+  const x = edge === 'left' ? -center.x * amount : edge === 'right' ? (width - center.x) * amount : 0;
   const eyes = (face[1] + (face[3] - face[1]) * .6) * height;
-  const y = position.edge === 'top' ? -cy * amount : position.edge === 'bottom' ? (height - eyes) * amount : 0;
-  return { window, pet: { x, y, width, height }, panelAbove: window.y - area.y >= area.y + area.height - window.y - height, panelHeight: Math.min(258, area.height - 16) };
+  // Hold the face at its undocked screen height while it leans around the neck.
+  const y = headOnly ? faceY - center.y : edge === 'top' ? -center.y * amount : edge === 'bottom' ? (height - eyes) * amount : 0;
+  const fw = face[2] - face[0], fh = face[3] - face[1];
+  const left = Math.max(0, face[0] - fw * .65) * width, right = Math.min(1, face[2] + fw * .65) * width;
+  const top = Math.max(0, face[1] - fh * 1.4) * height, bottom = Math.min(1, face[3] + fh * .45) * height;
+  // Side peeks show hair, face and neck, never a vertical strip of a long skirt.
+  const clip: Rect | null = headOnly ? { x: left, y: top, width: right - left, height: bottom - top } : null;
+  const source = clip ?? { x: 0, y: 0, width, height };
+  const corners = [[source.x, source.y], [source.x + source.width, source.y], [source.x, source.y + source.height], [source.x + source.width, source.y + source.height]].map(([x, y]) => rotate(x, y));
+  const x0 = Math.max(0, Math.min(...corners.map(p => p.x + x))), x1 = Math.min(width, Math.max(...corners.map(p => p.x + x)));
+  const y0 = Math.max(0, Math.min(...corners.map(p => p.y + y))), y1 = Math.min(height, Math.max(...corners.map(p => p.y + y)));
+  return { x, y, pivot, clip, visible: { x: x0, y: y0, width: Math.max(0, x1 - x0), height: Math.max(0, y1 - y0) } };
 }
 /** The strip of a tucked pet still on screen; hovering only this brings it out. */
 export function exposedRect(window: Rect, edge: DockEdge, visible = .25): Rect {
