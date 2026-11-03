@@ -115,6 +115,35 @@ describe('API keys', () => {
     expect(keys.get('https://b.example')).toBeNull(); expect(keys.has('https://b.example')).toBe(false);
     keys.clear('https://a.example'); expect(new VoiceKeys(path, crypto).has('https://a.example')).toBe(false);
   });
+  it('shows a denied saved key as unavailable without prompting repeatedly or erasing ciphertext', () => {
+    const path = join(temp(), 'keys.json');
+    new VoiceKeys(path, crypto).set('https://a.example', 'fixture-key');
+    const original = readFileSync(path);
+    let calls = 0;
+    const keys = new VoiceKeys(path, { ...crypto, decryptString: () => { calls++; throw new Error('Keychain denied'); } });
+    expect(keys.has('https://a.example')).toBe(true);
+    for (let i = 0; i < 5; i++) expect(keys.get('https://a.example')).toBeNull();
+    expect(calls).toBe(1); expect(keys.has('https://a.example')).toBe(false);
+    expect(readFileSync(path)).toEqual(original);
+  });
+  it('allows explicit key re-entry after denial and retries existing ciphertext on a later launch', () => {
+    const path = join(temp(), 'keys.json');
+    new VoiceKeys(path, crypto).set('https://a.example', 'old-fixture-key');
+    let denied = true;
+    const keys = new VoiceKeys(path, { ...crypto, decryptString: value => { if (denied) throw new Error('denied'); return crypto.decryptString(value); } });
+    expect(keys.get('https://a.example')).toBeNull(); expect(keys.has('https://a.example')).toBe(false);
+    expect(new VoiceKeys(path, crypto).get('https://a.example')).toBe('old-fixture-key');
+    denied = false; keys.set('https://a.example', 'new-fixture-key');
+    expect(keys.has('https://a.example')).toBe(true); expect(keys.get('https://a.example')).toBe('new-fixture-key');
+  });
+  it('keeps an unavailable encryption backend passive until explicit re-entry', () => {
+    const path = join(temp(), 'keys.json'); new VoiceKeys(path, crypto).set('https://a.example', 'fixture-key');
+    let availabilityChecks = 0;
+    const keys = new VoiceKeys(path, { ...crypto, isEncryptionAvailable: () => { availabilityChecks++; return false; } });
+    expect(keys.get('https://a.example')).toBeNull(); expect(keys.get('https://a.example')).toBeNull();
+    expect(keys.has('https://a.example')).toBe(false); expect(availabilityChecks).toBe(1);
+    expect(new VoiceKeys(path, crypto).get('https://a.example')).toBe('fixture-key');
+  });
   it('refuses to store a key without a keychain', () => {
     const keys = new VoiceKeys(join(temp(), 'keys.json'), { ...crypto, isEncryptionAvailable: () => false });
     expect(() => keys.set('https://a.example', 'k')).toThrow('keychainUnavailable');
