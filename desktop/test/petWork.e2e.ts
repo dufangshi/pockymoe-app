@@ -22,7 +22,7 @@ function wav(): Buffer {
   b.write('RIFF', 0); b.writeUInt32LE(36 + n * 2, 4); b.write('WAVEfmt ', 8); b.writeUInt32LE(16, 16); b.writeUInt16LE(1, 20); b.writeUInt16LE(1, 22); b.writeUInt32LE(24000, 24); b.writeUInt32LE(48000, 28); b.writeUInt16LE(2, 32); b.writeUInt16LE(16, 34); b.write('data', 36); b.writeUInt32LE(n * 2, 40);
   return b;
 }
-const FIXTURE = `<!doctype html><meta charset="utf-8"><title>Fixture</title><script>window.commands=[];window.fixtureReady=false;const installFixture=()=>{window.pockymoeHost?.onCommand(command=>{window.commands.push(command);
+const FIXTURE = `<!doctype html><meta charset="utf-8"><title>Fixture</title><script>window.commands=[];window.fixtureReady=false;const installFixture=window.installFixture=()=>{window.stopFixture?.();window.stopFixture=window.pockymoeHost?.onCommand(command=>{window.commands.push(command);
   const data=command.type==='turnText'?{request:'修一下登录白屏',answer:'白屏已修好，原因是回调读取了未加载的用户信息。'}:command.type==='listConnections'?[{deviceId:'old',deviceName:'wsl',id:'c2',name:'Older',protocol:'openai_chat',model:'small',supervisorVersion:'0.13.41',needsUpdate:true},{deviceId:'mac',deviceName:'MacBook',id:'c1',name:'Main',protocol:'openai_chat',model:'small',supervisorVersion:'0.13.43',needsUpdate:false}]:command.type==='listMuteTargets'?{devices:[{id:'mac',label:'MacBook Pro'},{id:'pc',label:'Windows PC'}],workspaces:[{id:'mac:rc',label:'remoteCodex · MacBook Pro'}],threads:[{id:'mac:thread-1',label:'修复登录状态同步 · remoteCodex'}]}:command.type==='connectionModels'?[{id:'small',name:'Small model'},{id:'large',name:'Large model'}]:command.type==='completeWithConnection'?{text:'连接总结：白屏修好了。'}:undefined;
   if(command.type==='connectionModels'&&window.failModels){window.pockymoeHost.commandResult(command.id,{ok:false,error:'upstream refused'});return;}
   if(command.type==='completeWithConnection'&&command.connectionId==='c2'){window.pockymoeHost.commandResult(command.id,{ok:false,code:'supervisorTooOld',error:'x'});return;}
@@ -145,20 +145,21 @@ test('working: the pet shows work while a thread runs', async () => {
 const speaker = { petVoice: true, petVoiceProvider: 'compatible' as const, petVoiceSpeed: 1, petVoiceSummary: true, petSummaryLanguage: 'zh-CN' as const };
 const remoteVoice = (): Partial<DesktopSettings> => ({ ...speaker, petVoiceRemotes: { compatible: { url: `${origin}/v1`, model: 't', voice: '', style: '', extra: '' } } });
 const openPreferences = async (): Promise<Page> => {
+  // fixtureReady is only a renderer flag: a late main navigation reset can clear
+  // Windows.ready after the inline listener registered. Re-register idempotently
+  // after load, then roundtrip the same-frame IPC before discovery can queue.
+  await page.evaluate(async () => { (window as unknown as { installFixture(): void }).installFixture(); await window.pockymoeHost!.capabilities(); });
   await app.evaluate(() => (globalThis as unknown as { __pockymoeDesktopTest: Testing }).__pockymoeDesktopTest.windows.createLocal('preferences'));
   await expect.poll(() => app.windows().some(window => window.url().includes('preferences'))).toBe(true);
   const preferences = app.windows().find(window => window.url().includes('preferences'))!;
   await preferences.locator('[data-section="pet"]').click();
   // Discovery starts when this section mounts. Open its pickers only after their
   // data arrives; an open picker deliberately defers replacing its options.
-  await preferences.evaluate(() => new Promise<void>(resolve => {
+  await expect.poll(() => preferences.evaluate(async () => {
     const bridge = (window as unknown as { pockymoeDesktop: import('../src/shared/local').LocalBridge }).pockymoeDesktop;
-    const ready = (state: import('../src/shared/local').LocalState): boolean => !!state.summary.muteTargets && (!state.settings.petVoiceSummary || state.summary.connections.length > 0);
-    // Await the data broadcasts produced by the UI's actual requests. A separate
-    // five-second polling deadline can expire before the query's own IPC deadline.
-    const stop = bridge.onState(state => { if (ready(state)) { stop(); resolve(); } });
-    void bridge.getState().then(state => { if (ready(state)) { stop(); resolve(); } });
-  }));
+    const state = await bridge.getState();
+    return { muteTargets: !!state.summary.muteTargets, connections: !state.settings.petVoiceSummary || state.summary.connections.length > 0 };
+  }), { timeout: 20_000, message: 'Fixture discovery must answer after the command-ready handshake' }).toEqual({ muteTargets: true, connections: true });
   return preferences;
 };
 test('summary: picks a saved upstream and its model, and reads what the model said', async () => {
@@ -272,6 +273,18 @@ test('silencing: the activity panel can silence a conversation', async () => {
   await expect(toggle).toHaveAttribute('aria-pressed', 'true');
   await glass.locator('[data-action="toggleMute"]').first().evaluate(element => (element as HTMLElement).click());
   await expect(glass.locator('[data-action="toggleMute"]').first()).toHaveAttribute('aria-pressed', 'false');
+});
+test('preferences discovery reannounces fixture readiness after a late navigation reset', async () => {
+  await settings(remoteVoice());
+  await app.evaluate(({ BrowserWindow }) => {
+    const relay = BrowserWindow.getAllWindows().find(w => !w.webContents.getURL().includes('pet/index.html'))!;
+    // Reproduce the host-side reset without destroying the loaded fixture listener.
+    relay.webContents.emit('did-start-navigation', {}, relay.webContents.getURL(), false, true);
+  });
+  const preferences = await openPreferences();
+  await expect(preferences.locator('#summary-source')).toBeVisible();
+  await preferences.locator('#summary-source').click();
+  await expect(preferences.getByRole('option', { name: 'Main · MacBook' })).toBeVisible();
 });
 test('a summary that works is not reported as failed when the voice cannot read it', async () => {
   await settings({ petVoice: true, petVoiceProvider: 'compatible', petVoiceRemotes: { compatible: { url: 'http://127.0.0.1:9/v1', model: 't', voice: '', style: '', extra: '' } }, petVoiceSummary: true, petSummaryConnection: { deviceId: 'mac', id: 'c1', name: 'Main · MacBook', model: '' } });

@@ -201,7 +201,7 @@ describe('local model', () => {
     expect(model.state).toBe('ready'); expect(states).toContain('extracting'); expect(readFileSync(join(model.path, 'model.int8.onnx'), 'utf8')).toBe('weights');
     expect(new LocalModel(dir, async () => new Response(), () => undefined, source).state).toBe('ready');
     await model.remove(); expect(model.state).toBe('absent'); expect(existsSync(model.path)).toBe(false);
-  });
+  }, 15_000); // Windows runner tar/antivirus can exceed the default five seconds.
   it('resumes a partial download with a range request', async () => {
     const { bytes, source } = fixture(), dir = temp();
     mkdirSync(dir, { recursive: true }); writeFileSync(join(dir, `${source.name}.tar.bz2.partial`), bytes.subarray(0, 10));

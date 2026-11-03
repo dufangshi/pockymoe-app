@@ -84,7 +84,7 @@ it('counts conversations in a completion burst rather than each agent event', ()
   expect(notices[0].options.subtitle).toBe('MacBook Pro · remoteCodex · 🤖 3');
   expect(String(notices[0].options.body).split('MacBook Pro')).toHaveLength(2);
   expect(String(notices[0].options.title)).toContain('3 个子线程'); notifications.dispose();
-});
+}, 15_000); // Shared Windows runners occasionally stall even this fake-timer check.
 
 it('refreshes already delivered notification actions in the page language with the same ID', () => {
   const hub = connected(new ActivityHub()), dispatch = vi.fn().mockResolvedValue({ ok: true });
