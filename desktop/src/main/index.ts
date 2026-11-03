@@ -1,3 +1,4 @@
+import { recoverUpdateStartup } from './updateRecovery';
 import { hasConnection } from './store';
 import { t, getLocale, setLocale } from '../shared/i18n';
 import { app, BrowserWindow, dialog, globalShortcut, ipcMain, nativeTheme, Notification, session, shell, type IpcMainEvent, type IpcMainInvokeEvent } from 'electron';
@@ -26,8 +27,14 @@ import { PetCatalog } from './petCatalog';
 import { VoiceService } from './voice';
 
 declare const __UPDATER_TEST_BUILD__: boolean;
+async function bootstrap(): Promise<void> {
 app.setName('Pockymoe');
 app.setPath('userData', process.env.POCKYMOE_DESKTOP_USER_DATA || join(app.getPath('appData'), 'Pockymoe'));
+const recovered = await recoverUpdateStartup({ platform: process.platform, execPath: process.execPath, userData: app.getPath('userData') });
+if (recovered.restoredFromBackup && recovered.appPath) {
+  app.relaunch({ execPath: join(recovered.appPath, 'Contents/MacOS/Pockymoe'), args: process.argv.slice(1) });
+  app.exit(0); return;
+}
 // Only migrate the old JSON settings, never inspect or copy credentials/keys.
 const settingsPath = join(app.getPath('userData'), 'settings.json');
 const oldSettingsPath = join(app.getPath('appData'), 'Remote Codex', 'settings.json');
@@ -44,6 +51,7 @@ else {
   const deepLinks: string[] = [];
   app.on('open-url', (event, url) => { event.preventDefault(); if (windows) openLink(url); else deepLinks.push(url); });
   app.on('second-instance', (_event, argv) => {
+    if (windows?.closingForUpdate) return;
     const links = argv.filter(arg => /^(pockymoe|remotecodex):/.test(arg));
     const remaining = links.filter(url => !activateToast?.(url));
     if (links.length && !remaining.length) return;
@@ -71,6 +79,7 @@ else {
     let preferencesRequestId = 0;
     let preferencesSection: LocalState['preferencesSection'] = 'general';
     const openPreferences = (section?: LocalState['preferencesSection']): void => {
+      if (manager.closingForUpdate) return;
       preferencesRequestId++;
       preferencesSection = section || 'general';
       manager.createLocal('preferences'); broadcast();
@@ -88,11 +97,13 @@ else {
     session.defaultSession.protocol.handle('pockymoe-pet', request => petCatalog.asset(request.url));
     const petModules = import.meta.glob('../pet/controller.ts', { eager: true }) as Record<string, { createPetController(deps: PetControllerDeps): PetController }>;
     const petModule = Object.values(petModules)[0];
-    if (petModule) {
-      try { pet = petModule.createPetController({ hub, settings, dispatch: command => manager.dispatch(command as CommandInput), openPreferences, mainFocused: () => manager.mainFocused(), lowerMain: () => manager.lowerMain(), speak: text => voice.speak(text), summarize: event => voice.summarize(event), shouldSpeak: event => notifications.shouldSpeak(event), petDirectories, appearance: appearance.get, onAppearance: appearance.onChange }); }
+    const startPet = (): void => {
+      if (!petModule || pet?.isAvailable()) return;
+      try { pet = petModule.createPetController({ hub, settings, isUpdating: () => manager.closingForUpdate, dispatch: command => manager.dispatch(command as CommandInput), openPreferences, mainFocused: () => manager.mainFocused(), lowerMain: () => manager.lowerMain(), speak: text => voice.speak(text), summarize: event => voice.summarize(event), shouldSpeak: event => notifications.shouldSpeak(event), petDirectories, appearance: appearance.get, onAppearance: appearance.onChange }); }
       catch { /* Shell remains usable if a pet pack cannot load. */ }
-    }
-    const updates = createUpdates(() => hasConnection(settings.get()));
+    };
+    startPet();
+    const updates = createUpdates(() => hasConnection(settings.get()), { close: () => manager.closeForUpdate(), restore: async () => { await manager.restoreAfterUpdate(); startPet(); } });
     const tray = new DesktopTray(hub, settings, manager);
     tray.setUpdates(updates.state, () => { void updates.install(); });
     updates.onChange(state => {
@@ -307,7 +318,7 @@ else {
     }
     for (const url of [...deepLinks, ...process.argv.filter(a => /^(pockymoe|remotecodex):/.test(a))]) openLink(url);
     if (process.env.POCKYMOE_DESKTOP_E2E !== '1') { configureUpdates(() => hasConnection(settings.get())); void registerApns(settings, manager); }
-    app.on('activate', () => { if (manager.quitting) return; if (manager.relay.size) manager.focusMain(); else manager.createLocal('relay'); });
+    app.on('activate', () => { if (manager.quitting || manager.closingForUpdate) return; if (manager.relay.size) manager.focusMain(); else manager.createLocal('relay'); });
     app.on('before-quit', () => { manager.quitting = true; messages.dispose(); manager.dispose(); notifications.dispose(); voice.dispose(); pet?.dispose(); tray.dispose(); hub.dispose(); globalShortcut.unregisterAll(); });
     if (process.env.POCKYMOE_DESKTOP_E2E === '1') Object.assign(globalThis, { __pockymoeDesktopTest: { hub, settings, appearance, windows: manager, tray, notifications, capabilities, showMessageBox, messages, ...(__UPDATER_TEST_BUILD__ ? { updates } : {}) } });
   }).catch(error => {
@@ -316,3 +327,6 @@ else {
     app.quit();
   });
 }
+
+}
+void bootstrap().catch(() => { app.quit(); });

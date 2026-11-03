@@ -230,7 +230,7 @@ async function roundtrip() {
     }
     if (request.url === '/healthz') { response.setHeader('Content-Type', 'application/json'); response.end('{"status":"ok"}'); return; }
     response.setHeader('Content-Type', 'text/html');
-    response.end('<!doctype html><html><head><title>Pockymoe updater fixture</title></head><body><h1>Disposable updater fixture</h1></body></html>');
+    response.end('<!doctype html><html><head><title>Pockymoe updater fixture</title></head><body><h1>Disposable updater fixture</h1><script>window.pockymoeHost?.onCommand(c=>window.pockymoeHost.commandResult(c.id,{ok:true,data:{prepared:true}}))</script></body></html>');
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;

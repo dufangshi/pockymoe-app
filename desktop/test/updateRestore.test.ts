@@ -57,3 +57,14 @@ it('rechecks a restored artifact at the install boundary', async () => {
   await updates.install(); expect(install).not.toHaveBeenCalled();
   expect(updates.state()).toMatchObject({ status: 'error', error: 'Fixture installation failed' });
 });
+
+it('reports an incomplete Windows attempt only beside authenticated ready metadata', async () => {
+  await saved(); await writeFile(join(directory, 'install-attempt.json'), JSON.stringify({ currentVersion: '1.2.2', targetVersion: '1.2.3' }));
+  const { updates } = service(); await updates.settled(); expect(updates.state()).toMatchObject({ status: 'error', version: '1.2.3' });
+});
+it('deletes the used installer and attempt marker when its version is running', async () => {
+  await saved(); await writeFile(join(directory, 'install-attempt.json'), JSON.stringify({ currentVersion: '1.2.2', targetVersion: '1.2.3' }));
+  const updates = new UpdateService({ version: '1.2.3', platform: 'win32-x64', publicKey: key, directory, fetch: vi.fn(), install: vi.fn(), feed: 'https://fixture.invalid/latest', allowed: () => true, openExternal: vi.fn() });
+  services.push(updates); await updates.settled(); expect(updates.state()).toEqual({ status: 'idle' });
+  await expect(readFile(join(directory, entry().fileName))).rejects.toThrow(); await expect(readFile(join(directory, 'install-attempt.json'))).rejects.toThrow();
+});

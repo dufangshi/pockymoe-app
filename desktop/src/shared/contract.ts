@@ -105,6 +105,7 @@ export type HostCommand =
   | { id: string; type: 'reply'; deviceId: string; threadId: string; text: string }
   | { id: string; type: 'revealInMap'; key: string }
   | { id: string; type: 'openMap' }
+  | { id: string; type: 'prepareUpdate'; cancel?: boolean }
   | { id: string; type: 'newThread' }
   | { id: string; type: 'openDevices' }
   /** Text of a finished turn, for spoken summaries. Answers in `data`. */
@@ -187,6 +188,7 @@ export interface UpdateState {
   version?: string;
   error?: string;
   releaseUrl?: string;
+  retryAllowed?: boolean;
 }
 
 export interface PockymoeHost {
@@ -258,6 +260,7 @@ export type PetMood =
 /** Implemented by desktop/src/pet/controller.ts; created and owned by the main process. */
 export interface PetControllerDeps {
   hub: ActivityHubLike;
+  isUpdating?(): boolean;
   settings: SettingsStoreLike;
   /** Run a command in the relay page; only commands that show something raise the main window. */
   dispatch(command: Omit<HostCommand, 'id'>): Promise<HostCommandResult>;

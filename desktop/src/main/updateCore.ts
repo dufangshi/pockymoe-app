@@ -48,9 +48,10 @@ export interface UpdateDependencies {
   install: (file: string, entry: SignedUpdate) => Promise<void>;
   openExternal: (url: string) => Promise<unknown>;
   testBuild?: boolean;
-  failureMessage?: () => string;
+  failureMessage?: (reason?: unknown) => string;
+  now?: () => number;
 }
-export type CheckResult = 'latest' | 'downloading' | 'ready' | 'manual' | 'failed';
+export type CheckResult = 'latest' | 'downloading' | 'ready' | 'unverified' | 'failed';
 export class UpdateService {
   private current: UpdateState = { status: 'idle' };
   private listeners = new Set<(state: UpdateState) => void>();
@@ -60,27 +61,70 @@ export class UpdateService {
   private download: Promise<void> | null = null;
   private ready: { file: string; entry: SignedUpdate; releaseUrl: string } | null = null;
   private stopped = false;
+  private unverifiedVersion = '';
+  private installFailures = new Map<string, number>();
+  private retry = { lastCheckAt: 0, versions: {} as Record<string, { failures: number; retryAfter: number }> };
+  private now = (): number => this.deps.now?.() ?? Date.now();
+  unverified = (): string => this.unverifiedVersion;
+  private async saveRetry(): Promise<void> {
+    await mkdir(this.deps.directory, { recursive: true, mode: 0o700 });
+    const path = join(this.deps.directory, '.retry.json');
+    await writeFile(path + '.tmp', JSON.stringify(this.retry), { mode: 0o600 });
+    await rename(path + '.tmp', path);
+  }
+  private async loadRetry(): Promise<void> {
+    try {
+      const saved = JSON.parse(await readFile(join(this.deps.directory, '.retry.json'), 'utf8'));
+      const now = this.now();
+      if (Number.isFinite(saved.lastCheckAt)) this.retry.lastCheckAt = Math.max(0, Math.min(now, saved.lastCheckAt));
+      for (const [version, value] of Object.entries(saved.versions || {}).slice(-64)) {
+        const item = value as { failures: number; retryAfter: number };
+        if (parseVersion(version) && isNewerVersion(version, this.deps.version) && Number.isInteger(item.failures) && item.failures > 0 && Number.isFinite(item.retryAfter)) {
+          this.retry.versions[version] = { failures: Math.min(item.failures, 20), retryAfter: Math.max(0, Math.min(now + 24 * 3600_000, item.retryAfter)) };
+        }
+      }
+    } catch { /* Missing/truncated policy never authenticates an installer. */ }
+  }
+  private async beginDownload(version: string): Promise<void> {
+    const failures = (this.retry.versions[version]?.failures || 0) + 1;
+    this.retry.versions[version] = { failures, retryAfter: this.now() + Math.min(24, 2 ** Math.min(failures - 1, 5)) * 3600_000 };
+    // Persist before I/O: a killed process also leaves a bounded retry deadline.
+    await this.saveRetry();
+  }
   private abort?: AbortController;
   private restoring: Promise<void>;
-  constructor(private deps: UpdateDependencies) { this.restoring = this.restore().catch(() => undefined); }
+  constructor(private deps: UpdateDependencies) { this.restoring = (async () => { await this.loadRetry(); await this.restore().catch(() => undefined); })(); }
   private async restore(): Promise<void> {
     const { directory, platform, publicKey, version } = this.deps;
     const saved = JSON.parse(await readFile(join(directory, '.ready.json'), 'utf8')) as SignedUpdate;
-    if (!isNewerVersion(saved.version, version) || !signedUpdate(`<!-- pockymoe-updates-v1\n${JSON.stringify([saved])}\n-->`, saved.version, platform, publicKey)) return;
+    if (!signedUpdate(`<!-- pockymoe-updates-v1\n${JSON.stringify([saved])}\n-->`, saved.version, platform, publicKey)) return;
+    if (!isNewerVersion(saved.version, version)) {
+      // Authenticate the flat filename before removing an already-installed payload.
+      try { await rm(join(directory, saved.fileName), { force: true }); } catch { return; }
+      for (const name of ['.ready.json', 'install-attempt.json', 'install-failed']) await rm(join(directory, name), { force: true }).catch(() => undefined);
+      return;
+    }
     const file = join(directory, saved.fileName); await verifyFile(file, saved);
     this.ready = { file, entry: saved, releaseUrl: `https://github.com/dufangshi/pockymoe-app/releases/tag/v${saved.version}` };
     const failed = await readFile(join(directory, 'install-failed'), 'utf8').then(() => true, () => false);
-    this.set({ status: failed ? 'error' : 'ready', version: saved.version, releaseUrl: `https://github.com/dufangshi/pockymoe-app/releases/tag/v${saved.version}`, ...(failed ? { error: this.deps.failureMessage?.() || 'Installation failed; previous version restored' } : {}) });
+    const previous = await readFile(join(directory, 'install-attempt.json'), 'utf8').then(text => { const marker = JSON.parse(text); return marker.currentVersion === version && marker.targetVersion === saved.version; }).catch(() => false);
+    this.set({ status: failed || previous ? 'error' : 'ready', version: saved.version, releaseUrl: `https://github.com/dufangshi/pockymoe-app/releases/tag/v${saved.version}`, ...(failed || previous ? { error: this.deps.failureMessage?.(previous ? 'previousAttempt' : undefined) || 'Installation failed; previous version restored' } : {}) });
   }
   state = (): UpdateState => ({ ...this.current });
   onChange = (listener: (state: UpdateState) => void): (() => void) => { this.listeners.add(listener); return () => this.listeners.delete(listener); };
   private set(state: UpdateState): void { this.current = state; for (const listener of this.listeners) listener(this.state()); }
-  check = (): Promise<CheckResult> => {
+  check = (source: 'manual' | 'startup' | 'timer' | 'wake' = 'manual'): Promise<CheckResult> => {
     if (this.stopped || !this.deps.allowed()) return Promise.resolve('latest');
     if (this.current.status === 'installing') return Promise.resolve('ready');
     if (this.download) return Promise.resolve('downloading');
     if (this.pending) return this.pending;
-    this.pending = this.checkRelease().catch(() => 'failed' as const).finally(() => { this.pending = null; });
+    this.pending = (async () => {
+      await this.restoring;
+      if (source === 'wake' && this.now() - this.retry.lastCheckAt < 3600_000) return this.ready ? 'ready' as const : 'latest' as const;
+      this.retry.lastCheckAt = this.now();
+      await this.saveRetry();
+      return this.checkRelease();
+    })().catch(() => 'failed' as const).finally(() => { this.pending = null; });
     return this.pending;
   };
   private async checkRelease(): Promise<CheckResult> {
@@ -107,12 +151,18 @@ export class UpdateService {
     if (this.ready && !isNewerVersion(version, this.ready.entry.version)) return 'ready';
     const releaseUrl = `https://github.com/dufangshi/pockymoe-app/releases/tag/${release.tag_name}`;
     const entry = signedUpdate(release.body || '', version, this.deps.platform, this.deps.publicKey);
-    if (!entry) { if (this.ready) return 'ready'; this.set({ status: 'idle', version, releaseUrl }); return 'manual'; }
+    if (!entry) {
+      this.unverifiedVersion = version;
+      if (!this.ready) this.set({ status: 'idle' });
+      return 'unverified';
+    }
     const assets = release.assets?.filter(asset => asset.name === entry.fileName && asset.size === entry.size) || [];
     if (assets.length !== 1) return 'failed';
     const url = new URL(assets[0].browser_download_url);
     const expected = `https://github.com/dufangshi/pockymoe-app/releases/download/${release.tag_name}/${entry.fileName}`;
     if (url.href !== expected && !(this.deps.testBuild && url.origin === new URL(this.deps.feed).origin)) return 'failed';
+    if ((this.retry.versions[version]?.retryAfter || 0) > this.now()) return 'failed';
+    await this.beginDownload(version);
     this.set({ status: 'downloading', version, releaseUrl });
     this.download = this.downloadFile(url.href, entry).catch(() => {
       // Background failures stay invisible; the next scheduled check retries.
@@ -147,27 +197,32 @@ export class UpdateService {
       if (this.stopped) throw new Error('cancelled');
       await rename(part, file);
       await writeFile(join(directory, '.ready.json'), JSON.stringify(entry), { mode: 0o600 });
+      delete this.retry.versions[entry.version];
+      await this.saveRetry();
       this.ready = { file, entry, releaseUrl: this.current.releaseUrl! };
       this.set({ status: 'ready', version: entry.version, releaseUrl: this.current.releaseUrl });
       // Only verified artifacts remain; never trust persisted ready metadata on restart.
-      for (const name of await readdir(directory)) if (![entry.fileName, '.ready.json'].includes(name)) await rm(join(directory, name), { recursive: true, force: true });
+      for (const name of await readdir(directory)) if (![entry.fileName, '.ready.json', '.retry.json', '.retry.json.tmp'].includes(name)) await rm(join(directory, name), { recursive: true, force: true }).catch(() => undefined);
     } finally { clearTimeout(timeout); this.abort = undefined; await rm(part, { force: true }); }
   }
   install = async (): Promise<void> => {
     if (!this.ready || this.current.status === 'installing') return;
     const { file, entry } = this.ready;
-    if (!isNewerVersion(entry.version, this.deps.version)) return;
+    if (!isNewerVersion(entry.version, this.deps.version) || (this.installFailures.get(entry.version) || 0) >= 3) return;
     this.set({ ...this.current, status: 'installing', error: undefined });
     try {
       await verifyFile(file, entry);
       await rm(join(this.deps.directory, 'install-failed'), { force: true });
       await this.deps.install(file, entry);
       this.set({ ...this.current, status: 'ready' });
-    } catch {
-      this.set({ ...this.current, status: 'error', error: this.deps.failureMessage?.() || 'Installation failed' });
+    } catch (error) {
+      const cancelled = !!error && typeof error === 'object' && 'code' in error && error.code === 'updateCancelled';
+      const failures = (this.installFailures.get(entry.version) || 0) + (cancelled ? 0 : 1);
+      this.installFailures.set(entry.version, failures);
+      this.set({ ...this.current, status: 'error', retryAllowed: failures < 3, error: this.deps.failureMessage?.(failures >= 3 ? 'retryLimit' : error) || 'Installation failed' });
     }
   };
-  openDownload = async (): Promise<void> => { if (this.current.releaseUrl) await this.deps.openExternal(this.current.releaseUrl); };
+  openDownload = async (): Promise<void> => { if (this.ready) await this.deps.openExternal(this.ready.releaseUrl); };
   dispose(): void { this.stopped = true; this.abort?.abort(); this.listeners.clear(); }
   // Tests can wait for actual I/O without exposing a page-controlled download API.
   async settled(): Promise<void> { await this.restoring; await this.pending; await this.download; }

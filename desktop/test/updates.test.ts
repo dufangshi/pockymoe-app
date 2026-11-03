@@ -62,10 +62,41 @@ it('uses ETag, handles 304 and never downgrades a ready update', async () => {
   expect(fetch).toHaveBeenLastCalledWith(expect.any(String), expect.objectContaining({ headers: expect.objectContaining({ 'If-None-Match': 'fixture' }) }));
   fetch.mockResolvedValueOnce(new Response(JSON.stringify(release(entry(), { tag_name: 'v0.2.9' })))); expect(await updates.check()).toBe('ready'); expect(updates.state().version).toBe('0.3.0');
 });
-it('offers manual download only for missing/bad release signatures', async () => {
-  const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify(release(entry(), { body: '' })))); const { updates } = service({ fetch }); expect(await updates.check()).toBe('manual'); expect(updates.state()).toMatchObject({ status: 'idle', version: '0.3.0' }); expect(fetch).toHaveBeenCalledOnce();
+it('does not offer missing/bad signatures through a link or icon', async () => {
+  const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify(release(entry(), { body: '' })))); const { updates } = service({ fetch }); expect(await updates.check()).toBe('unverified'); expect(updates.unverified()).toBe('0.3.0'); expect(updates.state()).toEqual({ status: 'idle' }); expect(fetch).toHaveBeenCalledOnce();
 });
 it('respects setup gating and cleans old downloads after success', async () => {
   const blocked = service({ allowed: () => false }); await blocked.updates.check(); expect(blocked.fetch).not.toHaveBeenCalled();
   await writeFile(join(directory, 'old.part'), 'old'); const { updates } = service(); await updates.check(); await updates.settled(); await expect(readFile(join(directory, 'old.part'))).rejects.toThrow();
+});
+
+it('stops a page after three failed installs of one version until relaunch', async () => {
+  const install = vi.fn().mockRejectedValue(new Error('cannot start'));
+  const { updates } = service({ install }); await updates.check(); await updates.settled();
+  for (let i = 0; i < 5; i++) await updates.install();
+  expect(install).toHaveBeenCalledTimes(3); expect(updates.state()).toMatchObject({ status: 'error', retryAllowed: false });
+  const next = service({ install: vi.fn().mockRejectedValue(new Error('cannot start')) }); await next.updates.settled();
+  await next.updates.install(); expect(next.updates.state().retryAllowed).toBe(true);
+});
+it('persists exponential download backoff and throttles wake checks across launches', async () => {
+  let now = 1_000_000_000, downloads = 0, requests = 0;
+  const fetch = vi.fn(async (url: string) => {
+    requests++;
+    if (url.endsWith('/latest')) return new Response(JSON.stringify(release()));
+    downloads++; return new Response(Buffer.alloc(bytes.length));
+  });
+  const first = service({ fetch, now: () => now }); await first.updates.check('startup'); await first.updates.settled();
+  expect(downloads).toBe(1);
+  first.updates.dispose();
+  const second = service({ fetch, now: () => now }); await second.updates.check('startup'); await second.updates.settled();
+  expect(downloads).toBe(1);
+  let count = requests; await second.updates.check('wake'); expect(requests).toBe(count);
+  for (const hours of [1, 2, 4, 8, 16, 24]) {
+    const policy = JSON.parse(await readFile(join(directory, '.retry.json'), 'utf8'));
+    expect(policy.versions['0.3.0'].retryAfter - now).toBe(hours * 3600_000);
+    now = policy.versions['0.3.0'].retryAfter + 1;
+    await second.updates.check('wake'); await second.updates.settled();
+    count = requests; await second.updates.check('wake'); expect(requests).toBe(count);
+  }
+  expect(downloads).toBe(7);
 });
