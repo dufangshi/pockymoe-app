@@ -642,7 +642,13 @@ test('clips: slender side peeks crop the body and hit only the visible head', as
     const png = PNG.sync.read(await sprite.screenshot({ omitBackground: true, scale: 'css' }));
     const opaque: { x: number; y: number }[] = []; let belowHead = 0;
     for (let y = 0; y < png.height; y++) for (let x = 0; x < png.width; x++) if (png.data[(y * png.width + x) * 4 + 3]! > 200) { opaque.push({ x, y }); if (y > png.height / 2) belowHead++; }
-    expect(opaque.length).toBeGreaterThan(30); expect(belowHead).toBe(0);
+    expect(opaque.length).toBeGreaterThan(30);
+    if (manifest.remoteCodex?.peek) {
+      // Long hair is intentionally below the face. It must end naturally inside
+      // the fixed viewport, not disappear into its bottom edge.
+      expect(Math.max(...opaque.map(p => p.y))).toBeLessThan(png.height - 4);
+      expect(Math.min(...opaque.map(p => p.y))).toBeGreaterThan(0);
+    } else expect(belowHead).toBe(0);
     const head = opaque[Math.floor(opaque.length / 2)]!;
     await sprite.mouse.move(head.x + .5, head.y + .5); await expect.poll(ignored).toBe(false);
     await sprite.mouse.move(5, png.height * .75); await expect.poll(ignored).toBe(true);

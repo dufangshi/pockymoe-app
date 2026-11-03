@@ -226,13 +226,16 @@ shown. State changes hurry the playing video toward the final rest endpoint
 within 600 ms (legacy WebP retains its nearest-end behavior).
 
 `peek` is optional. Its path is exactly `peek.png` or `peek.webp`; dimensions are
-positive integers ≤2048 and must match the image header. `anchor` is the normalized
+positive integers ≤4096 with ≤8,388,608 pixels total and must match the image header. `anchor` is the normalized
 right-source point where the half-face line crosses the screen edge (ordered
 x,y, strictly inside the image). `headHeight` is the normalized crown-to-chin
 height, .1–1; it scales to twice the face-box height. `bounds` is the normalized
 visible-art bounding box `[x0,y0,x1,y1]`, ordered in [0,1]. Keep the cropped face
 side past the anchor so it stays offscreen even in the fuller alert peek. Leave
-room for natural tapered hair tips. Left edges mirror both image and geometry.
+room for the complete gravity-hanging hair and tapered strand tips, with transparent
+margin below. `bounds` must include the hair ends: docked controls go below those
+ends (or above the head when there is insufficient space). Keep the scaled bounds
+inside the fixed pet viewport so near-bottom docking cannot cut them off. Left edges mirror both image and geometry.
 Side docking uses this head alone without rotation, at the undocked face's
 vertical anchor. Alerts slide the same head further into view. A 150 ms
 slide/fade takes the body behind the edge while the head appears; undocking

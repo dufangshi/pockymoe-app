@@ -70,6 +70,21 @@ describe('visible-head surfaces', () => {
     if(edge==='left')expect(surface.x).toBe(8);if(edge==='right')expect(surface.x).toBe(860);
     if(edge==='bottom')expect(surface.y+36).toBe(Math.round(anchor.y-6));else expect(surface.y).toBe(Math.round(anchor.y+anchor.height+6));
   });
+  for (const size of [96,128,160]) for (const edge of ['left','right'] as DockEdge[]) for (const amount of [1,.6]) it(`long hair: ${size}/${edge}/${amount} stays inside both work-area extremes and anchors below tips`, () => {
+    const height=Math.round(size*1.6),width=Math.round(height*192/208);
+    const long: PeekArt={path:'peek.png',width:2048,height:2400,anchor:[.675,.25],headHeight:730/2400,bounds:[345/2048,0,1761/2048,2220/2400]};
+    const pose=dockedPose(width,height,edge,amount,[.4,.24,.62,.36],long);
+    expect(pose.visible.y).toBeGreaterThan(0);expect(pose.visible.y+pose.visible.height).toBeLessThan(height-4);
+    const area={x:0,y:38,width:900,height:800};
+    for(const bottom of [false,true]){
+      const originY=bottom?area.y+area.height-height:area.y;
+      const anchor={...pose.visible,x:(edge==='right'?900-width:0)+pose.visible.x,y:originY+pose.visible.y};
+      expect(anchor.y).toBeGreaterThan(area.y);expect(anchor.y+anchor.height).toBeLessThan(area.y+area.height);
+      const side=anchor.y+anchor.height+6+36<=838?'below':'above';
+      const surface=surfaceLayout(anchor,area,132,36,side,edge);
+      if(side==='below')expect(surface.y).toBe(Math.round(anchor.y+anchor.height+6));else expect(surface.y+36).toBe(Math.round(anchor.y-6));
+    }
+  });
   it('rejects unsafe peek paths and nonfinite anchors', () => {
     for (const peek of [{ ...art,path:'../peek.png' },{ ...art,anchor:[NaN,.5] },{ ...art,headHeight:0 },{ ...art,bounds:[.9,0,.1,1] }]) expect(()=>parseManifest(Buffer.from(JSON.stringify({...base,remoteCodex:{peek}})))).toThrow('peek');
   });
