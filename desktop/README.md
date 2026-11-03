@@ -255,6 +255,12 @@ codesign --verify --deep --strict --verbose=2 release/mac-arm64/Pockymoe.app
 spctl -a -vv release/mac-arm64/Pockymoe.app
 ```
 
+For a separate local development-signed install, quit your existing client yourself,
+then copy `release/mac-arm64/Pockymoe.app` into Applications in Finder. Packaging
+and tests never perform that copy. Keep the development identity consistent for
+local testing. Its identity differs from the public Pockymoe certificate, so the
+update icon opens the release page instead of replacing this development copy.
+
 Hardened runtime remains enabled. `build/entitlements.mac.plist` grants Electron's
 JIT/executable-memory requirements and deliberately has **no APNs entitlement**
 or provisioning profile. APNs stays disabled unless explicitly configured for a

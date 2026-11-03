@@ -62,8 +62,11 @@ function exitOf(child, timeout = 120_000, onTimeout = () => undefined) {
 }
 
 function fixtureEnvironment() {
+  // NSIS probes Windows PowerShell and falls back to tasklist filtered by
+  // USERNAME. A sparse environment stalls those probes on hosted runners.
+  // Preserve OS context, while continuing to exclude tokens/signing secrets.
   const inherited = {};
-  for (const key of ['PATH', 'HOME', 'TMPDIR', 'USER', 'LOGNAME', 'SystemRoot', 'WINDIR', 'TEMP', 'TMP', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'ComSpec', 'PATHEXT', 'ProgramData', 'ProgramFiles', 'ProgramFiles(x86)', 'CommonProgramFiles']) if (process.env[key]) inherited[key] = process.env[key];
+  for (const key of ['PATH', 'HOME', 'TMPDIR', 'USER', 'LOGNAME', 'SystemRoot', 'WINDIR', 'TEMP', 'TMP', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'ComSpec', 'PATHEXT', 'ProgramData', 'ProgramFiles', 'ProgramFiles(x86)', 'CommonProgramFiles', 'USERNAME', 'USERDOMAIN', 'COMPUTERNAME', 'PSModulePath']) if (process.env[key]) inherited[key] = process.env[key];
   return inherited;
 }
 function powershellProbe(executable, code, env, timeout = 12_000) {
