@@ -5,6 +5,7 @@ import { resolve, join } from 'node:path';
 import { generateMediaFixture } from './petMediaFixture';
 
 test('synthetic VP9 alpha streams through the pet protocol and switches without blanking', async () => {
+  test.skip(!process.env.POCKYMOE_FFMPEG, 'Dedicated pet-media CI supplies the local synthetic encoder');
   test.setTimeout(45_000);
   const root=mkdtempSync(join(tmpdir(),'pet-synthetic-'));const pack=join(root,'pack');mkdirSync(pack);generateMediaFixture(pack);
   const out=process.env.POCKYMOE_DESKTOP_EVIDENCE || join(tmpdir(),'pet-media-evidence');
