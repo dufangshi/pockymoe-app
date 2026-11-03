@@ -215,7 +215,7 @@ async function roundtrip() {
   mkdirSync(evidence, { recursive: true });
   const temporary = mkdtempSync(join(tmpdir(), 'pockymoe-update-roundtrip-'));
   const profile = join(temporary, 'profile'); mkdirSync(profile);
-  const install = join(temporary, 'installed');
+  const install = join(temporary, 'installed copy with spaces');
   const executable = join(install, 'PockymoeUpdaterFixture.exe');
   const stray = join(temporary, 'older-copy');
   const strayExecutable = join(stray, 'PockymoeUpdaterFixture.exe');
@@ -283,7 +283,7 @@ async function roundtrip() {
     // Silent initial installation must not launch A. B must be launched by the
     // updater/NSIS --force-run path, never by this driver.
     stage('initialInstaller');
-    const installer = spawn(fileA, ['/S', `/D=${install}`], { env, stdio: 'ignore', windowsHide: true });
+    const installer = spawn(fileA, ['/S', `/D=${install}`], { env, stdio: 'ignore', windowsHide: true, windowsVerbatimArguments: true });
     report.initialInstaller = { pid: installer.pid, snapshots: [] };
     const snapshot = (name, image = false) => {
       report.initialInstaller.snapshots.push(installerSnapshot(installer, name, install, executable, fileA, evidence, image));

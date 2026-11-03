@@ -489,7 +489,9 @@ Tests never replace `/Applications/Pockymoe.app`.
 
 On Windows the verified x64 one-click per-user NSIS installer runs detached with
 `/S --updated --force-run /D=<running executable directory>`; the final `/D=`
-argument pins the install destination even with stale registry state. Relaunch
+argument pins the install destination even with stale registry state. Windows
+arguments are passed verbatim so NSIS receives the unquoted final directory even
+when the path contains spaces. Relaunch
 uses the installed executable directly, never a preserved Start-menu shortcut
 that could target an older copy. `--updated` allows the old process to close gracefully
 and `--force-run` relaunches even in silent mode. An attempt marker is written
