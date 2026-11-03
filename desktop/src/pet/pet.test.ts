@@ -101,6 +101,29 @@ describe('display and dock geometry', () => {
 });
 describe('pack validation and safe import', () => {
   const fixture = fileURLToPath(new URL('../../test/fixtures/pets/placeholder/', import.meta.url));
+  it('imports WebM and optional peek from ZIP, replaces atomically, and rejects renamed container bytes', async () => {
+    const temp = await mkdtemp(join(tmpdir(), 'pet-media-zip-'));
+    try {
+      // EBML structure is tested independently; native CI uses a real generated VP9 clip.
+      const { structuralVideo } = await import('./mediaFixture');
+      const image = await readFile(join(fixture, 'spritesheet.png'));
+      const peek = PNG.sync.write(new PNG({ width: 32, height: 32 }));
+      const manifest = { id: 'media-zip', displayName: 'Media', description: '', spritesheetPath: 'spritesheet.png', remoteCodex: {
+        clipFormat: { mediaType: 'webm-vp9-alpha', fps: 24, columns: 1, width: 648, height: 702 },
+        clips: { idle: [{ path: 'clips/a.webm', frames: 48 }] },
+        peek: { path: 'peek.png', width: 32, height: 32, anchor: [.9,.6], headHeight: .6, bounds: [0,0,1,1] },
+      } };
+      const files = (video: Buffer) => [{ name: 'pet.json', data: Buffer.from(JSON.stringify(manifest)) }, { name: 'spritesheet.png', data: image }, { name: 'peek.png', data: peek }, { name: 'clips/a.webm', data: video }];
+      const source = join(temp,'pack.zip'); await writeFile(source,zip(files(structuralVideo())));
+      const imported = await importPetPack(source,join(temp,'pets'));
+      expect(imported.peekImage).toEqual(peek); expect(await readClip(imported,'clips/a.webm')).toEqual(structuralVideo());
+      await writeFile(source,zip(files(Buffer.from('a WebP renamed as video'))));
+      await expect(importPetPack(source,join(temp,'pets'))).rejects.toThrow('WebM');
+      expect(await readFile(join(imported.directory,'clips/a.webm'))).toEqual(structuralVideo());
+      await writeFile(source,zip(files(structuralVideo()).filter(f=>f.name!=='peek.png')));
+      await expect(importPetPack(source,join(temp,'pets'))).rejects.toThrow('peek');
+    } finally { await rm(temp,{recursive:true,force:true}); }
+  });
   it('accepts a good v1 and v2 atlases and rejects dimensions, unsupported versions, formats and limits', async () => {
     const p = await loadPetPack(fixture); expect(p.manifest.id).toBe('placeholder'); const wrong = Buffer.from(p.image); wrong.writeUInt32BE(1760, 20); expect(() => validateAtlas(wrong, p.manifest)).toThrow('1536×1872'); expect(() => validateAtlas(Buffer.alloc(MAX_PACK_BYTES + 1), p.manifest)).toThrow('8 MB'); expect(() => validateAtlas(Buffer.from('fake'), p.manifest)).toThrow('PNG or WebP'); expect(parseManifest(Buffer.from(JSON.stringify({ ...p.manifest, spriteVersionNumber: 2 }))).spriteVersionNumber).toBe(2); expect(() => parseManifest(Buffer.from(JSON.stringify({ ...p.manifest, spriteVersionNumber: 3 })))).toThrow('spriteVersionNumber'); expect(() => parseManifest(Buffer.from(JSON.stringify({ ...p.manifest, spritesheetPath: '../outside.png' })))).toThrow('spritesheetPath');
   });
@@ -266,7 +289,7 @@ describe('v3 atlas and fixed-window regressions', () => {
       if (edge === 'bottom') expect(y + (faceBox[1] + (faceBox[3] - faceBox[1]) * .6) * h).toBeCloseTo(h);
       expect(Math.abs(alert.pet.x) + Math.abs(alert.pet.y)).toBeLessThan(Math.abs(x) + Math.abs(y));
       expect(rest.window).toEqual(alert.window);
-      if (rest.clip) {
+      if (rest.clip && (edge === 'left' || edge === 'right')) {
         expect(cy).toBeCloseTo((faceBox[1] + faceBox[3]) / 2 * h);
         expect(rest.visible.height).toBeLessThan(h * .5);
         expect(rest.visible.width).toBeLessThan(width * .4);

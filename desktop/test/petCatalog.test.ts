@@ -13,10 +13,10 @@ it('serves only cataloged atlas files and supplies bundled attribution without f
     const catalog = new PetCatalog([root]);
     expect(catalog.list()).toEqual([expect.objectContaining({ author: 'Pockymoe', rows: 11, thumbnail: 'pockymoe-pet://atlas/moe' })]);
     expect(JSON.stringify(catalog.list())).not.toContain(root);
-    expect(await catalog.asset('pockymoe-pet://atlas/moe').text()).toBe('fixture-image');
-    for (const path of ['pockymoe-pet://atlas/unknown', 'pockymoe-pet://atlas/%2e%2e%2fpet.json', 'pockymoe-pet://other/moe']) expect(catalog.asset(path).status).toBe(404);
+    expect(await (await catalog.asset('pockymoe-pet://atlas/moe')).text()).toBe('fixture-image');
+    for (const path of ['pockymoe-pet://atlas/unknown', 'pockymoe-pet://atlas/%2e%2e%2fpet.json', 'pockymoe-pet://other/moe']) expect((await catalog.asset(path)).status).toBe(404);
     rmSync(join(pack, 'spritesheet.webp')); symlinkSync(process.platform === 'win32' ? pack : join(pack, 'pet.json'), join(pack, 'spritesheet.webp'), process.platform === 'win32' ? 'junction' : 'file');
-    expect(catalog.asset('pockymoe-pet://atlas/moe').status).toBe(404);
+    expect((await catalog.asset('pockymoe-pet://atlas/moe')).status).toBe(404);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 it('ignores unsafe manifests and never replaces bundled catalog assets with an imported duplicate', async () => {
@@ -30,6 +30,6 @@ it('ignores unsafe manifests and never replaces bundled catalog assets with an i
     mkdirSync(join(root, 'imported/unsafe')); writeFileSync(join(root, 'imported/unsafe/pet.json'), JSON.stringify({ spritesheetPath: '../moe/pet.json' }));
     const catalog = new PetCatalog([join(root, 'bundled'), join(root, 'imported')]);
     expect(catalog.list()).toHaveLength(1);
-    expect(await catalog.asset('pockymoe-pet://atlas/moe').text()).toBe('bundled-image');
+    expect(await (await catalog.asset('pockymoe-pet://atlas/moe')).text()).toBe('bundled-image');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

@@ -1,3 +1,4 @@
+import { openPetPanel } from './petPanel';
 import { recordLifecycle } from './lifecycle';
 import { test, expect, _electron as electron, type ElectronApplication, type Page } from '@playwright/test';
 import { createServer, type Server, type RequestListener } from 'node:http';
@@ -379,14 +380,17 @@ for (const material of ['native', 'solid']) for (const pack of packs) for (const
   const prefs = await pageAt(app, 'view=preferences');
   await prefs.locator('[data-section=shortcuts]').click();
   await expect(prefs.locator('kbd').first()).toContainText('Ctrl');
-  const sprite = await pageAt(app, '/pet/');
-  await sprite.evaluate(() => (window as unknown as { rcDesktop: { pet: { action(value: unknown): Promise<unknown> } } }).rcDesktop.pet.action({ type: 'toggleTray' }));
-  await expect.poll(() => app.windows().filter(page => page.url().includes('/pet/')).length).toBe(2);
+  // Finish creating/showing every utility window before the interactive pet
+  // takes focus. A late ready-to-show would legitimately blur/close its panel.
+  for (const role of ['preferences', 'quick', 'about', 'relay']) await pageAt(app, `view=${role}`);
+  await expect.poll(() => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().filter(w => w.webContents.getURL().includes('/local/')).every(w => w.isVisible() && !w.webContents.isLoading()))).toBe(true);
+  const { glass } = await openPetPanel(app);
+  // Capture the focused panel before moving other native windows to the top.
+  const pages = [glass, ...app.windows().filter(page => page !== glass)];
   const scales: { url: string; devicePixelRatio: number }[] = [];
-  for (const page of app.windows()) {
+  for (const page of pages) {
     await page.waitForLoadState('domcontentloaded');
     if (page.url().includes('/pet/') && await page.evaluate(() => document.body.dataset.surface) === 'glass') {
-      if (!await page.locator('.panel').count()) await page.evaluate(() => (window as unknown as { rcDesktop: { pet: { action(value: unknown): Promise<unknown> } } }).rcDesktop.pet.action({ type: 'toggleTray' }));
       await expect(page.locator('.panel')).toBeVisible();
     }
     const violations = await page.evaluate(() => {

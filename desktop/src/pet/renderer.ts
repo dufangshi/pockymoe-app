@@ -1,3 +1,4 @@
+import { VideoClipPlayer } from './videoPlayer';
 document.documentElement.dataset.platform = navigator.userAgent.includes('Windows') ? 'win32' : '';
 import './styles.css';
 import lucideNotice from './NOTICE?raw';
@@ -14,7 +15,7 @@ import { commandErrorMessage } from './errors';
 import { scrollGeometry } from './scroll';
 import { playSound, playSpeech, speechMouth, speechPlaying } from './sounds';
 import { isMuted } from '../shared/mutes';
-import { dockedPose, dockTilt } from './geometry';
+import { dockedPose, dockTilt, peekPose, DEFAULT_FACE_BOX } from './geometry';
 import { ClipSequencer } from './clipSequence';
 import type { PetClip } from './packs';
 import type { ActivityItem, HostCommandResult } from '../shared/contract';
@@ -190,6 +191,22 @@ root.addEventListener('submit', event => {
   sendState = 'sending'; const text = draft, account = state?.accountId; renderGlass();
   void itemAction({ type: 'reply', key: target.key, text }, 'chat').then(result => { if (state?.accountId !== account) return; sendState = result.ok ? 'sent' : 'error'; if (result.ok && draft === text) draft = ''; renderGlass(); });
 });
+let peekSource: HTMLImageElement | null = null;
+let dockClipHeld = false;
+function paintPeek(): void {
+  const ch = root.querySelector('#character'); if (!state || !ch) return;
+  let c = ch.querySelector<HTMLCanvasElement>('#peek-art');
+  if (!state.peekArt || state.edge !== 'left' && state.edge !== 'right') { c?.remove(); return; }
+  if (!c) { c = document.createElement('canvas'); c.id = 'peek-art'; ch.append(c); }
+  const art = state.peekArt, src = art.imageUrl;
+  if (!peekSource || peekSource.src !== src) { peekSource = new Image(); peekSource.onload = () => { paintPeek(); updateHit(); }; peekSource.src = src; }
+  if (!peekSource.complete || !peekSource.naturalWidth) return;
+  c.width = Math.round(state.pet.width * devicePixelRatio); c.height = Math.round(state.pet.height * devicePixelRatio);
+  const ctx = c.getContext('2d', { willReadFrequently: true })!, r = peekPose(state.pet.width, state.pet.height, state.edge, state.dockAmount || 1, state.faceBox ?? DEFAULT_FACE_BOX, art);
+  ctx.scale(devicePixelRatio, devicePixelRatio); ctx.imageSmoothingQuality = 'high';
+  if (state.edge === 'left') { ctx.translate(state.pet.width, 0); ctx.scale(-1, 1); ctx.drawImage(peekSource, state.pet.width - r.x - r.width, r.y, r.width, r.height); }
+  else ctx.drawImage(peekSource, r.x, r.y, r.width, r.height);
+}
 function renderSprite(): void {
   if (!state) return;
   if (!root.querySelector('#character')) root.innerHTML = `<div id="character" role="button" tabindex="0"><div id="sprite-old"></div><div id="sprite"></div><canvas id="clip"></canvas><canvas id="talk" aria-hidden="true"></canvas><svg class="sleep-motes" viewBox="0 0 36 48" aria-hidden="true"><path d="M7 34h6l-6 6h6"/><path d="M17 24h7l-7 7h7"/><path d="M23 13h5l-5 5h5"/></svg></div>`;
@@ -197,16 +214,28 @@ function renderSprite(): void {
   character.setAttribute('aria-label', t('桌宠，点击查看任务，拖动以移动'));
   character.style.width = `${state.pet.width}px`; character.style.height = `${state.pet.height}px`;
   // Leaning out from the edge; at the top she hangs upside down, so it is still her head that shows.
-  const tilt = dockTilt(state.edge, state.dockAmount);
-  const pose = dockedPose(state.pet.width, state.pet.height, state.edge, state.dockAmount, state.faceBox);
+  const sideArt = !!state.peekArt && (state.edge === 'left' || state.edge === 'right');
+  const tilt = sideArt ? 0 : dockTilt(state.edge, state.dockAmount);
+  const pose = dockedPose(state.pet.width, state.pet.height, state.edge, state.dockAmount, state.faceBox, state.peekArt);
   character.style.transformOrigin = `${pose.pivot.x}px ${pose.pivot.y}px`;
-  character.style.clipPath = pose.clip ? `inset(${pose.clip.y}px ${state.pet.width - pose.clip.x - pose.clip.width}px ${state.pet.height - pose.clip.y - pose.clip.height}px ${pose.clip.x}px)` : '';
+  const feather = pose.clip ? `linear-gradient(to bottom, #000 0px, #000 ${Math.max(0, pose.clip.y + pose.clip.height - 12)}px, transparent ${pose.clip.y + pose.clip.height}px)` : state.dockAmount > 0 ? `linear-gradient(to bottom, #000 0px, #000 ${state.pet.height - 12}px, transparent ${state.pet.height}px)` : '';
+  character.style.maskImage = sideArt ? '' : feather;
+  character.style.clipPath = sideArt ? '' : pose.clip ? `inset(${pose.clip.y}px ${state.pet.width - pose.clip.x - pose.clip.width}px ${state.pet.height - pose.clip.y - pose.clip.height}px ${pose.clip.x}px)` : '';
   character.style.transform = `translate(${state.pet.x}px,${state.pet.y}px) rotate(${tilt}deg)`;
+  character.classList.toggle('has-peek', sideArt);
+  const tuckedArt = sideArt && state.dockAmount > 0;
+  // Out, then in: each direction has exactly one visible representation.
+  const wasTucked = character.classList.contains('art-tucked');
+  character.classList.toggle('art-tucked', tuckedArt);
+  if (wasTucked !== tuckedArt) character.dataset.peekTransition = tuckedArt ? 'docking' : 'undocking';
+  character.style.setProperty('--body-slide', sideArt && tuckedArt ? `${state.edge === 'right' ? state.pet.width : -state.pet.width}px` : '0px');
+  paintPeek();
   character.classList.toggle('docked-rest', state.dockAmount === 1);
   character.classList.toggle('sleeping', state.mood === 'sleeping');
   character.classList.toggle('peeking', state.dockAmount > 0 && state.dockAmount < 1);
   root.dataset.mood = state.mood; root.dataset.edge = state.edge ?? ''; root.dataset.dockAmount = String(state.dockAmount);
-  if (animationState !== state.mood || lastEpoch !== state.moodEpoch) {
+  const moodChanged = animationState !== state.mood || lastEpoch !== state.moodEpoch;
+  if (moodChanged) {
     lastEpoch = state.moodEpoch;
     const old = root.querySelector<HTMLElement>('#sprite-old')!, sprite = root.querySelector<HTMLElement>('#sprite')!;
     old.style.cssText = sprite.style.cssText; old.style.opacity = state.dockAmount === 1 ? '0' : '1'; sprite.style.opacity = motion.matches || state.dockAmount === 1 ? '1' : '0';
@@ -219,7 +248,11 @@ function renderSprite(): void {
     source.onload = () => { if (spriteImage !== source) return; canvas.width = source.width; canvas.height = source.height; context.clearRect(0, 0, canvas.width, canvas.height); context.drawImage(source, 0, 0); alpha = context.getImageData(0, 0, source.width, source.height).data; };
     source.src = image;
   }
+  const hold = !!state.clips && !!state.edge && state.dockAmount > 0;
+  if (hold !== dockClipHeld) { dockClipHeld = hold; if (!moodChanged) playClips(); }
   paintSprite();
+  if (clipPlayer && (dockClipHeld || motion.matches)) { clipPlayer.drawn = 0; drawClip(0); }
+  videoPlayer?.invalidate();
 }
 // A pack's clips replace the atlas for the states they cover; any other state, or a clip that
 // fails to decode, draws from the atlas. Sheets are decoded when needed and few are kept.
@@ -239,16 +272,42 @@ function loadClip(path: string): Promise<ImageBitmap | null> {
   }
   return loading;
 }
+let videoPlayer: VideoClipPlayer | null = null;
+function videoCanvas(video: HTMLVideoElement): void {
+  const c = root.querySelector<HTMLCanvasElement>('#clip'); if (!c || !state) return;
+  const w = Math.round(state.pet.width * devicePixelRatio), h = Math.round(state.pet.height * devicePixelRatio);
+  if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
+  clipContext ??= c.getContext('2d', { willReadFrequently: true }); if (!clipContext) return;
+  c.dataset.clipPath = videoPlayer?.path ?? ''; c.dataset.renderMode = dockRestClip() ? 'dock-rest' : 'playing';
+  c.dataset.mediaSource = video.src; c.dataset.mediaFrame = String(Math.floor(video.currentTime * (state.clips?.format.fps ?? 24) + .001));
+  clipContext.globalCompositeOperation = 'copy'; clipContext.imageSmoothingQuality = 'high'; const frame = new VideoFrame(video);
+  try { clipContext.drawImage(frame, 0, 0, w, h); } finally { frame.close(); }
+  updateHit();
+}
+function dockRestClip(): PetClip | null {
+  if (!state?.clips || !state.edge || state.dockAmount <= 0) return null;
+  return state.clips.states.idle?.find(c => !c.role) ?? state.clips.states[animationState]?.find(c => !c.role) ?? Object.values(state.clips.states).flat().find(c => !c?.role) ?? null;
+}
 function playClips(): void {
   const token = ++clipToken;
   clipSequence ??= state?.clips ? new ClipSequencer(state.clips.states) : null;
-  const clip = !clipSequence ? null : motion.matches ? clipSequence.still(animationState) : clipSequence.next(animationState, Date.now());
-  if (!clip) { clipPlayer = null; root.querySelector('#character')?.classList.remove('clips'); return; }
+  const docked = dockRestClip();
+  const clip = docked ?? (!clipSequence ? null : motion.matches ? clipSequence.still(animationState) : clipSequence.next(animationState, Date.now()));
+  if (!clip) { videoPlayer?.dispose(); clipPlayer = null; root.querySelector('#character')?.classList.remove('clips'); return; }
+  if (state?.clips?.format.mediaType === 'webm-vp9-alpha') {
+    videoPlayer ??= new VideoClipPlayer(path => state?.clips?.urls?.[path] ?? '', video => { root.querySelector('#character')?.classList.add('clips'); videoCanvas(video); }, () => { if (!ONE_SHOT.includes(animationState) || videoPlayer?.role) playClips(); }, () => { root.querySelector('#character')?.classList.remove('clips'); paintSprite(); });
+    void videoPlayer.play(clip, state.clips.format.fps, motion.matches || !!docked).then(() => {
+      if (token !== clipToken) return;
+      const next = docked ? null : clipSequence?.upcoming(animationState); videoPlayer?.preload(next ?? null);
+    });
+    return;
+  }
   // Keep showing the current frame until the next clip is ready, so nothing ever blanks.
   void loadClip(clip.path).then(bitmap => {
     if (token !== clipToken) return;
     if (!bitmap) { clipPlayer = null; root.querySelector('#character')?.classList.remove('clips'); paintSprite(); return; }
     clipPlayer = { clip, bitmap, start: performance.now(), drawn: -1 };
+    if (docked) { clipPlayer.drawn = 0; drawClip(0); }
     root.querySelector('#character')?.classList.add('clips');
     const next = clipSequence?.upcoming(animationState); if (next && next !== clip) void loadClip(next.path);
   });
@@ -257,7 +316,9 @@ function playClips(): void {
 // clip to the nearer end instead of cutting away from the middle of a movement. An intro has to
 // reach its end, because what follows starts there, and an outro simply finishes.
 function leaveClip(): void {
+  if (dockRestClip()) { playClips(); return; }
   const format = state?.clips?.format;
+  if (format?.mediaType && videoPlayer?.playing && !motion.matches) { videoPlayer.leave(); return; }
   if (!clipPlayer || !format || motion.matches || !state?.clips?.states[animationState]) { playClips(); return; }
   const { clip, drawn } = clipPlayer;
   if (clip.role === 'outro' || clipPlayer.leaving) return;
@@ -268,7 +329,8 @@ function leaveClip(): void {
 // Talking uses the closed/rest frame as a stable body. A fixed face box cannot align
 // arbitrary bent/lying poses (paint_face only searches ±8 px), so use the documented
 // rest-pose fallback rather than painting a detached face over those poses.
-const faceCanvas = document.createElement('canvas'), faceMask = document.createElement('canvas');
+const faceCanvas = document.createElement('canvas'), faceMask = document.createElement('canvas'), talkBase = document.createElement('canvas');
+let talkBaseKey = '';
 let talkBitmap: ImageBitmap | null = null, talkLoading = '', talkFrame = -1;
 function paintTalk(now: number): void {
   const element = root.querySelector<HTMLCanvasElement>('#talk'), character = root.querySelector('#character');
@@ -286,18 +348,28 @@ function paintTalk(now: number): void {
   if (!talkBitmap) return;
   character?.classList.add('talking');
   const index = level === 2 && talk.frames > 3 ? 2 + Math.floor(now / 180) % (talk.frames - 2) : level;
-  if (index === talkFrame) { element.style.display = ''; return; }
+  if (index === talkFrame && element.width === Math.round(state!.pet.width * devicePixelRatio) && element.height === Math.round(state!.pet.height * devicePixelRatio)) { element.style.display = ''; return; }
   const { width, height, columns } = format;
-  element.width = faceCanvas.width = faceMask.width = width;
-  element.height = faceCanvas.height = faceMask.height = height;
+  faceCanvas.width = faceMask.width = width;
+  faceCanvas.height = faceMask.height = height;
+  element.width = Math.round(state!.pet.width * devicePixelRatio);
+  element.height = Math.round(state!.pet.height * devicePixelRatio);
   const work = faceCanvas.getContext('2d')!, mask = faceMask.getContext('2d')!;
   const x0 = Math.floor(box[0] * width), y0 = Math.floor(box[1] * height), x1 = Math.floor(box[2] * width), y1 = Math.floor(box[3] * height);
   work.drawImage(talkBitmap, index % columns * width, Math.floor(index / columns) * height, width, height, 0, 0, width, height);
   mask.filter = `blur(${(y1 - y0) / 8}px)`; mask.fillRect(x0, y0, x1 - x0, y1 - y0);
   work.globalCompositeOperation = 'destination-in'; work.drawImage(faceMask, 0, 0); work.globalCompositeOperation = 'source-over';
-  const context = element.getContext('2d')!;
-  context.drawImage(talkBitmap, 0, 0, width, height, 0, 0, width, height);
-  context.drawImage(faceCanvas, 0, 0);
+  const context = element.getContext('2d', { willReadFrequently: true })!;
+  const baseKey = `${key}:${element.width}:${element.height}`;
+  if (baseKey !== talkBaseKey) {
+    talkBaseKey = baseKey; talkBase.width = element.width; talkBase.height = element.height;
+    const base = talkBase.getContext('2d', { willReadFrequently: true })!; base.imageSmoothingQuality = 'high';
+    base.drawImage(talkBitmap, 0, 0, width, height, 0, 0, element.width, element.height);
+  }
+  context.imageSmoothingQuality = 'high';
+  context.drawImage(talkBase, 0, 0);
+  context.save(); context.beginPath(); context.rect(0, 0, element.width, Math.min(element.height, Math.ceil((y1 + (y1 - y0) / 2) / height * element.height))); context.clip();
+  context.drawImage(faceCanvas, 0, 0, element.width, element.height); context.restore();
   element.style.display = ''; talkFrame = index; updateHit();
 }
 let clipContext: CanvasRenderingContext2D | null = null;
@@ -308,12 +380,15 @@ function drawClip(index: number): void {
   if (element.width !== width || element.height !== height) { element.width = width; element.height = height; clipContext = null; }
   clipContext ??= element.getContext('2d', { willReadFrequently: true });
   if (!clipContext) return;
+  element.dataset.clipPath = clipPlayer.clip.path; element.dataset.mediaFrame = String(index); element.dataset.renderMode = dockRestClip() ? 'dock-rest' : 'playing';
   clipContext.clearRect(0, 0, width, height); clipContext.imageSmoothingQuality = 'high';
   clipContext.drawImage(clipPlayer.bitmap, (index % format.columns) * format.width, Math.floor(index / format.columns) * format.height, format.width, format.height, 0, 0, width, height);
 }
 function stepClip(now: number): void {
+  if (state?.clips?.format.mediaType) { videoPlayer?.tick(now, state.clips.format.fps, motion.matches || !!dockRestClip()); return; }
   if (!clipPlayer || !state?.clips) return;
   const format = state.clips.format, { clip } = clipPlayer;
+  if (dockRestClip()) { if (clipPlayer.drawn !== 0) { clipPlayer.drawn = 0; drawClip(0); updateHit(); } return; }
   const { leaving } = clipPlayer;
   if (leaving) {
     const amount = Math.min(1, (now - leaving.start) / leaving.ms), index = Math.round(leaving.from + (leaving.to - leaving.from) * amount);
@@ -338,7 +413,12 @@ function paintSprite(): void {
   sprite.style.backgroundPosition = `${-(docked ? 0 : frame) * state.pet.width}px ${sleeping || docked ? 0 : -ANIMATIONS[animationState].row * state.pet.height}px`;
 }
 function opaqueAt(point: { clientX: number; clientY: number }): boolean {
-  if (!state || !(alpha || clipPlayer)) return false;
+  if (!state || !(alpha || clipPlayer || videoPlayer?.playing)) return false;
+  if (state.peekArt && state.dockAmount > 0 && (state.edge === 'left' || state.edge === 'right')) {
+    const c = root.querySelector<HTMLCanvasElement>('#peek-art');
+    const x = Math.floor(point.clientX * devicePixelRatio), y = Math.floor(point.clientY * devicePixelRatio);
+    return !!c && x >= 0 && y >= 0 && x < c.width && y < c.height && c.getContext('2d')!.getImageData(x, y, 1, 1).data[3]! > 24;
+  }
   const character = root.querySelector<HTMLElement>('#character'); if (!character) return false;
   const [centerX, centerY] = getComputedStyle(character).transformOrigin.split(' ').map(Number.parseFloat);
   const matrix = new DOMMatrix(getComputedStyle(character).transform).inverse();
@@ -349,12 +429,16 @@ function opaqueAt(point: { clientX: number; clientY: number }): boolean {
   const clip = dockedPose(state.pet.width, state.pet.height, state.edge, state.dockAmount, state.faceBox).clip;
   const localX = x / 192 * state.pet.width, localY = y / 208 * state.pet.height;
   if (clip && (localX < clip.x || localX > clip.x + clip.width || localY < clip.y || localY > clip.y + clip.height)) return false;
+  const bottom = clip ? clip.y + clip.height : state.pet.height;
+  const feather = state.dockAmount > 0 ? Math.min(1, Math.max(0, (bottom - localY) / 12)) : 1;
+  if (feather === 0) return false;
+  const threshold = 24 / feather;
   const talk = root.querySelector<HTMLCanvasElement>('#talk');
-  if (character.classList.contains('talking') && talk) return talk.getContext('2d')!.getImageData(Math.floor(x / 192 * talk.width), Math.floor(y / 208 * talk.height), 1, 1).data[3]! > 24;
-  if (state.dockAmount !== 1 && clipPlayer && clipContext) { const element = clipContext.canvas; return clipContext.getImageData(Math.floor(x / 192 * element.width), Math.floor(y / 208 * element.height), 1, 1).data[3]! > 24; }
+  if (character.classList.contains('talking') && talk) return talk.getContext('2d')!.getImageData(Math.floor(x / 192 * talk.width), Math.floor(y / 208 * talk.height), 1, 1).data[3]! > threshold;
+  if ((clipPlayer || videoPlayer?.playing) && clipContext) { const element = clipContext.canvas; return clipContext.getImageData(Math.floor(x / 192 * element.width), Math.floor(y / 208 * element.height), 1, 1).data[3]! > threshold; }
   if (!alpha) return false;
   const row = state.dockAmount === 1 || animationState === 'sleeping' && state.sleeping ? 0 : ANIMATIONS[animationState].row;
-  return alpha[((row * 208 + y) * (spriteImage?.width ?? 1536) + (state.dockAmount === 1 ? 0 : frame) * 192 + x) * 4 + 3] > 24;
+  return alpha[((row * 208 + y) * (spriteImage?.width ?? 1536) + (state.dockAmount === 1 ? 0 : frame) * 192 + x) * 4 + 3] > threshold;
 }
 function updateHit(): void { const next = !!drag || !!lastPointer && opaqueAt(lastPointer); if (next !== hit) { hit = next; bridge.hitTest(hit); } }
 window.addEventListener('pointermove', event => {
@@ -412,7 +496,7 @@ bridge.onState(next => {
   if (next.surface === 'sprite') {
     // Another pack's sheets share nothing with this one's.
     const packKey = `${next.packName}#${next.clips?.epoch ?? 0}`;
-    if (packKey !== clipPack) { talkBitmap?.close(); talkLoading = ''; talkBitmap = null; talkFrame = -1; clipPack = packKey; for (const entry of clipCache.values()) void entry.then(bitmap => bitmap?.close()); clipCache.clear(); clipSequence = null; clipPlayer = null; clipToken++; lastEpoch = -1; }
+    if (packKey !== clipPack) { videoPlayer?.dispose(); videoPlayer = null; clipContext = null; peekSource = null; talkBaseKey = ''; talkBitmap?.close(); talkLoading = ''; talkBitmap = null; talkFrame = -1; clipPack = packKey; for (const entry of clipCache.values()) void entry.then(bitmap => bitmap?.close()); clipCache.clear(); dockClipHeld = false; clipSequence = null; clipPlayer = null; clipToken++; lastEpoch = -1; }
     renderSprite(); updateHit(); return;
   }
   if (old?.detailOpen && !next.detailOpen) root.querySelector<HTMLButtonElement>('.error-mark[aria-expanded="true"]')?.click();
@@ -423,7 +507,7 @@ bridge.onState(next => {
 });
 function animate(now: number): void {
   if (state?.surface === 'sprite') { stepClip(now); paintTalk(now); }
-  if (state?.surface === 'sprite' && !clipPlayer) {
+  if (state?.surface === 'sprite' && !clipPlayer && !videoPlayer?.playing) {
     const elapsedMs = now - animationStart, idleTime = elapsedMs % 46000;
     const cycle = animationState === 'idle' ? idleTime >= 31000 ? idleTime - 31000 : idleTime >= 14000 ? idleTime - 14000 : idleTime : elapsedMs;
     let next = frameAt(animationState, animationState === 'idle' && cycle > 1100 * state.frameScale ? 0 : cycle, motion.matches, state.frameScale, ONE_SHOT.includes(animationState));

@@ -1,7 +1,8 @@
+import { openPetPanel } from './petPanel';
 import { PNG } from 'pngjs';
 import { recordLifecycle } from './lifecycle';
 import { test, expect, _electron as electron, type ElectronApplication, type Page } from '@playwright/test';
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { cpSync, writeFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -22,7 +23,7 @@ function wav(): Buffer {
   b.write('RIFF', 0); b.writeUInt32LE(36 + n * 2, 4); b.write('WAVEfmt ', 8); b.writeUInt32LE(16, 16); b.writeUInt16LE(1, 20); b.writeUInt16LE(1, 22); b.writeUInt32LE(24000, 24); b.writeUInt32LE(48000, 28); b.writeUInt16LE(2, 32); b.writeUInt16LE(16, 34); b.write('data', 36); b.writeUInt32LE(n * 2, 40);
   return b;
 }
-const FIXTURE = `<!doctype html><meta charset="utf-8"><title>Fixture</title><script>window.commands=[];window.fixtureReady=false;const installFixture=()=>{window.pockymoeHost?.onCommand(command=>{window.commands.push(command);
+const FIXTURE = `<!doctype html><meta charset="utf-8"><title>Fixture</title><script>window.commands=[];window.fixtureReady=false;const installFixture=window.installFixture=()=>{window.stopFixture?.();window.stopFixture=window.pockymoeHost?.onCommand(command=>{window.commands.push(command);
   const data=command.type==='turnText'?{request:'修一下登录白屏',answer:'白屏已修好，原因是回调读取了未加载的用户信息。'}:command.type==='listConnections'?[{deviceId:'old',deviceName:'wsl',id:'c2',name:'Older',protocol:'openai_chat',model:'small',supervisorVersion:'0.13.41',needsUpdate:true},{deviceId:'mac',deviceName:'MacBook',id:'c1',name:'Main',protocol:'openai_chat',model:'small',supervisorVersion:'0.13.43',needsUpdate:false}]:command.type==='listMuteTargets'?{devices:[{id:'mac',label:'MacBook Pro'},{id:'pc',label:'Windows PC'}],workspaces:[{id:'mac:rc',label:'remoteCodex · MacBook Pro'}],threads:[{id:'mac:thread-1',label:'修复登录状态同步 · remoteCodex'}]}:command.type==='connectionModels'?[{id:'small',name:'Small model'},{id:'large',name:'Large model'}]:command.type==='completeWithConnection'?{text:'连接总结：白屏修好了。'}:undefined;
   if(command.type==='connectionModels'&&window.failModels){window.pockymoeHost.commandResult(command.id,{ok:false,error:'upstream refused'});return;}
   if(command.type==='completeWithConnection'&&command.connectionId==='c2'){window.pockymoeHost.commandResult(command.id,{ok:false,code:'supervisorTooOld',error:'x'});return;}
@@ -145,20 +146,21 @@ test('working: the pet shows work while a thread runs', async () => {
 const speaker = { petVoice: true, petVoiceProvider: 'compatible' as const, petVoiceSpeed: 1, petVoiceSummary: true, petSummaryLanguage: 'zh-CN' as const };
 const remoteVoice = (): Partial<DesktopSettings> => ({ ...speaker, petVoiceRemotes: { compatible: { url: `${origin}/v1`, model: 't', voice: '', style: '', extra: '' } } });
 const openPreferences = async (): Promise<Page> => {
+  // fixtureReady is only a renderer flag: a late main navigation reset can clear
+  // Windows.ready after the inline listener registered. Re-register idempotently
+  // after load, then roundtrip the same-frame IPC before discovery can queue.
+  await page.evaluate(async () => { (window as unknown as { installFixture(): void }).installFixture(); await window.pockymoeHost!.capabilities(); });
   await app.evaluate(() => (globalThis as unknown as { __pockymoeDesktopTest: Testing }).__pockymoeDesktopTest.windows.createLocal('preferences'));
   await expect.poll(() => app.windows().some(window => window.url().includes('preferences'))).toBe(true);
   const preferences = app.windows().find(window => window.url().includes('preferences'))!;
   await preferences.locator('[data-section="pet"]').click();
   // Discovery starts when this section mounts. Open its pickers only after their
   // data arrives; an open picker deliberately defers replacing its options.
-  await preferences.evaluate(() => new Promise<void>(resolve => {
+  await expect.poll(() => preferences.evaluate(async () => {
     const bridge = (window as unknown as { pockymoeDesktop: import('../src/shared/local').LocalBridge }).pockymoeDesktop;
-    const ready = (state: import('../src/shared/local').LocalState): boolean => !!state.summary.muteTargets && (!state.settings.petVoiceSummary || state.summary.connections.length > 0);
-    // Await the data broadcasts produced by the UI's actual requests. A separate
-    // five-second polling deadline can expire before the query's own IPC deadline.
-    const stop = bridge.onState(state => { if (ready(state)) { stop(); resolve(); } });
-    void bridge.getState().then(state => { if (ready(state)) { stop(); resolve(); } });
-  }));
+    const state = await bridge.getState();
+    return { muteTargets: !!state.summary.muteTargets, connections: !state.settings.petVoiceSummary || state.summary.connections.length > 0 };
+  }), { timeout: 20_000, message: 'Fixture discovery must answer after the command-ready handshake' }).toEqual({ muteTargets: true, connections: true });
   return preferences;
 };
 test('summary: picks a saved upstream and its model, and reads what the model said', async () => {
@@ -272,6 +274,53 @@ test('silencing: the activity panel can silence a conversation', async () => {
   await expect(toggle).toHaveAttribute('aria-pressed', 'true');
   await glass.locator('[data-action="toggleMute"]').first().evaluate(element => (element as HTMLElement).click());
   await expect(glass.locator('[data-action="toggleMute"]').first()).toHaveAttribute('aria-pressed', 'false');
+});
+test('preferences discovery reannounces fixture readiness after a late navigation reset', async () => {
+  await settings(remoteVoice());
+  await app.evaluate(({ BrowserWindow }) => {
+    const relay = BrowserWindow.getAllWindows().find(w => !w.webContents.getURL().includes('pet/index.html'))!;
+    // Reproduce the host-side reset without destroying the loaded fixture listener.
+    relay.webContents.emit('did-start-navigation', {}, relay.webContents.getURL(), false, true);
+  });
+  const preferences = await openPreferences();
+  await expect(preferences.locator('#summary-source')).toBeVisible();
+  await preferences.locator('#summary-source').click();
+  await expect(preferences.getByRole('option', { name: 'Main · MacBook' })).toBeVisible();
+});
+test('panel opening waits for delayed glass state instead of toggling it closed', async () => {
+  await baseline();
+  const glass = await pet('glass'), sprite = await pet('sprite');
+  await app.evaluate(({ BrowserWindow }) => {
+    const glass = BrowserWindow.getAllWindows().find(w => w.webContents.getURL().includes('/pet/') && !!w.getParentWindow())!;
+    const send = glass.webContents.send.bind(glass.webContents), queue: (() => void)[] = [];
+    const replay = { hold: true, queue, modes: [] as string[], flush() { replay.hold = false; for (const send of queue.splice(0)) send(); } };
+    Object.assign(globalThis, { panelReplay: replay });
+    glass.webContents.send = (channel, ...args) => {
+      if (channel === 'rcDesktop:pet:state' && replay.hold) { replay.modes.push((args[0] as { mode: string }).mode); queue.push(() => { if (!glass.isDestroyed()) send(channel, ...args); }); }
+      else send(channel, ...args);
+    };
+  });
+  await glass.evaluate(() => {
+    Object.assign(window, { panelDeliveredModes: [] as string[] });
+    (window as unknown as { rcDesktop: { pet: { onState(listener: (state: { mode: string }) => void): unknown } } }).rcDesktop.pet.onState(state => { (window as unknown as { panelDeliveredModes: string[] }).panelDeliveredModes.push(state.mode); });
+  });
+  const toggle = () => sprite.evaluate(() => (window as unknown as { rcDesktop: { pet: { action(value: unknown): Promise<unknown> } } }).rcDesktop.pet.action({ type: 'toggleTray' }));
+  // Reproduce the old acceptance fixture: main has opened, glass DOM is stale,
+  // and a second toggle closes main again. This is the captured controls state.
+  await toggle(); expect(await glass.locator('.panel').count()).toBe(0); await toggle();
+  await app.evaluate(() => (globalThis as unknown as { panelReplay: { flush(): void } }).panelReplay.flush());
+  await expect.poll(() => glass.evaluate(() => (window as unknown as { panelDeliveredModes: string[] }).panelDeliveredModes.at(-1))).toBe('controls');
+  await expect(glass.locator('.panel')).toHaveCount(0);
+  const oldModes = await app.evaluate(() => (globalThis as unknown as { panelReplay: { modes: string[] } }).panelReplay.modes);
+  expect(oldModes).toContain('panel'); expect(oldModes.at(-1)).toBe('controls');
+  // Same delayed renderer, corrected helper: exactly one open, then wait.
+  await app.evaluate(() => { (globalThis as unknown as { panelReplay: { hold: boolean } }).panelReplay.hold = true; });
+  const opened = openPetPanel(app);
+  await expect.poll(() => app.evaluate(() => (globalThis as unknown as { panelReplay: { queue: unknown[] } }).panelReplay.queue.length)).toBeGreaterThan(0);
+  expect(await glass.locator('.panel').count()).toBe(0);
+  await app.evaluate(() => (globalThis as unknown as { panelReplay: { flush(): void } }).panelReplay.flush());
+  await opened; await glass.waitForTimeout(200); await expect(glass.locator('.panel')).toBeVisible();
+  writeFileSync(join(evidence, 'panel-delayed-render-regression.json'), JSON.stringify({ oldModes, corrected: 'one toggle then await glass panel', visible: true }));
 });
 test('a summary that works is not reported as failed when the voice cannot read it', async () => {
   await settings({ petVoice: true, petVoiceProvider: 'compatible', petVoiceRemotes: { compatible: { url: 'http://127.0.0.1:9/v1', model: 't', voice: '', style: '', extra: '' } }, petVoiceSummary: true, petSummaryConnection: { deviceId: 'mac', id: 'c1', name: 'Main · MacBook', model: '' } });
@@ -437,7 +486,7 @@ test('clips: speech uses the audio envelope on the fixed rest face and resumes t
   test.skip(!clipPack, 'POCKYMOE_CLIP_PACK is not set');
   const manifest = JSON.parse(readFileSync(join(clipPack!, 'pet.json'), 'utf8')) as { remoteCodex?: { talk?: unknown } };
   test.skip(!manifest.remoteCodex?.talk, 'Pack has no speech faces');
-  await settings({ petId: clipPackId(), petEdgeHide: false }); await baseline(); await sync([item()]);
+  await settings({ petId: clipPackId(), petEdgeHide: false, petSize: 'L' }); await baseline(); await sync([item()]);
   const sprite = await pet('sprite');
   await expect(sprite.locator('#character')).toHaveClass(/clips/);
   const rate = 24000, count = rate * 3, audio = Buffer.alloc(44 + count * 2);
@@ -449,9 +498,12 @@ test('clips: speech uses the audio envelope on the fixed rest face and resumes t
   const samples = await sprite.evaluate(async () => {
     const result: { face: string; body: string; visible: boolean; level: string | undefined; restBody: string }[] = [];
     const hash = (id: string, bodyOnly = false): string => { const c = document.querySelector<HTMLCanvasElement>(id)!; const data = c.getContext('2d')!.getImageData(0, bodyOnly ? Math.floor(c.height / 2) : 0, c.width, bodyOnly ? Math.floor(c.height / 2) : c.height).data; let hash = 0; for (let i = 0; i < data.length; i += 16) hash = (hash * 31 + data[i]!) | 0; return String(hash); };
-    for (let i = 0; i < 100; i++) { result.push({ face: hash('#talk'), body: hash('#clip'), restBody: hash('#talk', true), visible: document.querySelector<HTMLElement>('#talk')!.style.display !== 'none', level: document.querySelector<HTMLElement>('#talk')!.dataset.level }); await new Promise(resolve => setTimeout(resolve, 35)); }
+    for (let i = 0; i < 100; i++) { result.push({ face: hash('#talk'), body: hash('#clip'), restBody: hash('#talk', true), visible: document.querySelector<HTMLElement>('#talk')!.style.display !== 'none' && document.querySelector('#character')!.classList.contains('talking'), level: document.querySelector<HTMLElement>('#talk')!.dataset.level }); await new Promise(resolve => setTimeout(resolve, 35)); }
     return result;
   });
+  const backing = await sprite.locator('#talk').evaluate(c => ({ width: (c as HTMLCanvasElement).width, height: (c as HTMLCanvasElement).height, cssWidth: document.querySelector('#character')!.clientWidth, cssHeight: document.querySelector('#character')!.clientHeight, dpr: devicePixelRatio }));
+  expect(backing.width).toBe(Math.round(backing.cssWidth * backing.dpr)); expect(backing.height).toBe(Math.round(backing.cssHeight * backing.dpr));
+  writeFileSync(join(evidence, 'speech-samples.json'), JSON.stringify(samples));
   const visible = samples.filter(s => s.visible);
   expect(visible.length).toBeGreaterThan(30);
   expect(new Set(visible.map(s => s.restBody)).size).toBe(1);
@@ -610,7 +662,7 @@ test('review: compact statuses retain the running ring and waiting bubble at 10p
 
 test('clips: slender side peeks crop the body and hit only the visible head', async () => {
   test.skip(!clipPack, 'POCKYMOE_CLIP_PACK is not set');
-  const manifest = JSON.parse(readFileSync(join(clipPack!, 'pet.json'), 'utf8')) as { remoteCodex?: { faceBox?: number[] } };
+  const manifest = JSON.parse(readFileSync(join(clipPack!, 'pet.json'), 'utf8')) as { remoteCodex?: { faceBox?: number[]; peek?: unknown } };
   const face = manifest.remoteCodex?.faceBox;
   test.skip(!face || face[3]! - face[1]! >= .28, 'Requires a slender pack face box');
   await settings({ petId: clipPackId(), petEdgeHide: true }); await baseline();
@@ -634,11 +686,18 @@ test('clips: slender side peeks crop the body and hit only the visible head', as
     // Wait for the existing slide to settle before measuring painted pixels.
     await sprite.waitForTimeout(250);
     const transform = await sprite.locator('#character').evaluate(e => new DOMMatrix(getComputedStyle(e).transform).b);
-    expect(edge === 'left' ? transform : -transform).toBeGreaterThan(.2);
+    if (manifest.remoteCodex?.peek) expect(transform).toBe(0);
+    else expect(edge === 'left' ? transform : -transform).toBeGreaterThan(.2);
     const png = PNG.sync.read(await sprite.screenshot({ omitBackground: true, scale: 'css' }));
     const opaque: { x: number; y: number }[] = []; let belowHead = 0;
     for (let y = 0; y < png.height; y++) for (let x = 0; x < png.width; x++) if (png.data[(y * png.width + x) * 4 + 3]! > 200) { opaque.push({ x, y }); if (y > png.height / 2) belowHead++; }
-    expect(opaque.length).toBeGreaterThan(30); expect(belowHead).toBe(0);
+    expect(opaque.length).toBeGreaterThan(30);
+    if (manifest.remoteCodex?.peek) {
+      // Long hair is intentionally below the face. It must end naturally inside
+      // the fixed viewport, not disappear into its bottom edge.
+      expect(Math.max(...opaque.map(p => p.y))).toBeLessThan(png.height - 4);
+      expect(Math.min(...opaque.map(p => p.y))).toBeGreaterThan(0);
+    } else expect(belowHead).toBe(0);
     const head = opaque[Math.floor(opaque.length / 2)]!;
     await sprite.mouse.move(head.x + .5, head.y + .5); await expect.poll(ignored).toBe(false);
     await sprite.mouse.move(5, png.height * .75); await expect.poll(ignored).toBe(true);
@@ -646,5 +705,66 @@ test('clips: slender side peeks crop the body and hit only the visible head', as
       await sprite.mouse.click(head.x + .5, head.y + .5);
       await expect(sprite.locator('#app')).toHaveAttribute('data-mood', 'poked');
     }
+  }
+});
+
+
+test('clips: top and bottom hold a real rest frame at full backing resolution', async () => {
+  test.skip(!clipPack, 'POCKYMOE_CLIP_PACK is not set');
+  const manifest = JSON.parse(readFileSync(join(clipPack!, 'pet.json'), 'utf8')) as { remoteCodex: { clips: { idle: { path: string; role?: string }[] } } };
+  const rest = manifest.remoteCodex.clips.idle.find(c => !c.role)!.path;
+  await settings({ petId: clipPackId(), petEdgeHide: true, petSize: 'L' }); await baseline();
+  const sprite = await pet('sprite'); await expect(sprite.locator('#character')).toHaveClass(/clips/);
+  await app.evaluate(({ screen }) => { screen.getCursorScreenPoint = () => ({ x: -10000, y: -10000 }); });
+  await sprite.evaluate(() => {
+    const draw = CanvasRenderingContext2D.prototype.drawImage;
+    Object.assign(window, { dockClipDraws: [] as string[] });
+    const wrapped = function (this: CanvasRenderingContext2D, ...args: unknown[]): void {
+      if (this.canvas.id === 'clip') (window as unknown as { dockClipDraws: string[] }).dockClipDraws.push(args[0] instanceof VideoFrame ? 'video-frame' : args[0] instanceof ImageBitmap ? 'bitmap-frame' : 'other');
+      Reflect.apply(draw, this, args);
+    };
+    CanvasRenderingContext2D.prototype.drawImage = wrapped as typeof draw;
+  });
+  for (const edge of ['top', 'bottom'] as const) {
+    const { bounds, area } = await app.evaluate(({ BrowserWindow, screen }) => ({ bounds: BrowserWindow.getAllWindows().find(w => w.webContents.getURL().includes('pet/index.html') && !w.getParentWindow())!.getBounds(), area: screen.getPrimaryDisplay().workArea }));
+    const x = area.x + Math.round(area.width / 2), y = edge === 'top' ? area.y : area.y + area.height - bounds.height;
+    const action = (value: unknown) => sprite.evaluate(value => (window as unknown as { rcDesktop: { pet: { action(value: unknown): Promise<unknown> } } }).rcDesktop.pet.action(value), value);
+    await action({ type: 'dragStart', x: bounds.x, y: bounds.y }); await action({ type: 'dragMove', x, y }); await action({ type: 'dragEnd', x, y });
+    await expect(sprite.locator('#app')).toHaveAttribute('data-edge', edge); await expect(sprite.locator('#app')).toHaveAttribute('data-dock-amount', '1');
+    await expect(sprite.locator('#clip')).toHaveAttribute('data-clip-path', rest);
+    await expect(sprite.locator('#clip')).toHaveAttribute('data-media-frame', '0');
+    const canvas = await sprite.locator('#clip').evaluate(c => ({ backing: [(c as HTMLCanvasElement).width, (c as HTMLCanvasElement).height], expected: [Math.round(c.clientWidth * devicePixelRatio), Math.round(c.clientHeight * devicePixelRatio)], visibility: getComputedStyle(c).visibility, atlas: getComputedStyle(document.querySelector('#sprite')!).display, draws: (window as unknown as { dockClipDraws: string[] }).dockClipDraws }));
+    expect(canvas.backing).toEqual(canvas.expected); expect(canvas.visibility).toBe('visible'); expect(canvas.atlas).toBe('none');
+    expect(canvas.draws.some(kind => kind === 'video-frame' || kind === 'bitmap-frame')).toBe(true);
+    // A held frame must resize too; no animation tick will choose another index.
+    for (const petSize of ['M', 'L'] as const) {
+      await settings({ petSize });
+      await expect.poll(() => sprite.locator('#clip').evaluate(c => (c as HTMLCanvasElement).width === Math.round(c.clientWidth * devicePixelRatio) && (c as HTMLCanvasElement).height === Math.round(c.clientHeight * devicePixelRatio))).toBe(true);
+      await expect(sprite.locator('#clip')).toHaveAttribute('data-media-frame', '0');
+    }
+  }
+});
+
+test('clips: dedicated peek handoff fades out before fading in in both directions', async () => {
+  test.skip(!clipPack, 'POCKYMOE_CLIP_PACK is not set');
+  test.skip(!JSON.parse(readFileSync(join(clipPack!, 'pet.json'), 'utf8')).remoteCodex?.peek, 'Pack has no dedicated peek');
+  await settings({ petId: clipPackId(), petEdgeHide: false }); await baseline();
+  const sprite = await pet('sprite'); await expect(sprite.locator('#character')).toHaveClass(/clips/);
+  await app.evaluate(({ screen }) => { screen.getCursorScreenPoint = () => ({ x: -10000, y: -10000 }); });
+  const { bounds, area } = await app.evaluate(({ BrowserWindow, screen }) => ({ bounds: BrowserWindow.getAllWindows().find(w => w.webContents.getURL().includes('pet/index.html') && !w.getParentWindow())!.getBounds(), area: screen.getPrimaryDisplay().workArea }));
+  const action = (value: unknown) => sprite.evaluate(value => (window as unknown as { rcDesktop: { pet: { action(value: unknown): Promise<unknown> } } }).rcDesktop.pet.action(value), value);
+  const x = area.x + area.width - bounds.width, y = area.y + 120;
+  await action({ type: 'dragStart', x: bounds.x, y: bounds.y }); await action({ type: 'dragMove', x, y }); await action({ type: 'dragEnd', x, y });
+  for (const tucked of [true, false]) {
+    const samples = await sprite.evaluate(async tucked => {
+      const result: { body: number; peek: number }[] = [];
+      await (window as unknown as { rcDesktop: { pet: { action(value: unknown): Promise<unknown> } } }).rcDesktop.pet.action({ type: 'setEdgeHide', value: tucked });
+      while (document.querySelector('#character')!.classList.contains('art-tucked') !== tucked) await new Promise<void>(r => requestAnimationFrame(() => r()));
+      const start = performance.now(); while (performance.now() - start < 500) { result.push({ body: Number(getComputedStyle(document.querySelector('#clip')!).opacity), peek: Number(getComputedStyle(document.querySelector('#peek-art')!).opacity) }); await new Promise<void>(r => requestAnimationFrame(() => r())); }
+      return result;
+    }, tucked);
+    expect(samples.some(s => s.body > .01 && s.peek > .01)).toBe(false);
+    expect(samples.at(-1)).toEqual({ body: tucked ? 0 : 1, peek: tucked ? 1 : 0 });
+    expect(samples.some(s => s.body > 0 && s.body < 1 || s.peek > 0 && s.peek < 1)).toBe(true);
   }
 });
