@@ -35,6 +35,8 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Validate fixture signature serialization
         run: node test/update-roundtrip.mjs --self-test
+      - name: Compare native and WOW64 installer prerequisites with inherited and fixture environments
+        run: node test/update-roundtrip.mjs --diagnostics-only
       - name: Install A, download verified B, silently update and assert genuine relaunch with preserved data
         run: node test/update-roundtrip.mjs
       - name: Check temporary source injection was restored

@@ -53,12 +53,123 @@ async function until(read, message, timeout = 120_000) {
   }
   throw new Error(message);
 }
-function exitOf(child, timeout = 120_000) {
+function exitOf(child, timeout = 120_000, onTimeout = () => undefined) {
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => { child.kill(); reject(new Error('Owned fixture installer timed out')); }, timeout);
+    const timer = setTimeout(() => { onTimeout(); child.kill(); reject(new Error('Owned fixture installer timed out')); }, timeout);
     child.once('error', error => { clearTimeout(timer); reject(error); });
     child.once('exit', (code, signal) => { clearTimeout(timer); if (code === 0) resolve(); else reject(new Error(`Installer exited ${code ?? signal}`)); });
   });
+}
+
+function fixtureEnvironment() {
+  const inherited = {};
+  for (const key of ['PATH', 'HOME', 'TMPDIR', 'USER', 'LOGNAME', 'SystemRoot', 'WINDIR', 'TEMP', 'TMP', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'ComSpec', 'PATHEXT', 'ProgramData', 'ProgramFiles', 'ProgramFiles(x86)', 'CommonProgramFiles']) if (process.env[key]) inherited[key] = process.env[key];
+  return inherited;
+}
+function powershellProbe(executable, code, env, timeout = 12_000) {
+  const started = Date.now();
+  try {
+    const text = execFileSync(executable, ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(code, 'utf16le').toString('base64')],
+      { env, encoding: 'utf8', timeout, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 256 * 1024 });
+    return { elapsedMs: Date.now() - started, ok: true, result: JSON.parse(text.replace(/^\uFEFF/, '').trim()) };
+  } catch (error) {
+    // Do not emit stderr/command lines/environment values, even on timeout.
+    return { elapsedMs: Date.now() - started, ok: false, code: error.code || 'processFailure', status: error.status ?? null, signal: error.signal || null };
+  }
+}
+const powershellLiteral = value => `'${String(value).replace(/'/g, "''")}'`;
+function windowsPreflight(evidence) {
+  const root = process.env.SystemRoot || 'C:\\Windows';
+  const code = `$ErrorActionPreference='Stop'; try {
+    $timer=[Diagnostics.Stopwatch]::StartNew(); $available=[bool](Get-Command Get-CimInstance -ErrorAction SilentlyContinue);
+    $policy=[string](Get-ExecutionPolicy -Scope Process); $count=0;
+    if($available) { $count=@(Get-CimInstance -Query 'SELECT ProcessId FROM Win32_Process' -OperationTimeoutSec 3).Count }
+    @{available=$available; processPolicy=$policy; processCount=$count; cimElapsedMs=$timer.ElapsedMilliseconds; is64Bit=[Environment]::Is64BitProcess} | ConvertTo-Json -Compress
+  } catch { @{errorType=$_.Exception.GetType().FullName} | ConvertTo-Json -Compress }`;
+  const result = { scope: 'Only process count/policy/timing and environment-key presence; no values or command lines', probes: [] };
+  const sanitized = fixtureEnvironment();
+  for (const architecture of ['System32', 'SysWOW64']) {
+    const executable = join(root, architecture, 'WindowsPowerShell/v1.0/powershell.exe');
+    if (!existsSync(executable)) continue;
+    for (const [environment, env] of [['inherited', process.env], ['fixture', sanitized]]) {
+      const keys = ['USERNAME', 'USERDOMAIN', 'COMPUTERNAME', 'PSModulePath', 'PSExecutionPolicyPreference', 'ComSpec', 'SystemRoot'];
+      result.probes.push({ architecture, environment, present: Object.fromEntries(keys.map(key => [key, !!env[key]])), ...powershellProbe(executable, code, env) });
+    }
+  }
+  writeFileSync(join(evidence, 'windows-preflight.json'), `${JSON.stringify(result, null, 2)}\n`);
+  console.log('Windows installer preflight saved (CIM/policy timing, no environment values)');
+  return result;
+}
+function installedProgress(directory) {
+  let files = 0, bytes = 0;
+  const visit = (folder, depth = 0) => {
+    if (depth > 12 || files > 10_000) return;
+    for (const entry of readdirSync(folder, { withFileTypes: true })) {
+      const file = join(folder, entry.name);
+      if (entry.isDirectory()) visit(file, depth + 1);
+      else if (entry.isFile()) { files++; bytes += statSync(file).size; }
+    }
+  };
+  try { visit(directory); } catch { /* Installation is concurrently creating files. */ }
+  return { files, bytes };
+}
+function installerSnapshot(child, stage, install, executable, installerFile, evidence, captureWindow = false) {
+  const root = process.env.SystemRoot || 'C:\\Windows';
+  const ps = join(root, 'System32/WindowsPowerShell/v1.0/powershell.exe');
+  // Expand TEMP's RUNNER~1 alias before comparing against CIM's long path.
+  const canonicalInstaller = realpathSync(installerFile);
+  // Query a bounded owned process tree. Never request CommandLine or inspect an
+  // unrelated window. Cropped pictures, if any, are only the initial fixture UI.
+  const code = `$ErrorActionPreference='Stop'; try {
+    $rootPid=${Number(child.pid)}; $owned=[Collections.Generic.HashSet[int]]::new(); [void]$owned.Add($rootPid);
+    $all=@(Get-CimInstance -Query 'SELECT ProcessId,ParentProcessId,Name,ExecutablePath,WorkingSetSize,KernelModeTime,UserModeTime FROM Win32_Process' -OperationTimeoutSec 3);
+    $rootProcess=$all | Where-Object {$_.ProcessId -eq $rootPid};
+    if($rootProcess -and $rootProcess.ExecutablePath -ne ${powershellLiteral(canonicalInstaller)}){ @{rootPidMatchesFixture=$false} | ConvertTo-Json -Compress; exit 0 }
+    for($i=0;$i -lt 4;$i++){ foreach($p in $all){ if($owned.Contains([int]$p.ParentProcessId)){ [void]$owned.Add([int]$p.ProcessId) } } }
+    $processes=@($all | Where-Object {$owned.Contains([int]$_.ProcessId)} | Select-Object ProcessId,ParentProcessId,Name,WorkingSetSize,KernelModeTime,UserModeTime);
+    Add-Type -TypeDefinition @'
+using System; using System.Text; using System.Runtime.InteropServices;
+public class FixtureWindows {
+ public delegate bool Callback(IntPtr hwnd, IntPtr parameter);
+ [DllImport("user32.dll")] public static extern bool EnumWindows(Callback callback, IntPtr parameter);
+ [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid);
+ [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hwnd);
+ [DllImport("user32.dll",CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr hwnd,StringBuilder text,int max);
+ [DllImport("user32.dll",CharSet=CharSet.Unicode)] public static extern int GetClassName(IntPtr hwnd,StringBuilder text,int max);
+ [DllImport("user32.dll")] public static extern bool EnumChildWindows(IntPtr hwnd,Callback callback,IntPtr parameter);
+ [StructLayout(LayoutKind.Sequential)] public struct Rect { public int left,top,right,bottom; }
+ [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hwnd,out Rect rect);
+ [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr hwnd,IntPtr dc,uint flags);
+}
+'@;
+    $windows=[Collections.Generic.List[object]]::new();
+    [FixtureWindows]::EnumWindows({param($handle,$unused)
+      [uint32]$owner=0; [void][FixtureWindows]::GetWindowThreadProcessId($handle,[ref]$owner);
+      if($owned.Contains([int]$owner)){
+        $title=[Text.StringBuilder]::new(256); $class=[Text.StringBuilder]::new(80);
+        [void][FixtureWindows]::GetWindowText($handle,$title,256); [void][FixtureWindows]::GetClassName($handle,$class,80);
+        $controls=[Collections.Generic.List[string]]::new();
+        [FixtureWindows]::EnumChildWindows($handle,{param($c,$u) $t=[Text.StringBuilder]::new(160); [void][FixtureWindows]::GetWindowText($c,$t,160); if($t.Length -gt 0 -and $controls.Count -lt 12){$controls.Add($t.ToString())}; return $true},[IntPtr]::Zero) | Out-Null;
+        $visible=[FixtureWindows]::IsWindowVisible($handle); $image=$null;
+        if(${captureWindow ? '$true' : '$false'} -and $visible -and $windows.Count -lt 3){
+          Add-Type -AssemblyName System.Drawing; $rect=[FixtureWindows+Rect]::new(); [void][FixtureWindows]::GetWindowRect($handle,[ref]$rect);
+          $width=$rect.right-$rect.left; $height=$rect.bottom-$rect.top;
+          if($width -gt 0 -and $height -gt 0 -and $width -lt 2000 -and $height -lt 1600){
+            $bitmap=[Drawing.Bitmap]::new($width,$height); $graphics=[Drawing.Graphics]::FromImage($bitmap); $dc=$graphics.GetHdc();
+            $printed=[FixtureWindows]::PrintWindow($handle,$dc,2); $graphics.ReleaseHdc($dc);
+            if($printed){$image='initial-installer-${stage}-window-'+$windows.Count+'.png'; $bitmap.Save((Join-Path ${powershellLiteral(evidence)} $image),[Drawing.Imaging.ImageFormat]::Png)}
+            $graphics.Dispose(); $bitmap.Dispose();
+          }
+        }
+        $windows.Add(@{pid=$owner;title=$title.ToString();class=$class.ToString();visible=$visible;controls=$controls.ToArray();image=$image});
+      }; return $true
+    },[IntPtr]::Zero) | Out-Null;
+    @{processes=$processes;windows=$windows.ToArray()} | ConvertTo-Json -Compress -Depth 5
+  } catch { @{errorType=$_.Exception.GetType().FullName} | ConvertTo-Json -Compress }`;
+  return { stage, at: new Date().toISOString(), installerPid: child.pid, installerExitCode: child.exitCode,
+    installDirectoryExists: existsSync(install), installedExecutableExists: existsSync(executable),
+    installedProgress: installedProgress(install),
+    ...powershellProbe(ps, code, process.env) };
 }
 
 async function selfTest() {
@@ -94,8 +205,11 @@ async function roundtrip() {
   const originalPackage = readFileSync(packagePath);
   assert.equal(existsSync(observerPath), false, 'Refuse to overwrite a leftover fixture observer');
   const report = { platform: process.platform, versions: { from: versionA, to: versionB },
-    checks: {}, smartScreenScope: 'CI installation/relaunch and process observation only; interactive real-device SmartScreen remains a separate observation' };
+    stage: 'preflight', checks: {}, smartScreenScope: 'CI installation/relaunch and process observation only; interactive real-device SmartScreen remains a separate observation' };
   let release, fileB, app;
+  const preflightFile = join(evidence, 'windows-preflight.json');
+  report.preflight = existsSync(preflightFile) ? JSON.parse(readFileSync(preflightFile, 'utf8')) : windowsPreflight(evidence);
+  const stage = name => { report.stage = name; console.log(`Updater fixture stage: ${name}`); writeFileSync(join(evidence, 'result.json'), `${JSON.stringify(report, null, 2)}\n`); };
   let feedRequests = 0, downloadRequests = 0;
   const server = createServer((request, response) => {
     response.setHeader('Connection', 'close');
@@ -122,9 +236,7 @@ async function roundtrip() {
   writeFileSync(publicPath, publicKey.export({ type: 'spki', format: 'pem' }));
   const fixture = { profile, origin, result: resultPath, versionB,
     secret: randomBytes(24).toString('hex'), cookie: randomBytes(24).toString('hex') };
-  const inherited = {};
-  for (const key of ['PATH', 'HOME', 'TMPDIR', 'USER', 'LOGNAME', 'SystemRoot', 'WINDIR', 'TEMP', 'TMP', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'ComSpec', 'PATHEXT', 'ProgramData', 'ProgramFiles', 'ProgramFiles(x86)', 'CommonProgramFiles']) if (process.env[key]) inherited[key] = process.env[key];
-  const env = { ...inherited, CSC_IDENTITY_AUTO_DISCOVERY: 'false',
+  const env = { ...fixtureEnvironment(), CSC_IDENTITY_AUTO_DISCOVERY: 'false',
     POCKYMOE_UPDATER_TEST_BUILD: '1', POCKYMOE_UPDATER_TEST_FEED: `${origin}/latest`, POCKYMOE_UPDATER_TEST_PUBLIC_KEY: publicPath };
   for (const key of Object.keys(env)) if (/^(?:CSC_|WIN_CSC_|APPLE_)/.test(key) && key !== 'CSC_IDENTITY_AUTO_DISCOVERY') delete env[key];
   const build = version => {
@@ -145,14 +257,27 @@ async function roundtrip() {
     const observer = readFileSync(join(desktop, 'test/update-fixture-observer.mjs'), 'utf8').replace('__POCKYMOE_ROUNDTRIP_FIXTURE__', JSON.stringify(fixture));
     writeFileSync(observerPath, observer);
     writeFileSync(mainPath, `import './__updateFixtureObserver.mjs';\n${originalMain}`);
-    const fileA = build(versionA);
-    fileB = build(versionB);
-    release = signedRelease(fileB, origin, privateKey);
+    stage('buildA'); const fileA = build(versionA);
     // Silent initial installation must not launch A. B must be launched by the
     // updater/NSIS --force-run path, never by this driver.
-    await exitOf(spawn(fileA, ['/S', `/D=${install}`], { env, stdio: 'ignore', windowsHide: true }));
+    stage('initialInstaller');
+    const installer = spawn(fileA, ['/S', `/D=${install}`], { env, stdio: 'ignore', windowsHide: true });
+    report.initialInstaller = { pid: installer.pid, snapshots: [] };
+    const snapshot = (name, image = false) => {
+      report.initialInstaller.snapshots.push(installerSnapshot(installer, name, install, executable, fileA, evidence, image));
+      writeFileSync(join(evidence, 'result.json'), `${JSON.stringify(report, null, 2)}\n`);
+    };
+    const timers = [10_000, 30_000, 60_000].map(milliseconds => setTimeout(() => snapshot(`after-${milliseconds / 1000}s`), milliseconds));
+    try { await exitOf(installer, 120_000, () => snapshot('timeout', true)); }
+    finally { timers.forEach(clearTimeout); }
+    snapshot('exited');
     await until(() => existsSync(executable), 'Initial NSIS install must produce the fixture executable', 90_000);
     report.checks.installedA = true;
+    // Prove the first install before spending time packaging B. This is setup
+    // ordering, not an assumption about the reason an installer might stall.
+    stage('buildB'); fileB = build(versionB);
+    release = signedRelease(fileB, origin, privateKey);
+    stage('launchA');
     app = await electron.launch({ executablePath: executable, env: { ...env, POCKYMOE_DESKTOP_E2E: '1', POCKYMOE_DESKTOP_USER_DATA: profile }, timeout: 60_000 });
     const originalPid = await app.evaluate(({ app }) => { if (app.getVersion() !== '0.0.900') throw new Error('Wrong initial version'); return process.pid; });
     const encrypted = await app.evaluate(async ({ safeStorage, session }, values) => {
@@ -164,6 +289,7 @@ async function roundtrip() {
       return encrypted;
     }, { origin, secret: fixture.secret, cookie: fixture.cookie });
     writeFileSync(join(profile, 'update-fixture-secret.bin'), Buffer.from(encrypted, 'base64'));
+    stage('downloadB');
     await app.evaluate(async () => { await globalThis.__pockymoeDesktopTest.updates.check(); });
     await until(async () => {
       const state = await app.evaluate(() => globalThis.__pockymoeDesktopTest.updates.state());
@@ -177,6 +303,7 @@ async function roundtrip() {
     try { readFileSync(`${downloaded}:Zone.Identifier`); motw = true; } catch (error) { if (error.code !== 'ENOENT') throw error; }
     assert.equal(motw, false, 'Electron net download unexpectedly has Mark of the Web');
     report.checks.downloadHasNoMarkOfTheWeb = true;
+    stage('installB');
     await app.evaluate(() => { void globalThis.__pockymoeDesktopTest.updates.install(); });
     const relaunched = await until(() => existsSync(resultPath) && JSON.parse(readFileSync(resultPath, 'utf8')), 'Installer did not genuinely relaunch B with the isolated data', 180_000);
     assert.equal(relaunched.version, versionB);
@@ -186,7 +313,7 @@ async function roundtrip() {
     assert.equal(relaunched.encryptedSecret, true);
     assert.notEqual(relaunched.pid, originalPid, 'B must be a new process');
     assert.equal(resolve(relaunched.executable).toLowerCase(), resolve(executable).toLowerCase());
-    report.checks.relaunchedB = true;
+    report.checks.relaunchedB = true; stage('verifyB');
     report.checks.cookieSurvived = true;
     report.checks.encryptedSecretSurvived = true;
     report.checks.differentProcess = true;
@@ -196,6 +323,9 @@ async function roundtrip() {
     report.checks.smartScreenDidNotBlockInCI = true;
     assert.ok(feedRequests > 0 && downloadRequests > 0, 'The actual fixture API and binary must be requested');
     console.log('Windows installed A -> verified B download -> silent NSIS update -> B relaunch passed; cookie and encrypted secret survived');
+  } catch (error) {
+    report.failure = { stage: report.stage, name: error.name };
+    throw error;
   } finally {
     // Only the test app/PIDs and isolated test installer are stopped/uninstalled.
     try { await app?.close(); } catch { /* A has already quit for the real update. */ }
@@ -216,4 +346,8 @@ async function roundtrip() {
 }
 
 if (process.argv.includes('--self-test')) await selfTest();
-else await roundtrip();
+else if (process.argv.includes('--diagnostics-only')) {
+  assert.equal(process.platform, 'win32');
+  const evidence = resolve(process.env.POCKYMOE_UPDATE_EVIDENCE || join(desktop, 'evidence', 'update-roundtrip'));
+  mkdirSync(evidence, { recursive: true }); windowsPreflight(evidence);
+} else await roundtrip();
