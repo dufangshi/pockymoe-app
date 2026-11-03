@@ -200,6 +200,9 @@ scripts/release-client.sh 0.3.0 --publish --notes-file /absolute/release-notes.m
   --output .local/client-release/0.3.0-publish
 ```
 
+Copy `desktop/release-notes-template.md` when preparing publication notes; it
+includes the short macOS Keychain prompt notice.
+
 `--publish` rebuilds and verifies before `gh release create --target <full SHA>
 --latest --notes-file ...`. It never updates an existing release. Each invocation
 requires an empty output folder and refuses extra files rather than deleting
@@ -490,7 +493,13 @@ Electron `net` writes no Mark of the Web stream; CI tests genuine A→B installe
 relaunch and preserved cookie/encrypted secret, while interactive SmartScreen
 behavior still needs real-device observation.
 
-**macOS Keychain limitation:** a stable self-signed identity does not establish an
+**macOS Keychain prompt:** macOS may ask once after each update. Choose **Always
+Allow** to keep sign-in and saved voice keys. If you deny access, sign in and enter
+voice keys again; the client keeps secure Keychain storage and never substitutes
+a mock Keychain or basic password store. Inaccessible voice keys stay encrypted
+and are not repeatedly decrypted during that launch.
+
+A stable self-signed identity does not establish an
 Apple TeamIdentifier. In the real updater A→B test macOS attached a build-specific
 `cdhash` partition ACL to the fixture Safe Storage item; B requested Keychain
 access despite the unchanged leaf certificate/designated requirement. The signed-DMG
@@ -500,8 +509,9 @@ be needed; seamless sign-in must not be assumed.
 
 **Draft limitation:** Web composer drafts are currently an in-memory Map, including
 File attachments. They survive route changes but **do not survive a full client
-quit/relaunch**. The page asks about unsent drafts and unsaved documents before
-requesting an update; cancel to keep working or save/send them first. The updater
+quit/relaunch**. The page names conversations with unsent text or attachments in the primary
+**更新并重启？** confirmation, alongside unsaved-document counts. The tray follows
+the same page flow. With nothing unsent or unsaved, updating is immediate; cancel to keep working or save/send them first. The updater
 does not claim to preserve them. Agents continue running on their Supervisors.
 
 ### Key backup and rotation

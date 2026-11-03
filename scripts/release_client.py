@@ -253,7 +253,9 @@ def main():
             temporary_public = Path(temporary) / 'validation-public-key.pem'
             run('node', ROOT / 'scripts/update-signatures.cjs', 'sign-validation', args.version, output, metadata, temporary_public)
             public_key.write_bytes(temporary_public.read_bytes())
-        original = args.notes_file.read_text() if args.notes_file else f'Pockymoe {args.version}\n'
+        template = ROOT / 'desktop/release-notes-template.md'
+        default_notes = template.read_text().replace('{version}', args.version) if template.is_file() else f'Pockymoe {args.version}\n\nmacOS may show one Keychain prompt after each update; choose Always Allow to retain sign-in and saved voice keys.\n'
+        original = args.notes_file.read_text() if args.notes_file else default_notes
         original = re.sub(r'<!-- pockymoe-updates-v1\n[\s\S]*?\n-->\n?', '', original)
         notes.write_text(original.rstrip() + '\n\n' + metadata.read_text())
     scan(notes)
