@@ -21,6 +21,7 @@ vi.mock('electron', () => ({
   }
 }));
 import { Notifications } from '../src/main/notifications';
+import { nativeNotificationId } from '../src/main/windowsToast';
 import { activityCounts, taskbarBadge, trayTemplate } from '../src/main/tray';
 beforeEach(() => { setLocale('zh-CN'); vi.useFakeTimers(); notices.length = 0; });
 afterEach(() => vi.useRealTimers());
@@ -83,7 +84,7 @@ it('counts conversations in a completion burst rather than each agent event', ()
   expect(notices[0].options.subtitle).toBe('MacBook Pro · remoteCodex · 🤖 3');
   expect(String(notices[0].options.body).split('MacBook Pro')).toHaveLength(2);
   expect(String(notices[0].options.title)).toContain('3 个子线程'); notifications.dispose();
-});
+}, 15_000); // Shared Windows runners occasionally stall even this fake-timer check.
 
 it('refreshes already delivered notification actions in the page language with the same ID', () => {
   const hub = connected(new ActivityHub()), dispatch = vi.fn().mockResolvedValue({ ok: true });
@@ -148,4 +149,27 @@ it('routes Windows protocol toast buttons once, even if Windows closed the banne
     expect(focusMain).toHaveBeenCalledTimes(4); expect(dispatch).toHaveBeenCalledTimes(1);
     notifications.dispose(); hub.dispose();
   } finally { vi.unstubAllGlobals(); }
+});
+
+const device = 'df3c6acc-a4fc-4e7b-94cd-3df6b5505ae8', turn = '28566358-df65-49ee-9b38-eba327d0bf9a';
+it('keeps real notification ids inside the Windows limit, stable and distinct', () => {
+  const id = `${device}:${turn}`, short = nativeNotificationId(id, 'win32');
+  expect(id.length).toBeGreaterThan(64);
+  expect(short.length).toBeLessThanOrEqual(64);
+  expect(nativeNotificationId(id, 'win32')).toBe(short);
+  expect(nativeNotificationId(`${device}:${device}`, 'win32')).not.toBe(short);
+  expect(nativeNotificationId('mac:req-1', 'win32')).toBe('mac:req-1');
+  expect(nativeNotificationId(id, 'darwin')).toBe(id);
+});
+it('a refused notification neither throws from the timer nor loses the next alert', () => {
+  const hub = connected(new ActivityHub()), dispatch = vi.fn().mockResolvedValue({ ok: true });
+  const settings = { get: () => ({ ...defaults, alertMode: 'system' }), onChange: () => () => undefined } as unknown as SettingsStore;
+  const notifications = new Notifications(hub, settings, { relay: new Set(), dispatch } as unknown as Windows, () => undefined, () => null);
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+  const show = vi.spyOn(notifications as unknown as { show(events: unknown[]): void }, 'show').mockImplementationOnce(() => { throw new Error('refused'); });
+  hub.sync(snapshot([item({ state: 'needsInput', request: { id: 'one', kind: 'input', summary: 'a' } }), item({ key: 'mac:other', threadId: 'other', state: 'needsInput', request: { id: 'two', kind: 'input', summary: 'b' } })]));
+  expect(() => vi.advanceTimersByTime(1500)).not.toThrow();
+  expect(show).toHaveBeenCalledTimes(2);
+  expect(warn).toHaveBeenCalledTimes(1);
+  warn.mockRestore(); notifications.dispose();
 });

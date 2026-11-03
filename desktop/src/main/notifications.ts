@@ -2,7 +2,7 @@ import { t, formatList } from '../shared/i18n';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { toastActivation, toastXml } from './windowsToast';
+import { nativeNotificationId, toastActivation, toastXml } from './windowsToast';
 import { app, Notification, powerMonitor } from 'electron';
 import type { ActivityEvent, ActivityItem, PetController } from '../shared/contract';
 import { conversationKey, alertTitle, groupActivities, isAgentActivity } from '../shared/activityGroups';
@@ -33,10 +33,10 @@ export class Notifications {
   private delivered = new Map<Notification, ActivityEvent[]>();
   refreshLocale(): void {
     const groups = [...this.delivered.entries()];
-    for (const [notification, events] of groups) { notification.close(); this.show(events); }
+    for (const [notification, events] of groups) { notification.close(); this.deliver(events); }
   }
   constructor(private hub: ActivityHub, private settings: SettingsStore, private windows: Windows, private pet: () => PetController | undefined, private focusedKey: () => string | null) {
-    this.batch = new EventCoalescer(events => this.show(events));
+    this.batch = new EventCoalescer(events => this.deliver(events));
     hub.onEvent(event => {
       if (event.type === 'resolved') { this.close(event.alertId); return; }
       const decision = this.policy(event);
@@ -62,6 +62,10 @@ export class Notifications {
     if (process.platform === 'darwin') Notification.remove(notification?.id || id);
     this.active.delete(id);
   }
+  /** A notification the system refuses must not take the app down with it: the alert is also in the app. */
+  private deliver(events: ActivityEvent[]): void {
+    try { this.show(events); } catch (error) { console.warn('Notification failed', error instanceof Error ? error.message : 'unknown'); }
+  }
   private show(all: ActivityEvent[]): void {
     const events = all.filter(e => this.policy(e).system);
     if (!events.length || !Notification.isSupported()) return;
@@ -72,8 +76,8 @@ export class Notifications {
     const related = [...(this.hub.snapshot()?.items || []), ...events.map(event => event.item)].filter(candidate => conversationKey(candidate) === conversationKey(item));
     const token = randomUUID();
     const notification = new Notification({
-      id: first.alertId,
-      groupId: `pockymoe:${conversationKey(item)}`,
+      id: nativeNotificationId(first.alertId),
+      groupId: nativeNotificationId(`pockymoe:${conversationKey(item)}`),
       title: multiple && conversations.length > 1 ? t(allComplete ? '{count} 个对话完成' : '{count} 个对话有新进展', { count: conversations.length }) : alertTitle(events.map(event => event.item), this.hub.snapshot()?.items, true),
       subtitle: multiple && conversations.length > 1 ? 'Pockymoe' : notificationContext(related),
       body: multiple ? formatList(conversations.map(group => `${group.title} · ${notificationContext(group.items)}`).slice(0, 3)) : item.state === 'interrupted' ? `${t('已中断')}${item.resultSummary ? ` · ${item.resultSummary}` : ''}` : item.request?.summary || item.resultSummary || (first.type === 'failed' ? t('任务遇到了问题') : t('已完成')),

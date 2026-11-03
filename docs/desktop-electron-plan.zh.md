@@ -169,7 +169,7 @@ Web 端用一个 `useHostCapabilities()` 来读取。宿主不支持的能力，
 | 快捷键 | 只有页面内快捷键 | 原生菜单加 Cmd/Ctrl+N、K、1–9；另有一个全局快捷键唤起快捷窗口 |
 | 文件拖入 | 走浏览器上传 | 能拿到本机真实路径（`webUtils.getPathForFile`），作为附件上传 |
 | 登录 | 当前页面 | OAuth 在 App 内同一 session 的窗口中打开，cookie 互通（Google 可能会拦截嵌入式窗口，需验证） |
-| 更新 | relay 部署 | UI 跟随 relay；外壳自身单独自动更新 |
+| 更新 | relay 部署 | UI 跟随 relay；外壳后台检查并验证签名安装包；草稿/未保存文件确认后安装重启，卸载被拒则取消；无有效签名不提供链接；旧版手动下载 |
 | 只在网页出现 | PWA 安装提示、“下载桌面版”横幅 | 桌面端隐藏这两项 |
 | 只在桌面出现 | — | 托盘菜单（活跃任务列表）、Dock 角标（待审批数或进行中数）、桌宠、快捷窗口 |
 
@@ -241,13 +241,13 @@ relay 网页（主窗口，持有密钥与连接）
 
 **与旧的 macOS SwiftUI 版的关系**：已决定删除（2026-11-01）。Electron 版是唯一的桌面端。
 
-**签名**：macOS 用 Developer ID 签名、公证，并配置 APNs entitlement；Windows 做代码签名。
+**签名**：当前公开 macOS 构建使用固定、无个人信息的自签名证书，硬化运行时关闭，不公证；Windows NSIS 未做 Authenticode 签名。两平台的安装包元数据以独立 Ed25519 密钥签在 Release body 中。未发布验证每次使用一次性元数据密钥，只有 clean main 上显式 --publish 使用生产 Ed25519 密钥；本机私钥以 0600 保存，防 GitHub 账号泄露伪造更新，不防以本机同一用户身份运行的代码。Developer ID、公证和 APNs 配置仍需另行准备。
 
 ### 分期
 
 | 期 | 内容 | 涉及仓库 |
 |---|---|---|
-| P0 外壳 | 选择 relay、主窗口远端加载、托盘、开机自启、关窗不退出、原生菜单和快捷键、下载接管、外链处理、外壳自动更新、签名打包 | remote-codex-app |
+| P0 外壳 | 选择 relay、主窗口远端加载、托盘、开机自启、关窗不退出、原生菜单和快捷键、下载接管、外链处理、外壳签名校验与应用内更新、签名打包 | remote-codex-app |
 | P1 宿主桥和通知 | `remoteCodexHost` 和 `HostCapabilities`；`activity.sync`；L1 本地通知（含去重、抑制、点击跳转、审批按钮）；Dock 角标；Web 端按能力适配标题栏、通知设置和下载 | 两个仓库，Web 部分要走 relay 部署 |
 | P2 桌宠 MVP | 透明悬浮窗、Codex 图集播放器、状态映射、气泡、任务卡、吸附、导入宠物包、一个原创默认宠物 | remote-codex-app |
 | P3 离线推送 | macOS APNs 注册；relay 按订阅区分 topic 并加 collapse-id；supervisor 投递 `awaiting_input` 事件 | 两个仓库 |

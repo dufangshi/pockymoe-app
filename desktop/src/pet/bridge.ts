@@ -2,7 +2,7 @@ import type { PetSound } from './sounds';
 import type { ActivityItem, ActivityRecent, Appearance, DesktopSettings, HostCommandResult } from '../shared/contract';
 import type { SpriteState } from './animation';
 import type { PetBubble } from './bubbles';
-import type { DockEdge, Rect } from './geometry';
+import type { DockEdge, FaceBox, Rect, PeekArt } from './geometry';
 import type { ClipFormat, PetClip } from './packs';
 export interface PetViewState {
   appearance: Appearance;
@@ -23,7 +23,10 @@ export interface PetViewState {
   moodEpoch: number;
   /** Clicking the pet: the running threads above the controls. */
   pinned: boolean;
-  clips: { format: ClipFormat; states: Partial<Record<SpriteState, PetClip[]>>; epoch: number } | null;
+  faceBox?: FaceBox;
+  talk?: PetClip;
+  peekArt?: PeekArt & { imageUrl: string };
+  clips: { format: ClipFormat; states: Partial<Record<SpriteState, PetClip[]>>; epoch: number; urls?: Record<string, string> } | null;
   bubble: PetBubble | null;
   settings: Pick<DesktopSettings, 'petSize' | 'petMini' | 'petSound' | 'petVoice' | 'petId' | 'petMutes'>;
   imageUrl: string;

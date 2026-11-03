@@ -1,0 +1,41 @@
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { generateKeyPairSync, sign, createHash } from 'node:crypto';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import type { UpdateService } from '../src/main/updateCore';
+const boundary = vi.hoisted(() => ({ directory: '', fetch: vi.fn(), external: vi.fn(), prepare: vi.fn() }));
+vi.mock('electron', () => ({ app: { isPackaged: true, getVersion: () => '0.3.0', getPath: () => boundary.directory }, net: { fetch: boundary.fetch }, shell: { openExternal: boundary.external }, dialog: { showMessageBox: vi.fn() }, powerMonitor: {} }));
+vi.mock('../src/main/updateInstall', () => ({ prepareInstall: boundary.prepare, ManualInstall: class extends Error {}, InsufficientSpace: class extends Error {} }));
+let service: UpdateService | undefined;
+beforeEach(async () => {
+  vi.resetModules(); vi.clearAllMocks(); boundary.directory = await mkdtemp(join(tmpdir(), 'pockymoe-update-message-'));
+  vi.stubGlobal('__UPDATER_TEST_BUILD__', false);
+  vi.stubGlobal('__UPDATER_FEED__', 'https://api.github.com/repos/dufangshi/pockymoe-app/releases/latest');
+  vi.stubGlobal('__UPDATER_PUBLIC_KEY__', 'unused for unsigned release');
+});
+afterEach(async () => { service?.dispose(); await service?.settled(); service = undefined; vi.unstubAllGlobals(); await rm(boundary.directory, { recursive: true, force: true }); });
+it('reports an unverified version with OK only and never offers a link or icon', async () => {
+  boundary.fetch.mockResolvedValue(new Response(JSON.stringify({ tag_name: 'v0.4.0', prerelease: false, draft: false, body: '' })));
+  const updates = await import('../src/main/updates'); const { setLocale } = await import('../src/shared/i18n'); setLocale('zh-CN');
+  service = updates.createUpdates(() => true); const show = vi.fn().mockResolvedValue({ response: 0, checkboxChecked: false });
+  await updates.checkUpdate(show);
+  expect(show).toHaveBeenCalledWith({ title: 'Pockymoe', message: '发现版本 0.4.0，但无法验证它的签名，不提供更新', buttons: ['好'] });
+  expect(boundary.external).not.toHaveBeenCalled(); expect(boundary.prepare).not.toHaveBeenCalled();
+  expect(service.state()).toEqual({ status: 'idle' });
+});
+it.runIf(process.platform === 'darwin' || process.platform === 'win32')('cancels prepared installation before commit when a window cannot close', async () => {
+  const bytes = Buffer.from('verified fixture'), { privateKey, publicKey } = generateKeyPairSync('ed25519');
+  vi.stubGlobal('__UPDATER_PUBLIC_KEY__', publicKey.export({ type: 'spki', format: 'pem' }).toString());
+  const fileName = `Pockymoe-0.4.0-${process.platform === 'darwin' ? 'mac-arm64.dmg' : 'win-x64.exe'}`;
+  const value = { version: '0.4.0', platform: `${process.platform}-${process.arch}`, fileName, sha256: createHash('sha256').update(bytes).digest('hex'), size: bytes.length };
+  const entry = { ...value, signature: sign(null, Buffer.from(JSON.stringify(value)), privateKey).toString('base64') };
+  boundary.fetch.mockImplementation(async (url: string) => url.endsWith('/latest') ? new Response(JSON.stringify({ tag_name: 'v0.4.0', prerelease: false, draft: false, body: `<!-- pockymoe-updates-v1\n${JSON.stringify([entry])}\n-->`, assets: [{ name: fileName, size: bytes.length, browser_download_url: `https://github.com/dufangshi/pockymoe-app/releases/download/v0.4.0/${fileName}` }] })) : new Response(bytes));
+  const commit = vi.fn(), cancel = vi.fn(); boundary.prepare.mockResolvedValue({ commit, cancel });
+  const updates = await import('../src/main/updates'); const { UpdateCancelled } = await import('../src/main/updateWindows');
+  const { setLocale } = await import('../src/shared/i18n'); setLocale('zh-CN');
+  const close = vi.fn().mockRejectedValue(new UpdateCancelled()), restore = vi.fn();
+  service = updates.createUpdates(() => true, { close, restore }); await service.check(); await service.settled(); await service.install();
+  expect(close).toHaveBeenCalledOnce(); expect(cancel).toHaveBeenCalledOnce(); expect(restore).toHaveBeenCalledOnce(); expect(commit).not.toHaveBeenCalled();
+  expect(service.state()).toMatchObject({ status: 'error', error: '有未保存的文件，已取消更新', retryAllowed: true });
+});

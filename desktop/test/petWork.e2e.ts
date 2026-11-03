@@ -1,6 +1,8 @@
+import { openPetPanel } from './petPanel';
+import { PNG } from 'pngjs';
 import { recordLifecycle } from './lifecycle';
 import { test, expect, _electron as electron, type ElectronApplication, type Page } from '@playwright/test';
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { cpSync, writeFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -21,11 +23,11 @@ function wav(): Buffer {
   b.write('RIFF', 0); b.writeUInt32LE(36 + n * 2, 4); b.write('WAVEfmt ', 8); b.writeUInt32LE(16, 16); b.writeUInt16LE(1, 20); b.writeUInt16LE(1, 22); b.writeUInt32LE(24000, 24); b.writeUInt32LE(48000, 28); b.writeUInt16LE(2, 32); b.writeUInt16LE(16, 34); b.write('data', 36); b.writeUInt32LE(n * 2, 40);
   return b;
 }
-const FIXTURE = `<!doctype html><meta charset="utf-8"><title>Fixture</title><script>window.commands=[];window.pockymoeHost?.onCommand(command=>{window.commands.push(command);
+const FIXTURE = `<!doctype html><meta charset="utf-8"><title>Fixture</title><script>window.commands=[];window.fixtureReady=false;const installFixture=window.installFixture=()=>{window.stopFixture?.();window.stopFixture=window.pockymoeHost?.onCommand(command=>{window.commands.push(command);
   const data=command.type==='turnText'?{request:'修一下登录白屏',answer:'白屏已修好，原因是回调读取了未加载的用户信息。'}:command.type==='listConnections'?[{deviceId:'old',deviceName:'wsl',id:'c2',name:'Older',protocol:'openai_chat',model:'small',supervisorVersion:'0.13.41',needsUpdate:true},{deviceId:'mac',deviceName:'MacBook',id:'c1',name:'Main',protocol:'openai_chat',model:'small',supervisorVersion:'0.13.43',needsUpdate:false}]:command.type==='listMuteTargets'?{devices:[{id:'mac',label:'MacBook Pro'},{id:'pc',label:'Windows PC'}],workspaces:[{id:'mac:rc',label:'remoteCodex · MacBook Pro'}],threads:[{id:'mac:thread-1',label:'修复登录状态同步 · remoteCodex'}]}:command.type==='connectionModels'?[{id:'small',name:'Small model'},{id:'large',name:'Large model'}]:command.type==='completeWithConnection'?{text:'连接总结：白屏修好了。'}:undefined;
   if(command.type==='connectionModels'&&window.failModels){window.pockymoeHost.commandResult(command.id,{ok:false,error:'upstream refused'});return;}
   if(command.type==='completeWithConnection'&&command.connectionId==='c2'){window.pockymoeHost.commandResult(command.id,{ok:false,code:'supervisorTooOld',error:'x'});return;}
-  window.pockymoeHost.commandResult(command.id,{ok:true,...(data?{data}:{})});});</script>`;
+  window.pockymoeHost.commandResult(command.id,{ok:true,...(data?{data}:{})});});window.fixtureReady=true;};if(document.readyState==='loading')addEventListener('DOMContentLoaded',installFixture,{once:true});else installFixture();</script>`;
 test.beforeAll(async () => {
   server = createServer((req, res) => {
     let body = '';
@@ -57,6 +59,9 @@ test.beforeEach(async () => {
   await expect.poll(() => app.windows().some(window => window.url().startsWith(origin))).toBe(true);
   page = app.windows().find(window => window.url().startsWith(origin))!;
   await page.waitForLoadState('domcontentloaded');
+  // Match the real Web's post-mount command registration. An inline head script
+  // can announce readiness before the initial navigation event clears it.
+  await expect.poll(() => page.evaluate(() => (window as unknown as { fixtureReady?: boolean }).fixtureReady)).toBe(true);
   await expect.poll(() => page.evaluate(() => !!window.pockymoeHost)).toBe(true);
   await page.evaluate(() => window.pockymoeHost!.capabilities());
 });
@@ -141,20 +146,21 @@ test('working: the pet shows work while a thread runs', async () => {
 const speaker = { petVoice: true, petVoiceProvider: 'compatible' as const, petVoiceSpeed: 1, petVoiceSummary: true, petSummaryLanguage: 'zh-CN' as const };
 const remoteVoice = (): Partial<DesktopSettings> => ({ ...speaker, petVoiceRemotes: { compatible: { url: `${origin}/v1`, model: 't', voice: '', style: '', extra: '' } } });
 const openPreferences = async (): Promise<Page> => {
+  // fixtureReady is only a renderer flag: a late main navigation reset can clear
+  // Windows.ready after the inline listener registered. Re-register idempotently
+  // after load, then roundtrip the same-frame IPC before discovery can queue.
+  await page.evaluate(async () => { (window as unknown as { installFixture(): void }).installFixture(); await window.pockymoeHost!.capabilities(); });
   await app.evaluate(() => (globalThis as unknown as { __pockymoeDesktopTest: Testing }).__pockymoeDesktopTest.windows.createLocal('preferences'));
   await expect.poll(() => app.windows().some(window => window.url().includes('preferences'))).toBe(true);
   const preferences = app.windows().find(window => window.url().includes('preferences'))!;
   await preferences.locator('[data-section="pet"]').click();
   // Discovery starts when this section mounts. Open its pickers only after their
   // data arrives; an open picker deliberately defers replacing its options.
-  await preferences.evaluate(() => new Promise<void>(resolve => {
+  await expect.poll(() => preferences.evaluate(async () => {
     const bridge = (window as unknown as { pockymoeDesktop: import('../src/shared/local').LocalBridge }).pockymoeDesktop;
-    const ready = (state: import('../src/shared/local').LocalState): boolean => !!state.summary.muteTargets && (!state.settings.petVoiceSummary || state.summary.connections.length > 0);
-    // Await the data broadcasts produced by the UI's actual requests. A separate
-    // five-second polling deadline can expire before the query's own IPC deadline.
-    const stop = bridge.onState(state => { if (ready(state)) { stop(); resolve(); } });
-    void bridge.getState().then(state => { if (ready(state)) { stop(); resolve(); } });
-  }));
+    const state = await bridge.getState();
+    return { muteTargets: !!state.summary.muteTargets, connections: !state.settings.petVoiceSummary || state.summary.connections.length > 0 };
+  }), { timeout: 20_000, message: 'Fixture discovery must answer after the command-ready handshake' }).toEqual({ muteTargets: true, connections: true });
   return preferences;
 };
 test('summary: picks a saved upstream and its model, and reads what the model said', async () => {
@@ -268,6 +274,53 @@ test('silencing: the activity panel can silence a conversation', async () => {
   await expect(toggle).toHaveAttribute('aria-pressed', 'true');
   await glass.locator('[data-action="toggleMute"]').first().evaluate(element => (element as HTMLElement).click());
   await expect(glass.locator('[data-action="toggleMute"]').first()).toHaveAttribute('aria-pressed', 'false');
+});
+test('preferences discovery reannounces fixture readiness after a late navigation reset', async () => {
+  await settings(remoteVoice());
+  await app.evaluate(({ BrowserWindow }) => {
+    const relay = BrowserWindow.getAllWindows().find(w => !w.webContents.getURL().includes('pet/index.html'))!;
+    // Reproduce the host-side reset without destroying the loaded fixture listener.
+    relay.webContents.emit('did-start-navigation', {}, relay.webContents.getURL(), false, true);
+  });
+  const preferences = await openPreferences();
+  await expect(preferences.locator('#summary-source')).toBeVisible();
+  await preferences.locator('#summary-source').click();
+  await expect(preferences.getByRole('option', { name: 'Main · MacBook' })).toBeVisible();
+});
+test('panel opening waits for delayed glass state instead of toggling it closed', async () => {
+  await baseline();
+  const glass = await pet('glass'), sprite = await pet('sprite');
+  await app.evaluate(({ BrowserWindow }) => {
+    const glass = BrowserWindow.getAllWindows().find(w => w.webContents.getURL().includes('/pet/') && !!w.getParentWindow())!;
+    const send = glass.webContents.send.bind(glass.webContents), queue: (() => void)[] = [];
+    const replay = { hold: true, queue, modes: [] as string[], flush() { replay.hold = false; for (const send of queue.splice(0)) send(); } };
+    Object.assign(globalThis, { panelReplay: replay });
+    glass.webContents.send = (channel, ...args) => {
+      if (channel === 'rcDesktop:pet:state' && replay.hold) { replay.modes.push((args[0] as { mode: string }).mode); queue.push(() => { if (!glass.isDestroyed()) send(channel, ...args); }); }
+      else send(channel, ...args);
+    };
+  });
+  await glass.evaluate(() => {
+    Object.assign(window, { panelDeliveredModes: [] as string[] });
+    (window as unknown as { rcDesktop: { pet: { onState(listener: (state: { mode: string }) => void): unknown } } }).rcDesktop.pet.onState(state => { (window as unknown as { panelDeliveredModes: string[] }).panelDeliveredModes.push(state.mode); });
+  });
+  const toggle = () => sprite.evaluate(() => (window as unknown as { rcDesktop: { pet: { action(value: unknown): Promise<unknown> } } }).rcDesktop.pet.action({ type: 'toggleTray' }));
+  // Reproduce the old acceptance fixture: main has opened, glass DOM is stale,
+  // and a second toggle closes main again. This is the captured controls state.
+  await toggle(); expect(await glass.locator('.panel').count()).toBe(0); await toggle();
+  await app.evaluate(() => (globalThis as unknown as { panelReplay: { flush(): void } }).panelReplay.flush());
+  await expect.poll(() => glass.evaluate(() => (window as unknown as { panelDeliveredModes: string[] }).panelDeliveredModes.at(-1))).toBe('controls');
+  await expect(glass.locator('.panel')).toHaveCount(0);
+  const oldModes = await app.evaluate(() => (globalThis as unknown as { panelReplay: { modes: string[] } }).panelReplay.modes);
+  expect(oldModes).toContain('panel'); expect(oldModes.at(-1)).toBe('controls');
+  // Same delayed renderer, corrected helper: exactly one open, then wait.
+  await app.evaluate(() => { (globalThis as unknown as { panelReplay: { hold: boolean } }).panelReplay.hold = true; });
+  const opened = openPetPanel(app);
+  await expect.poll(() => app.evaluate(() => (globalThis as unknown as { panelReplay: { queue: unknown[] } }).panelReplay.queue.length)).toBeGreaterThan(0);
+  expect(await glass.locator('.panel').count()).toBe(0);
+  await app.evaluate(() => (globalThis as unknown as { panelReplay: { flush(): void } }).panelReplay.flush());
+  await opened; await glass.waitForTimeout(200); await expect(glass.locator('.panel')).toBeVisible();
+  writeFileSync(join(evidence, 'panel-delayed-render-regression.json'), JSON.stringify({ oldModes, corrected: 'one toggle then await glass panel', visible: true }));
 });
 test('a summary that works is not reported as failed when the voice cannot read it', async () => {
   await settings({ petVoice: true, petVoiceProvider: 'compatible', petVoiceRemotes: { compatible: { url: 'http://127.0.0.1:9/v1', model: 't', voice: '', style: '', extra: '' } }, petVoiceSummary: true, petSummaryConnection: { deviceId: 'mac', id: 'c1', name: 'Main · MacBook', model: '' } });
@@ -427,4 +480,291 @@ test('agent alerts: picker, names and six theme appearances', async () => {
   await expect(glass.locator('.bubble')).toHaveCount(0);
   await sync([{ ...b, state: 'needsInput', request: { id: 'agent-input', kind: 'input', summary: 'Please choose' } }]);
   await expect(glass.locator('.bubble-title')).toContainText('.tests');
+});
+
+test('clips: speech uses the audio envelope on the fixed rest face and resumes the action', async () => {
+  test.skip(!clipPack, 'POCKYMOE_CLIP_PACK is not set');
+  const manifest = JSON.parse(readFileSync(join(clipPack!, 'pet.json'), 'utf8')) as { remoteCodex?: { talk?: unknown } };
+  test.skip(!manifest.remoteCodex?.talk, 'Pack has no speech faces');
+  await settings({ petId: clipPackId(), petEdgeHide: false, petSize: 'L' }); await baseline(); await sync([item()]);
+  const sprite = await pet('sprite');
+  await expect(sprite.locator('#character')).toHaveClass(/clips/);
+  const rate = 24000, count = rate * 3, audio = Buffer.alloc(44 + count * 2);
+  audio.write('RIFF'); audio.writeUInt32LE(36 + count * 2, 4); audio.write('WAVEfmt ', 8); audio.writeUInt32LE(16, 16); audio.writeUInt16LE(1, 20); audio.writeUInt16LE(1, 22); audio.writeUInt32LE(rate, 24); audio.writeUInt32LE(rate * 2, 28); audio.writeUInt16LE(2, 32); audio.writeUInt16LE(16, 34); audio.write('data', 36); audio.writeUInt32LE(count * 2, 40);
+  for (let i = 0; i < count; i++) { const t = i / rate, amplitude = t < .3 || t > 2.3 ? 0 : t < 1.3 ? .045 : .3; audio.writeInt16LE(Math.round(Math.sin(i / rate * 2 * Math.PI * 220) * amplitude * 32767), 44 + i * 2); }
+  await app.evaluate(({ BrowserWindow }, bytes) => {
+    BrowserWindow.getAllWindows().find(w => w.webContents.getURL().includes('pet/index.html') && !w.getParentWindow())!.webContents.send('rcDesktop:pet:speech', Uint8Array.from(bytes));
+  }, [...audio]);
+  const samples = await sprite.evaluate(async () => {
+    const result: { face: string; body: string; visible: boolean; level: string | undefined; restBody: string }[] = [];
+    const hash = (id: string, bodyOnly = false): string => { const c = document.querySelector<HTMLCanvasElement>(id)!; const data = c.getContext('2d')!.getImageData(0, bodyOnly ? Math.floor(c.height / 2) : 0, c.width, bodyOnly ? Math.floor(c.height / 2) : c.height).data; let hash = 0; for (let i = 0; i < data.length; i += 16) hash = (hash * 31 + data[i]!) | 0; return String(hash); };
+    for (let i = 0; i < 100; i++) { result.push({ face: hash('#talk'), body: hash('#clip'), restBody: hash('#talk', true), visible: document.querySelector<HTMLElement>('#talk')!.style.display !== 'none' && document.querySelector('#character')!.classList.contains('talking'), level: document.querySelector<HTMLElement>('#talk')!.dataset.level }); await new Promise(resolve => setTimeout(resolve, 35)); }
+    return result;
+  });
+  const backing = await sprite.locator('#talk').evaluate(c => ({ width: (c as HTMLCanvasElement).width, height: (c as HTMLCanvasElement).height, cssWidth: document.querySelector('#character')!.clientWidth, cssHeight: document.querySelector('#character')!.clientHeight, dpr: devicePixelRatio }));
+  expect(backing.width).toBe(Math.round(backing.cssWidth * backing.dpr)); expect(backing.height).toBe(Math.round(backing.cssHeight * backing.dpr));
+  writeFileSync(join(evidence, 'speech-samples.json'), JSON.stringify(samples));
+  const visible = samples.filter(s => s.visible);
+  expect(visible.length).toBeGreaterThan(30);
+  expect(new Set(visible.map(s => s.restBody)).size).toBe(1);
+  expect(new Set(visible.map(s => s.level))).toEqual(new Set(['0', '1', '2']));
+  expect(new Set(visible.map(s => s.face)).size).toBeGreaterThanOrEqual(3);
+  expect(new Set(visible.map(s => s.body)).size).toBeGreaterThan(20);
+  expect(samples.at(-1)?.visible).toBe(false);
+  await expect(sprite.locator('#character')).not.toHaveClass(/talking/);
+  await expect(sprite.locator('#character')).toHaveClass(/clips/);
+});
+
+test('compact surfaces: four 28px rows keep metadata adjacent and open the remaining activities', async () => {
+  await baseline(); await settings({ petEdgeHide: false });
+  const items = Array.from({ length: 6 }, (_, i) => item({ key: `mac:compact-${i}`, threadId: `compact-${i}`, title: `A deliberately long conversation title with a meaningful ending ${i}`, deviceName: 'Studio' }));
+  await sync(items);
+  const sprite = await pet('sprite'), glass = await pet('glass');
+  await sprite.evaluate(() => (window as unknown as { rcDesktop: { pet: { action(value: unknown): Promise<unknown> } } }).rcDesktop.pet.action({ type: 'click' }));
+  await expect(glass.locator('.running-row')).toHaveCount(4);
+  await expect(glass.locator('.running-more')).toHaveText('2 more');
+  const measured = await glass.evaluate(() => {
+    const rect = (s: string) => document.querySelector(s)!.getBoundingClientRect().toJSON();
+    return { root: rect('#app'), row: rect('.running-row'), title: rect('.running-title'), device: rect('.running-device'), more: rect('.running-more'), control: rect('.controls button'), status: rect('.running-row .pockymoe-status-mark') };
+  });
+  expect(measured.root.width).toBeLessThanOrEqual(280); expect(measured.row.height).toBe(28); expect(measured.more.height).toBe(22); expect(measured.control.height).toBe(28); expect(measured.status.width).toBe(10);
+  expect(measured.device.x - measured.title.right).toBeLessThanOrEqual(6.5);
+  await glass.locator('.running-more').click();
+  await expect(glass.locator('.task-row')).toHaveCount(6);
+});
+
+test('compact surfaces: a three-line bubble reveals full text on existing keyboard focus without moving the pet', async () => {
+  await baseline(); await settings({ petEdgeHide: false });
+  const summary = '确认桌面更新后的状态同步、键盘导航和窗口焦点，保留现有未发送的草稿与工作记录。'.repeat(3);
+  await sync([item()]);
+  await sync([item({ state: 'needsInput', request: { id: 'compact-summary', kind: 'approval', summary } })]);
+  const glass = await pet('glass');
+  await expect(glass.locator('.request-summary')).toBeVisible();
+  const before = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find(w => w.webContents.getURL().includes('pet/index.html') && !w.getParentWindow())!.getBounds());
+  const clipped = await glass.locator('.request-summary').evaluate(e => ({ height: e.clientHeight, full: e.scrollHeight }));
+  expect(clipped.height).toBeLessThanOrEqual(34); expect(clipped.full).toBeGreaterThan(clipped.height);
+  await glass.locator('.bubble-title').focus();
+  await expect(glass.getByRole('tooltip')).toHaveText(summary.trim());
+  await expect(glass.locator('.bubble-title')).toBeFocused();
+  expect(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find(w => w.webContents.getURL().includes('pet/index.html') && !w.getParentWindow())!.getBounds())).toEqual(before);
+});
+
+test('compact surfaces: Windows pet tint model keeps text above 4.5 on white and black', async () => {
+  await finish(); const glass = await pet('glass');
+  await glass.evaluate(() => { document.documentElement.dataset.platform = 'win32'; });
+  await glass.mouse.move(500, 500);
+  const results: { pack: string; effective: string; tint: number; minContrast: number }[] = [];
+  for (const pack of ['classic', 'plum-pocket', 'terminal']) for (const effective of ['light', 'dark'] as const) {
+    await app.evaluate((_e, value) => globalThis.__pockymoeDesktopTest.appearance.sync(value), { pack, effective, accent: '#ad782e' });
+    for (const tint of [85, 95, 100]) {
+      await glass.evaluate(solid => { document.documentElement.dataset.glassFallback = String(solid); }, tint === 100);
+      if (tint === 95) await glass.locator('.glass').hover(); else await glass.mouse.move(500, 500);
+      const minContrast = await glass.evaluate(() => {
+        const surface = document.querySelector<HTMLElement>('.glass')!;
+        const style = getComputedStyle(surface), canvas = document.createElement('canvas'); canvas.width = canvas.height = 1;
+        const c = canvas.getContext('2d')!;
+        const rgb = (color: string, backdrop: string) => { c.clearRect(0, 0, 1, 1); c.fillStyle = backdrop; c.fillRect(0, 0, 1, 1); c.fillStyle = color; c.fillRect(0, 0, 1, 1); return [...c.getImageData(0, 0, 1, 1).data].slice(0, 3); };
+        const lum = (rgb: number[]) => rgb.map(v => v / 255).map(v => v <= .04045 ? v / 12.92 : ((v + .055) / 1.055) ** 2.4).reduce((sum, v, i) => sum + v * [.2126, .7152, .0722][i]!, 0);
+        let min = Infinity;
+        for (const backdrop of ['#fff', '#000']) {
+          const bg = lum(rgb(style.backgroundColor, backdrop));
+          for (const color of [style.color, getComputedStyle(document.querySelector('.bubble-device')!).color]) { const fg = lum(rgb(color, backdrop)); min = Math.min(min, (Math.max(bg, fg) + .05) / (Math.min(bg, fg) + .05)); }
+        }
+        return min;
+      });
+      const alpha = await glass.locator('.glass').evaluate(e => { const c = document.createElement('canvas').getContext('2d')!; c.fillStyle = getComputedStyle(e).backgroundColor; c.fillRect(0, 0, 1, 1); return c.getImageData(0, 0, 1, 1).data[3]!; });
+      expect(Math.abs(alpha - tint / 100 * 255)).toBeLessThanOrEqual(1);
+      results.push({ pack, effective, tint, minContrast }); expect(minContrast).toBeGreaterThanOrEqual(4.5);
+    }
+  }
+  const { writeFile } = await import('node:fs/promises');
+  await writeFile(join(evidence, 'pet-tint-contrast-model.json'), JSON.stringify({ kind: 'CSS sRGB alpha model; native Acrylic unverified', results }, null, 2));
+});
+
+test('compact surfaces: native Windows CI acrylic contrast when desktop capture is available', async () => {
+  test.skip(process.platform !== 'win32' || !process.env.CI, 'Native Acrylic requires an interactive Windows CI desktop');
+  test.setTimeout(60_000);
+  await finish(); await movePetUnderPointer();
+  const glass = await pet('glass'); await expect(glass.locator('.bubble')).toBeVisible();
+  const backdropId = await app.evaluate(async ({ BrowserWindow }) => {
+    const glass = BrowserWindow.getAllWindows().find(w => w.webContents.getURL().includes('pet/index.html') && !!w.getParentWindow())!;
+    const b = glass.getBounds(), w = new BrowserWindow({ x: b.x - 24, y: b.y - 24, width: b.width + 48, height: b.height + 48, frame: false, backgroundColor: '#fff' });
+    await w.loadURL('data:text/html,<body style="margin:0;background:white">'); w.show(); glass.showInactive(); return w.id;
+  });
+  const { writeFile } = await import('node:fs/promises');
+  const measurements: { pack: string; effective: string; backdrop: string; contrast: number; nativeBackground: number[]; clearBackdrop: number[] }[] = [];
+  let unavailable = '';
+  try {
+    for (const pack of ['classic', 'plum-pocket', 'terminal']) for (const effective of ['light', 'dark'] as const) for (const backdrop of ['white', 'black']) {
+      await app.evaluate((_e, value) => globalThis.__pockymoeDesktopTest.appearance.sync(value), { pack, effective, accent: '#ad782e' });
+      await app.evaluate(async ({ BrowserWindow }, value) => {
+        const w = BrowserWindow.fromId(value.id)!;
+        const glass = BrowserWindow.getAllWindows().find(w => w.webContents.getURL().includes('pet/index.html') && !!w.getParentWindow())!;
+        const b = glass.getBounds(); w.setBounds({ x: b.x - 24, y: b.y - 24, width: b.width + 48, height: b.height + 48 });
+        await w.webContents.executeJavaScript(`document.body.style.background=${JSON.stringify(value.backdrop)}`); w.show(); glass.showInactive();
+      }, { id: backdropId, backdrop });
+      // DWM material recomposition follows the page paint, rather than its IPC acknowledgement.
+      await glass.waitForTimeout(250);
+      const native = await app.evaluate(async ({ BrowserWindow, screen, desktopCapturer }) => {
+        const w = BrowserWindow.getAllWindows().find(w => w.webContents.getURL().includes('pet/index.html') && !!w.getParentWindow())!, bounds = w.getBounds(), display = screen.getDisplayMatching(bounds);
+        try {
+          const sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: Math.round(display.bounds.width * display.scaleFactor), height: Math.round(display.bounds.height * display.scaleFactor) } });
+          const source = sources.find(s => s.display_id === String(display.id));
+          return { bounds, display: display.bounds, image: source && !source.thumbnail.isEmpty() ? source.thumbnail.toPNG().toString('base64') : null };
+        } catch { return { bounds, display: display.bounds, image: null }; }
+      });
+      if (!native.image) { unavailable = 'Desktop capture unavailable'; break; }
+      const image = PNG.sync.read(Buffer.from(native.image, 'base64')), sx = image.width / native.display.width, sy = image.height / native.display.height;
+      const pixel = (x: number, y: number): number[] => {
+        const px = Math.round((x - native.display.x) * sx), py = Math.round((y - native.display.y) * sy);
+        if (px < 0 || py < 0 || px >= image.width || py >= image.height) return [];
+        return [...image.data.subarray((py * image.width + px) * 4, (py * image.width + px) * 4 + 3)];
+      };
+      const clear = pixel(native.bounds.x - 20, native.bounds.y + 14), expected = backdrop === 'white' ? 255 : 0;
+      if (clear.length !== 3 || clear.some(v => Math.abs(v - expected) > 4)) { unavailable = 'Captured desktop does not show the controlled backdrop'; break; }
+      const colors = await glass.evaluate(() => {
+        const c = document.createElement('canvas').getContext('2d')!;
+        return [getComputedStyle(document.querySelector('.glass')!).color, getComputedStyle(document.querySelector('.bubble-device')!).color].map(color => { c.clearRect(0, 0, 1, 1); c.fillStyle = color; c.fillRect(0, 0, 1, 1); return [...c.getImageData(0, 0, 1, 1).data].slice(0, 3); });
+      });
+      const luminance = (rgb: number[]) => rgb.map(v => v / 255).map(v => v <= .04045 ? v / 12.92 : ((v + .055) / 1.055) ** 2.4).reduce((sum, v, i) => sum + v * [.2126, .7152, .0722][i]!, 0);
+      const nativeBackground = pixel(native.bounds.x + 5, native.bounds.y + 14);
+      if (nativeBackground.length !== 3) { unavailable = 'Native coordinates do not map inside the captured display'; break; }
+      const bg = luminance(nativeBackground);
+      const contrast = Math.min(...colors.map(color => { const fg = luminance(color); return (Math.max(bg, fg) + .05) / (Math.min(bg, fg) + .05); }));
+      measurements.push({ pack, effective, backdrop, contrast, nativeBackground, clearBackdrop: clear });
+      const left = Math.max(0, Math.floor((native.bounds.x - native.display.x) * sx)), top = Math.max(0, Math.floor((native.bounds.y - native.display.y) * sy));
+      if (left >= image.width || top >= image.height) { unavailable = 'Native crop lies outside the captured display'; break; }
+      const crop = new PNG({ width: Math.min(image.width - left, Math.ceil(native.bounds.width * sx)), height: Math.min(image.height - top, Math.ceil(native.bounds.height * sy)) });
+      PNG.bitblt(image, crop, left, top, crop.width, crop.height, 0, 0);
+      await writeFile(join(evidence, `pet-native-acrylic-${pack}-${effective}-${backdrop}.png`), PNG.sync.write(crop));
+      expect(contrast).toBeGreaterThanOrEqual(4.5);
+    }
+  } finally {
+    await app.evaluate(({ BrowserWindow }, id) => BrowserWindow.fromId(id)?.destroy(), backdropId);
+    await writeFile(join(evidence, 'pet-native-acrylic-contrast.json'), JSON.stringify({ kind: 'Native Windows composited desktop background, CSS foreground colors', status: unavailable || measurements.length !== 12 ? 'unverified' : 'measured', reason: unavailable, measurements }, null, 2));
+  }
+  test.skip(!!unavailable, unavailable);
+});
+
+test('review: compact statuses retain the running ring and waiting bubble at 10px', async () => {
+  await baseline(); await settings({ petEdgeHide: false }); await sync([item()]);
+  const sprite = await pet('sprite'), glass = await pet('glass');
+  const act = (value: unknown) => sprite.evaluate(value => (window as unknown as { rcDesktop: { pet: { action(value: unknown): Promise<unknown> } } }).rcDesktop.pet.action(value), value);
+  await act({ type: 'click' });
+  const running = glass.locator('.running-row .pockymoe-status-mark[data-status="running"]');
+  await expect(running).toHaveCSS('width', '10px'); await expect(running.locator('circle')).toHaveCount(2); await expect(running.locator('.status-mark-orbit')).toHaveCount(1);
+  await act({ type: 'close' });
+  await sync([item({ state: 'needsInput', request: { id: 'review-mark', kind: 'approval', summary: 'Review the result' } })]);
+  const waiting = glass.locator('.bubble-line .pockymoe-status-mark[data-status="waiting"]');
+  await expect(waiting).toHaveCSS('width', '10px'); await expect(waiting.locator('path')).toHaveCount(1); await expect(waiting.locator('circle')).toHaveCount(0);
+  await expect(waiting).toHaveAttribute('aria-label', 'Waiting for you');
+});
+
+test('clips: slender side peeks crop the body and hit only the visible head', async () => {
+  test.skip(!clipPack, 'POCKYMOE_CLIP_PACK is not set');
+  const manifest = JSON.parse(readFileSync(join(clipPack!, 'pet.json'), 'utf8')) as { remoteCodex?: { faceBox?: number[]; peek?: unknown } };
+  const face = manifest.remoteCodex?.faceBox;
+  test.skip(!face || face[3]! - face[1]! >= .28, 'Requires a slender pack face box');
+  await settings({ petId: clipPackId(), petEdgeHide: true }); await baseline();
+  const sprite = await pet('sprite');
+  await expect(sprite.locator('#character')).toHaveClass(/clips/);
+  await app.evaluate(({ BrowserWindow, screen }) => {
+    screen.getCursorScreenPoint = () => ({ x: -10000, y: -10000 });
+    const w = BrowserWindow.getAllWindows().find(w => w.webContents.getURL().includes('pet/index.html') && !w.getParentWindow())!;
+    const original = w.setIgnoreMouseEvents.bind(w);
+    Object.assign(globalThis, { reviewIgnored: true });
+    w.setIgnoreMouseEvents = (value, options) => { Object.assign(globalThis, { reviewIgnored: value }); original(value, options); };
+  });
+  const ignored = () => app.evaluate(() => (globalThis as unknown as { reviewIgnored: boolean }).reviewIgnored);
+  const act = (value: unknown) => sprite.evaluate(value => (window as unknown as { rcDesktop: { pet: { action(value: unknown): Promise<unknown> } } }).rcDesktop.pet.action(value), value);
+  for (const edge of ['left', 'right'] as const) {
+    const { bounds, area } = await app.evaluate(({ BrowserWindow, screen }) => ({ bounds: BrowserWindow.getAllWindows().find(w => w.webContents.getURL().includes('pet/index.html') && !w.getParentWindow())!.getBounds(), area: screen.getPrimaryDisplay().workArea }));
+    // Stay inside this display: overshooting can legitimately select a neighboring monitor.
+    const x = edge === 'left' ? area.x : area.x + area.width - bounds.width, y = area.y + 120;
+    await act({ type: 'dragStart', x: bounds.x, y: bounds.y }); await act({ type: 'dragMove', x, y }); await act({ type: 'dragEnd', x, y });
+    await expect(sprite.locator('#app')).toHaveAttribute('data-edge', edge); await expect(sprite.locator('#app')).toHaveAttribute('data-dock-amount', '1');
+    // Wait for the existing slide to settle before measuring painted pixels.
+    await sprite.waitForTimeout(250);
+    const transform = await sprite.locator('#character').evaluate(e => new DOMMatrix(getComputedStyle(e).transform).b);
+    if (manifest.remoteCodex?.peek) expect(transform).toBe(0);
+    else expect(edge === 'left' ? transform : -transform).toBeGreaterThan(.2);
+    const png = PNG.sync.read(await sprite.screenshot({ omitBackground: true, scale: 'css' }));
+    const opaque: { x: number; y: number }[] = []; let belowHead = 0;
+    for (let y = 0; y < png.height; y++) for (let x = 0; x < png.width; x++) if (png.data[(y * png.width + x) * 4 + 3]! > 200) { opaque.push({ x, y }); if (y > png.height / 2) belowHead++; }
+    expect(opaque.length).toBeGreaterThan(30);
+    if (manifest.remoteCodex?.peek) {
+      // Long hair is intentionally below the face. It must end naturally inside
+      // the fixed viewport, not disappear into its bottom edge.
+      expect(Math.max(...opaque.map(p => p.y))).toBeLessThan(png.height - 4);
+      expect(Math.min(...opaque.map(p => p.y))).toBeGreaterThan(0);
+    } else expect(belowHead).toBe(0);
+    const head = opaque[Math.floor(opaque.length / 2)]!;
+    await sprite.mouse.move(head.x + .5, head.y + .5); await expect.poll(ignored).toBe(false);
+    await sprite.mouse.move(5, png.height * .75); await expect.poll(ignored).toBe(true);
+    if (edge === 'right') {
+      await sprite.mouse.click(head.x + .5, head.y + .5);
+      await expect(sprite.locator('#app')).toHaveAttribute('data-mood', 'poked');
+    }
+  }
+});
+
+
+test('clips: top and bottom hold a real rest frame at full backing resolution', async () => {
+  test.skip(!clipPack, 'POCKYMOE_CLIP_PACK is not set');
+  const manifest = JSON.parse(readFileSync(join(clipPack!, 'pet.json'), 'utf8')) as { remoteCodex: { clips: { idle: { path: string; role?: string }[] } } };
+  const rest = manifest.remoteCodex.clips.idle.find(c => !c.role)!.path;
+  await settings({ petId: clipPackId(), petEdgeHide: true, petSize: 'L' }); await baseline();
+  const sprite = await pet('sprite'); await expect(sprite.locator('#character')).toHaveClass(/clips/);
+  await app.evaluate(({ screen }) => { screen.getCursorScreenPoint = () => ({ x: -10000, y: -10000 }); });
+  await sprite.evaluate(() => {
+    const draw = CanvasRenderingContext2D.prototype.drawImage;
+    Object.assign(window, { dockClipDraws: [] as string[] });
+    const wrapped = function (this: CanvasRenderingContext2D, ...args: unknown[]): void {
+      if (this.canvas.id === 'clip') (window as unknown as { dockClipDraws: string[] }).dockClipDraws.push(args[0] instanceof VideoFrame ? 'video-frame' : args[0] instanceof ImageBitmap ? 'bitmap-frame' : 'other');
+      Reflect.apply(draw, this, args);
+    };
+    CanvasRenderingContext2D.prototype.drawImage = wrapped as typeof draw;
+  });
+  for (const edge of ['top', 'bottom'] as const) {
+    const { bounds, area } = await app.evaluate(({ BrowserWindow, screen }) => ({ bounds: BrowserWindow.getAllWindows().find(w => w.webContents.getURL().includes('pet/index.html') && !w.getParentWindow())!.getBounds(), area: screen.getPrimaryDisplay().workArea }));
+    const x = area.x + Math.round(area.width / 2), y = edge === 'top' ? area.y : area.y + area.height - bounds.height;
+    const action = (value: unknown) => sprite.evaluate(value => (window as unknown as { rcDesktop: { pet: { action(value: unknown): Promise<unknown> } } }).rcDesktop.pet.action(value), value);
+    await action({ type: 'dragStart', x: bounds.x, y: bounds.y }); await action({ type: 'dragMove', x, y }); await action({ type: 'dragEnd', x, y });
+    await expect(sprite.locator('#app')).toHaveAttribute('data-edge', edge); await expect(sprite.locator('#app')).toHaveAttribute('data-dock-amount', '1');
+    await expect(sprite.locator('#clip')).toHaveAttribute('data-clip-path', rest);
+    await expect(sprite.locator('#clip')).toHaveAttribute('data-media-frame', '0');
+    const canvas = await sprite.locator('#clip').evaluate(c => ({ backing: [(c as HTMLCanvasElement).width, (c as HTMLCanvasElement).height], expected: [Math.round(c.clientWidth * devicePixelRatio), Math.round(c.clientHeight * devicePixelRatio)], visibility: getComputedStyle(c).visibility, atlas: getComputedStyle(document.querySelector('#sprite')!).display, draws: (window as unknown as { dockClipDraws: string[] }).dockClipDraws }));
+    expect(canvas.backing).toEqual(canvas.expected); expect(canvas.visibility).toBe('visible'); expect(canvas.atlas).toBe('none');
+    expect(canvas.draws.some(kind => kind === 'video-frame' || kind === 'bitmap-frame')).toBe(true);
+    // A held frame must resize too; no animation tick will choose another index.
+    for (const petSize of ['M', 'L'] as const) {
+      await settings({ petSize });
+      await expect.poll(() => sprite.locator('#clip').evaluate(c => (c as HTMLCanvasElement).width === Math.round(c.clientWidth * devicePixelRatio) && (c as HTMLCanvasElement).height === Math.round(c.clientHeight * devicePixelRatio))).toBe(true);
+      await expect(sprite.locator('#clip')).toHaveAttribute('data-media-frame', '0');
+    }
+  }
+});
+
+test('clips: dedicated peek handoff fades out before fading in in both directions', async () => {
+  test.skip(!clipPack, 'POCKYMOE_CLIP_PACK is not set');
+  test.skip(!JSON.parse(readFileSync(join(clipPack!, 'pet.json'), 'utf8')).remoteCodex?.peek, 'Pack has no dedicated peek');
+  await settings({ petId: clipPackId(), petEdgeHide: false }); await baseline();
+  const sprite = await pet('sprite'); await expect(sprite.locator('#character')).toHaveClass(/clips/);
+  await app.evaluate(({ screen }) => { screen.getCursorScreenPoint = () => ({ x: -10000, y: -10000 }); });
+  const { bounds, area } = await app.evaluate(({ BrowserWindow, screen }) => ({ bounds: BrowserWindow.getAllWindows().find(w => w.webContents.getURL().includes('pet/index.html') && !w.getParentWindow())!.getBounds(), area: screen.getPrimaryDisplay().workArea }));
+  const action = (value: unknown) => sprite.evaluate(value => (window as unknown as { rcDesktop: { pet: { action(value: unknown): Promise<unknown> } } }).rcDesktop.pet.action(value), value);
+  const x = area.x + area.width - bounds.width, y = area.y + 120;
+  await action({ type: 'dragStart', x: bounds.x, y: bounds.y }); await action({ type: 'dragMove', x, y }); await action({ type: 'dragEnd', x, y });
+  for (const tucked of [true, false]) {
+    const samples = await sprite.evaluate(async tucked => {
+      const result: { body: number; peek: number }[] = [];
+      await (window as unknown as { rcDesktop: { pet: { action(value: unknown): Promise<unknown> } } }).rcDesktop.pet.action({ type: 'setEdgeHide', value: tucked });
+      while (document.querySelector('#character')!.classList.contains('art-tucked') !== tucked) await new Promise<void>(r => requestAnimationFrame(() => r()));
+      const start = performance.now(); while (performance.now() - start < 500) { result.push({ body: Number(getComputedStyle(document.querySelector('#clip')!).opacity), peek: Number(getComputedStyle(document.querySelector('#peek-art')!).opacity) }); await new Promise<void>(r => requestAnimationFrame(() => r())); }
+      return result;
+    }, tucked);
+    expect(samples.some(s => s.body > .01 && s.peek > .01)).toBe(false);
+    expect(samples.at(-1)).toEqual({ body: tucked ? 0 : 1, peek: tucked ? 1 : 0 });
+    expect(samples.some(s => s.body > 0 && s.body < 1 || s.peek > 0 && s.peek < 1)).toBe(true);
+  }
 });

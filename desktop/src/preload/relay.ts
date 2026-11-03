@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import type { HostCommand, PockymoeHost } from '../shared/contract';
+import type { HostCommand, PockymoeHost, UpdateState } from '../shared/contract';
 import { channels as c } from '../shared/channels';
 
 const origin = process.argv.find(a => a.startsWith('--pockymoe-web-origin='))?.slice('--pockymoe-web-origin='.length);
@@ -9,6 +9,10 @@ const send = (channel: string, ...args: unknown[]): void => { guard(); ipcRender
 const invoke = <T>(channel: string, ...args: unknown[]): Promise<T> => { guard(); return ipcRenderer.invoke(channel, ...args); };
 if (allowed()) {
   const host: PockymoeHost = {
+    updates: { state: () => invoke(c.updateState), install: () => send(c.updateInstall), onChange: listener => {
+      guard(); const handler = (_: Electron.IpcRendererEvent, state: UpdateState): void => { if (allowed()) listener(state); };
+      ipcRenderer.on(c.updateChange, handler); return () => { guard(); ipcRenderer.removeListener(c.updateChange, handler); };
+    } },
     capabilities: () => invoke(c.capabilities),
     appearance: { sync: appearance => send(c.appearance, appearance) },
     activity: { sync: snapshot => send(c.sync, snapshot) },

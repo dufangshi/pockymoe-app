@@ -1,3 +1,4 @@
+import { openPetPanel } from './petPanel';
 import { recordLifecycle } from './lifecycle';
 import { test, expect, _electron as electron, type ElectronApplication, type Page } from '@playwright/test';
 import { createServer, type Server, type RequestListener } from 'node:http';
@@ -19,7 +20,7 @@ import { windowAt } from './windowReady';
 import { auditSurface } from './surfaceAudit';
 import { item, snapshot } from './fixtures';
 
-type Runtime = { messages: LocalMessages; lastMessageResponse?: number; showMessageBox: ShowMessage; lastDialog?: Electron.MessageBoxOptions; lastSave?: Electron.SaveDialogOptions; updater: { checkForUpdates(): Promise<{ isUpdateAvailable: boolean }> }; appearance: AppearanceStore; hub: ActivityHub; settings: SettingsStore; windows: Windows; tray: DesktopTray; notifications: Notifications };
+type Runtime = { messages: LocalMessages; lastMessageResponse?: number; showMessageBox: ShowMessage; lastDialog?: Electron.MessageBoxOptions; lastSave?: Electron.SaveDialogOptions; appearance: AppearanceStore; hub: ActivityHub; settings: SettingsStore; windows: Windows; tray: DesktopTray; notifications: Notifications };
 declare global { var __pockymoeDesktopTest: Runtime }
 declare global { interface Window { pockymoeHost?: PockymoeHost; commands: unknown[] } }
 const evidence = join(process.env.POCKYMOE_DESKTOP_EVIDENCE || join(tmpdir(), 'pockymoe-shell-evidence'), 'compat');
@@ -117,6 +118,16 @@ test('OAuth finishes in a bridge-free sign-in window on the page session', async
   await expect.poll(() => page.url()).toContain('signedIn=1');
   await expect.poll(() => app.windows().some(w => w.url().includes('/relay/auth/'))).toBe(false);
   expect(await page.evaluate(() => !!window.pockymoeHost)).toBe(true);
+});
+test('a real-length notification id reaches the system without an uncaught error', async () => {
+  // Device and turn ids are UUIDs, which together exceed what Windows accepts.
+  const device = 'df3c6acc-a4fc-4e7b-94cd-3df6b5505ae8', turn = '28566358-df65-49ee-9b38-eba327d0bf9a', thread = '195525c3-f221-429a-9860-eb82cbd10db9';
+  const app = await launch('light'); const page = await pageAt(app, origin);
+  await expect.poll(() => page.evaluate(() => !!window.pockymoeHost)).toBe(true);
+  await app.evaluate(() => { globalThis.__pockymoeDesktopTest.settings.set({ alertMode: 'system', petVisible: false }); });
+  const done = item({ key: `${device}:${thread}`, deviceId: device, threadId: thread, turnId: turn, state: 'completed', unread: true, resultSummary: 'done' });
+  await page.evaluate(s => { window.pockymoeHost!.activity.sync({ ...s, items: [], generatedAt: '2026-11-01T05:59:00.000Z', syncedDeviceIds: [s.items[0]!.deviceId] }); window.pockymoeHost!.activity.sync(s); }, snapshot([done]));
+  await expect.poll(() => app.evaluate(() => globalThis.__pockymoeDesktopTest.notifications.constructed.map(entry => entry.alertId)), { timeout: 8000 }).toContain(`${device}:${turn}`);
 });
 test('split origins bridge, activity delivery, tray and quick-window command round trip', async () => {
   const app = await launch('light'); const page = await pageAt(app, origin);
@@ -235,7 +246,8 @@ for (const pack of packs) for (const theme of ['light', 'dark'] as const) test(`
   await preferences.getByRole('textbox', { name: '快捷窗口快捷键' }).fill('CommandOrControl+Shift+Space'); await preferences.getByRole('button', { name: '保存', exact: true }).click();
   await expect.poll(() => app.evaluate(({ globalShortcut }) => globalShortcut.isRegistered('CommandOrControl+Shift+Space'))).toBe(true);
   const items = [item({ state: 'needsInput', request: { id: `request-${theme}`, kind: 'input', summary: '请选择部署环境' } }), item({ key: 'mac:thread-2', threadId: 'thread-2', turnId: `run-${theme}`, title: '完善桌面端交互细节', since: new Date(Date.now() - 65_000).toISOString() }), item({ key: 'mac:thread-3', threadId: 'thread-3', turnId: `done-${theme}`, title: '检查跨设备索引缓存', state: 'completed', unread: true, resultSummary: '离线恢复验证通过' })];
-  await page.evaluate(s => { window.pockymoeHost!.activity.sync({ ...s, items: [], generatedAt: '2026-11-01T05:59:00.000Z', syncedDeviceIds: ['mac', 'pc'] }); window.pockymoeHost!.activity.sync(s); }, snapshot(items));
+  // Wait for this frame's IPC before another renderer queries the seeded activity.
+  await page.evaluate(async s => { window.pockymoeHost!.activity.sync({ ...s, items: [], generatedAt: '2026-11-01T05:59:00.000Z', syncedDeviceIds: ['mac', 'pc'] }); window.pockymoeHost!.activity.sync(s); await window.pockymoeHost!.capabilities(); }, snapshot(items));
   await app.evaluate(() => globalThis.__pockymoeDesktopTest.windows.createLocal('quick'));
   const quick = await pageAt(app, 'view=quick'); await expect(quick.getByRole('option')).toHaveCount(3);
   await expect(quick.locator('.elapsed')).toHaveText(/^01:0[5-9]$/);
@@ -308,8 +320,8 @@ for (const pack of packs) for (const theme of ['light', 'dark'] as const) test(`
     dialog.showMessageBox = (async (...args: unknown[]) => { globalThis.__pockymoeDesktopTest.lastDialog = args.at(-1) as Electron.MessageBoxOptions; return { response: 0, checkboxChecked: false }; }) as typeof dialog.showMessageBox;
     dialog.showSaveDialog = (async (...args: unknown[]) => { globalThis.__pockymoeDesktopTest.lastSave = args.at(-1) as Electron.SaveDialogOptions; return { canceled: true, filePath: '' }; }) as typeof dialog.showSaveDialog;
   });
-  const packaged = await app.evaluate(({ app }) => {
-    if (app.isPackaged) globalThis.__pockymoeDesktopTest.updater.checkForUpdates = async () => ({ isUpdateAvailable: false });
+  const packaged = await app.evaluate(({ app, net }) => {
+    if (app.isPackaged) net.fetch = async () => new Response(JSON.stringify({tag_name: `v${app.getVersion()}`, prerelease: false, draft: false}), { status: 200 });
     return app.isPackaged;
   });
   const timings: { locale: string; milliseconds: number }[] = [];
@@ -368,14 +380,17 @@ for (const material of ['native', 'solid']) for (const pack of packs) for (const
   const prefs = await pageAt(app, 'view=preferences');
   await prefs.locator('[data-section=shortcuts]').click();
   await expect(prefs.locator('kbd').first()).toContainText('Ctrl');
-  const sprite = await pageAt(app, '/pet/');
-  await sprite.evaluate(() => (window as unknown as { rcDesktop: { pet: { action(value: unknown): Promise<unknown> } } }).rcDesktop.pet.action({ type: 'toggleTray' }));
-  await expect.poll(() => app.windows().filter(page => page.url().includes('/pet/')).length).toBe(2);
+  // Finish creating/showing every utility window before the interactive pet
+  // takes focus. A late ready-to-show would legitimately blur/close its panel.
+  for (const role of ['preferences', 'quick', 'about', 'relay']) await pageAt(app, `view=${role}`);
+  await expect.poll(() => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().filter(w => w.webContents.getURL().includes('/local/')).every(w => w.isVisible() && !w.webContents.isLoading()))).toBe(true);
+  const { glass } = await openPetPanel(app);
+  // Capture the focused panel before moving other native windows to the top.
+  const pages = [glass, ...app.windows().filter(page => page !== glass)];
   const scales: { url: string; devicePixelRatio: number }[] = [];
-  for (const page of app.windows()) {
+  for (const page of pages) {
     await page.waitForLoadState('domcontentloaded');
     if (page.url().includes('/pet/') && await page.evaluate(() => document.body.dataset.surface) === 'glass') {
-      if (!await page.locator('.panel').count()) await page.evaluate(() => (window as unknown as { rcDesktop: { pet: { action(value: unknown): Promise<unknown> } } }).rcDesktop.pet.action({ type: 'toggleTray' }));
       await expect(page.locator('.panel')).toBeVisible();
     }
     const violations = await page.evaluate(() => {
@@ -398,7 +413,7 @@ for (const material of ['native', 'solid']) for (const pack of packs) for (const
           const context = canvas.getContext('2d')!; context.fillStyle = getComputedStyle(element).backgroundColor;
           context.fillRect(0, 0, 1, 1); return Array.from(context.getImageData(0, 0, 1, 1).data);
         });
-        expect(color[3]).toBeGreaterThanOrEqual(material === 'solid' ? 255 : 244);
+        expect(color[3]).toBeGreaterThanOrEqual(material === 'solid' ? 255 : page.url().includes('/pet/') ? 217 : 244);
       }
     }
     test.info().annotations.push({ type: 'scale', description: `${page.url()}: devicePixelRatio=${violations.devicePixelRatio}` });

@@ -13,9 +13,8 @@ android {
         applicationId = "com.remotecodex.app"
         minSdk = 26
         targetSdk = 36
-
-        versionCode = 6
-        versionName = "0.2.0"
+        versionCode = 9
+        versionName = "0.3.2"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
     }

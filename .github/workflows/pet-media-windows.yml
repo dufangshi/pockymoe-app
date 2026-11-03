@@ -1,0 +1,40 @@
+name: Pet VP9 alpha on Windows
+on:
+  pull_request:
+    paths: ['desktop/**', '.github/workflows/pet-media-windows.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  media:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: desktop
+        shell: pwsh
+    env:
+      POCKYMOE_DESKTOP_EVIDENCE: ${{ github.workspace }}/.local/pet-media
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: desktop/pnpm-lock.yaml
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pnpm install --frozen-lockfile
+      - name: Local test encoder only
+        run: |
+          python -m pip install imageio-ffmpeg==0.8.1
+          $encoder = python -I -c "import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())"
+          "POCKYMOE_FFMPEG=$encoder" >> $env:GITHUB_ENV
+      - run: pnpm typecheck
+      - run: pnpm exec vitest run --config src/pet/vitest.config.ts
+      - run: pnpm exec electron-vite build --config src/pet/tools/electron.config.ts
+      - name: Real Electron native alpha, two-decoder handoff and range requests
+        run: pnpm exec playwright test test/petMedia.e2e.ts --project=electron --reporter=list

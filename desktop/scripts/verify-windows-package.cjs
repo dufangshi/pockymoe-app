@@ -3,8 +3,8 @@ const { readFileSync, readdirSync, statSync } = require('node:fs');
 const { join } = require('node:path');
 const files = ['sherpa-onnx.node', 'onnxruntime.dll', 'onnxruntime_providers_shared.dll', 'sherpa-onnx-c-api.dll', 'sherpa-onnx-cxx-api.dll'];
 function verifyWindowsPackage(directory, arch) {
-  const machine = { x64: 0x8664, arm64: 0xaa64 }[arch];
-  if (!machine) throw new Error(`Unsupported architecture ${arch}`);
+  const machine = 0x8664;
+  if (arch !== 'x64') throw new Error(`Unsupported architecture ${arch}`);
   const modules = join(directory, 'resources', 'app.asar.unpacked', 'node_modules');
   const addon = `sherpa-onnx-win-${arch}`;
   const unexpected = readdirSync(modules).filter(name => name.startsWith('sherpa-onnx-') && ![addon, 'sherpa-onnx-node'].includes(name));

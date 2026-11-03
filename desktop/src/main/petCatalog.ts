@@ -1,3 +1,4 @@
+import { petMediaResponse } from '../pet/media';
 import { lstatSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import type { LocalState } from '../shared/local';
@@ -38,8 +39,10 @@ export class PetCatalog {
     }
   }
   list(): LocalState['petPacks'] { return this.entries.map(entry => ({ ...entry })); }
-  asset(url: string): Response {
-    const target = new URL(url);
+  async asset(request: Request | string): Promise<Response> {
+    const req = typeof request === 'string' ? new Request(request) : request;
+    const media = await petMediaResponse(req); if (media) return media;
+    const target = new URL(req.url);
     const asset = target.hostname === 'atlas' && !target.search && !target.hash ? this.assets.get(decodeURIComponent(target.pathname.slice(1))) : null;
     if (!asset) return new Response(null, { status: 404 });
     try {

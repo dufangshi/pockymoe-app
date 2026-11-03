@@ -28,13 +28,15 @@ shows. PLAN.json holds the manifest fields, "poses" (the name of each pose in sh
 one that plays once on entering or leaving the state). "still" names clips without wind. The 8×9 atlas, needed for the
 thumbnail and any state without a clip, is sampled from the clips in "atlas".
 """
-import argparse, importlib.util, json, math, sys, zipfile
+import argparse, importlib.util, json, math, sys, zipfile, subprocess
 from pathlib import Path
 import numpy as np
 from PIL import Image
 from scipy import ndimage
 
-FPS, COLUMNS, WIDTH, HEIGHT, FADE = 15, 12, 240, 260, 6
+SHARP = None
+SHARP_KEYS = {}
+FPS, COLUMNS, WIDTH, HEIGHT, FADE = 24, 12, 240, 260, 10
 ATLAS_ROWS = [('idle', 6), ('running-right', 8), ('running-left', 8), ('waving', 4), ('jumping', 5), ('failed', 8), ('waiting', 6), ('running', 6), ('review', 6)]
 ATLAS_CELL = (192, 208)
 
@@ -116,6 +118,10 @@ def match_heads(drawn, rows):
 
 
 def render(tools, pose, scale, args):
+    if SHARP:
+        spec = importlib.util.spec_from_file_location('sharp_motion', Path(__file__).with_name('sharp_motion.py'))
+        motion = importlib.util.module_from_spec(spec); spec.loader.exec_module(motion)
+        return motion.transform(SHARP_KEYS[id(pose)], {**args, 'dx': args['dx'] * WIDTH / 384, 'dy': args['dy'] * HEIGHT / 416})
     size = scale * pose['norm']
     return tools.finish(tools.pose_canvas(pose, size, **{**args, 'dx': args['dx'] + (HEAD_X - pose['nudge']) * size}))
 
@@ -125,15 +131,15 @@ def beat_frames(tools, poses, scale, beat, cache):
     count, pose = beat['frames'], poses[beat['pose']]
     frames = []
     for index in range(count):
-        phase = index / count * 2 * math.pi
+        phase = index / max(1, count - 1) * 2 * math.pi
         wave = math.sin(phase)
         arc = beat.get('arc', 0) * math.sin(index / max(1, count - 1) * math.pi)
         args = {
             'dy': beat.get('dy', 0) - abs(math.sin(phase)) * beat.get('bob', 0) - arc,
             'dx': math.sin(phase) * beat.get('sway', 0) + beat.get('dx', 0),
             'rot': wave * beat.get('rot', 0),
-            'sy': 1 - (0.5 + 0.5 * wave) * 0.012 * beat.get('breathe', 0),
-            'sx': 1 + (0.5 + 0.5 * wave) * 0.006 * beat.get('breathe', 0),
+            'sy': 1 - (0.5 - 0.5 * math.cos(phase)) * 0.012 * beat.get('breathe', 0),
+            'sx': 1 + (0.5 - 0.5 * math.cos(phase)) * 0.006 * beat.get('breathe', 0),
         }
         key = (beat['pose'], beat.get('face'), *(round(value, 2) for value in args.values()))
         if key not in cache:
@@ -153,6 +159,10 @@ def on_grey(frame):
 def tween(a, b, steps):
     """The frames between two drawings, each pushed part of the way along the optical flow, so a
     moving arm travels instead of fading out in one place and in at another."""
+    if SHARP:
+        spec = importlib.util.spec_from_file_location('sharp_motion', Path(__file__).with_name('sharp_motion.py'))
+        motion = importlib.util.module_from_spec(spec); spec.loader.exec_module(motion)
+        return motion.tween(a, b, steps, FACE_BOX)
     import cv2
     flow = cv2.DISOpticalFlow_create(cv2.DISOPTICAL_FLOW_PRESET_MEDIUM)
     grey_a, grey_b = on_grey(a), on_grey(b)
@@ -183,7 +193,7 @@ def clip_frames(tools, poses, scale, beats, cache):
         next_frames = beat_frames(tools, poses, scale, beat, cache)
         # Move from where the last beat stopped, within this beat's own time.
         steps = min(beat.get('fade', FADE), len(next_frames) - 1)
-        same = previous and all(previous.get(key) == beat.get(key) for key in ('pose', 'face', 'dx', 'dy'))
+        same = previous and all(previous.get(key) == beat.get(key) for key in ('pose', 'face', 'dx', 'dy', 'breathe', 'sway', 'bob', 'rot', 'arc'))
         if frames and steps > 0 and not same:
             next_frames[:steps] = tween(frames[-1], next_frames[steps], steps)
         previous = beat
@@ -195,10 +205,23 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('plan', type=Path); parser.add_argument('sheets', nargs='+', type=Path); parser.add_argument('out', type=Path)
     parser.add_argument('--zip', type=Path)
+    parser.add_argument('--webm', action='store_true', help='648x702 VP9-alpha, SR keyframes and occlusion-safe motion')
+    parser.add_argument('--sr-weights', type=Path, help='local realesr-animevideov3.pth; never downloaded by this tool')
+    parser.add_argument('--soften', type=float, default=.25, help='small output-pixel RGB blur after SR, before motion')
+    parser.add_argument('--peek', type=Path, help='optional right-edge peek PNG; metadata is plan.peek')
     args = parser.parse_args()
+    if args.webm and not args.sr_weights:
+        parser.error('--webm requires --sr-weights')
     plan = json.loads(args.plan.read_text())
-    global WIDTH, HEIGHT, FACE_BOX, HEAD_X
-    WIDTH, HEIGHT = plan.get('width', WIDTH), plan.get('height', HEIGHT)
+    # Plans authored at 15 fps retain their duration when rendered at 24 fps.
+    source_fps = plan.get('fps', 15)
+    for beats in plan['clips'].values():
+        for beat in beats:
+            beat['frames'] = max(2, round(beat['frames'] * FPS / source_fps))
+            if 'fade' in beat:
+                beat['fade'] = max(1, round(beat['fade'] * FPS / source_fps))
+    global WIDTH, HEIGHT, FACE_BOX, HEAD_X, SHARP
+    WIDTH, HEIGHT = (384, 416) if args.webm else (plan.get('width', WIDTH), plan.get('height', HEIGHT))
     FACE_BOX = plan.get('faceBox', (.3, .05, .7, .25))
     grid = plan.get('grid', (4, 3))
     tools = load_atlas_tools()
@@ -219,8 +242,21 @@ def main():
     # One scale, the largest at which every pose still fits.
     used = {beat['pose'] for beats in plan['clips'].values() for beat in beats} | {beat['face'] for beats in plan['clips'].values() for beat in beats if beat.get('face')}
     scale = min(min((WIDTH - 8) / pose['img'].width, (tools.BASELINE - 4) / pose['img'].height) / pose['norm'] for name, pose in poses.items() if name in used)
+    if args.webm:
+        spec = importlib.util.spec_from_file_location('anime_sr', Path(__file__).with_name('anime_sr.py'))
+        sr = importlib.util.module_from_spec(spec); spec.loader.exec_module(sr)
+        restore = sr.restorer(args.sr_weights, args.soften)
+        # Normalize at the original source resolution, SR each key exactly once,
+        # then transform/flow at delivery resolution. Includes bed/lying keys.
+        zero = {'dx': 0, 'dy': 0, 'rot': 0, 'sx': 1, 'sy': 1}
+        for name, pose in poses.items():
+            SHARP_KEYS[id(pose)] = restore(render(tools, pose, scale, zero), (648, 702))
+        WIDTH, HEIGHT, SHARP = 648, 702, True
+        tools.CW, tools.CH, tools.BASELINE = WIDTH, HEIGHT, HEIGHT - 10
+        import imageio_ffmpeg
+        ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
     (args.out / 'clips').mkdir(parents=True, exist_ok=True)
-    frames, cache = {}, {}
+    frames, cache, frame_counts = {}, {}, {}
     entries = {state: [{'clip': entry} if isinstance(entry, str) else entry for entry in names] for state, names in plan['states'].items()}
     declared = {entry['clip'] for names in entries.values() for entry in names}
     for name, beats in plan['clips'].items():
@@ -228,9 +264,22 @@ def main():
         # Whole cycles from phase zero, so every clip starts and ends on the same drift and they join.
         if plan.get('wind') and name not in plan.get('still', ()):
             cycles = max(1, round(len(frames[name]) / (FPS * 3)))
-            frames[name] = [wind(frame, index / len(frames[name]) * cycles * 2 * math.pi, plan['wind']) for index, frame in enumerate(frames[name])]
+            frames[name] = [wind(frame, index / max(1, len(frames[name]) - 1) * cycles * 2 * math.pi, plan['wind']) for index, frame in enumerate(frames[name])]
+        frame_counts[name] = len(frames[name])
         # A clip only the atlas samples stays out of the pack, which holds just what it declares.
         if name not in declared:
+            continue
+        if args.webm:
+            path = args.out / 'clips' / f'{name}.webm'
+            cmd = [ffmpeg, '-y', '-v', 'error', '-f', 'rawvideo', '-pix_fmt', 'rgba', '-s', f'{WIDTH}x{HEIGHT}', '-r', str(FPS), '-i', '-', '-an', '-c:v', 'libvpx-vp9', '-pix_fmt', 'yuva420p', '-crf', '18', '-b:v', '0', '-auto-alt-ref', '0', '-row-mt', '1', str(path)]
+            with subprocess.Popen(cmd, stdin=subprocess.PIPE) as encoder:
+                for frame in frames[name]: encoder.stdin.write(frame.tobytes())
+                encoder.stdin.close(); encoder.wait()
+                if encoder.returncode: raise RuntimeError('VP9 encoding failed')
+            # Atlas needs only eight samples, not all decoded frames of every clip.
+            print('encoded', name, len(frames[name]), path.stat().st_size, flush=True)
+            frames[name] = [frames[name][i * len(frames[name]) // 8] for i in range(8)]
+            cache.clear()
             continue
         sheet = Image.new('RGBA', (COLUMNS * WIDTH, math.ceil(len(frames[name]) / COLUMNS) * HEIGHT))
         for index, frame in enumerate(frames[name]):
@@ -242,11 +291,32 @@ def main():
         for column in range(count):
             atlas.paste(source[column * len(source) // count].resize(ATLAS_CELL, Image.LANCZOS), (column * ATLAS_CELL[0], row * ATLAS_CELL[1]))
     atlas.save(args.out / 'spritesheet.webp', 'WEBP', quality=88, alpha_quality=92, method=4)
-    manifest = {key: plan[key] for key in plan if key not in ('poses', 'clips', 'states', 'atlas', 'grid', 'grids', 'farther', 'still', 'wind', 'width', 'height', 'sizeScale', 'effects', 'faceBox')}
+    manifest = {key: plan[key] for key in plan if key not in ('poses', 'clips', 'states', 'atlas', 'grid', 'grids', 'farther', 'still', 'wind', 'width', 'height', 'sizeScale', 'effects', 'faceBox', 'fps', 'talk', 'peek')}
     manifest.update({'spritesheetPath': 'spritesheet.webp', 'remoteCodex': {
+        'faceBox': list(FACE_BOX),
         **({'sizeScale': plan['sizeScale']} if 'sizeScale' in plan else {}),
-        'clipFormat': {'fps': FPS, 'columns': COLUMNS, 'width': WIDTH, 'height': HEIGHT},
-        'clips': {state: [{'path': f"clips/{entry['clip']}.webp", 'frames': len(frames[entry['clip']]), **({'role': entry['role']} if 'role' in entry else {})} for entry in names] for state, names in entries.items()}}})
+        'clipFormat': {'fps': FPS, 'columns': COLUMNS, 'width': WIDTH, 'height': HEIGHT, **({'mediaType': 'webm-vp9-alpha'} if args.webm else {})},
+        'clips': {state: [{'path': f"clips/{entry['clip']}.{'webm' if args.webm else 'webp'}", 'frames': frame_counts[entry['clip']], **({'role': entry['role']} if 'role' in entry else {})} for entry in names] for state, names in entries.items()}}})
+    if plan.get('talk'):
+        # Face variants are complete native frames; callers composite only the edited face.
+        talk_frames = [Image.open(args.plan.parent / path).convert('RGBA') for path in plan['talk']]
+        if args.webm: talk_frames = [restore(frame, (WIDTH, HEIGHT)) for frame in talk_frames]
+        if not 3 <= len(talk_frames) <= 8 or any(frame.size != (WIDTH, HEIGHT) for frame in talk_frames):
+            raise SystemExit('talk needs 3–8 native-size frames ordered closed, half, open, optional open variants')
+        sheet = Image.new('RGBA', (COLUMNS * WIDTH, HEIGHT))
+        for index, frame in enumerate(talk_frames):
+            sheet.paste(frame, (index * WIDTH, 0))
+        sheet.save(args.out / 'clips' / 'talk.webp', 'WEBP', quality=86, alpha_quality=92, method=4)
+        manifest['remoteCodex']['talk'] = {'path': 'clips/talk.webp', 'frames': len(talk_frames)}
+    if args.peek:
+        import shutil
+        shutil.copyfile(args.peek, args.out / 'peek.png')
+        manifest['remoteCodex']['peek'] = plan['peek']
+    declared_files = list((args.out / 'clips').glob('*'))
+    if any(path.stat().st_size > (32 if args.webm and path.suffix == '.webm' else 8) * 1024 * 1024 for path in declared_files) or sum(path.stat().st_size for path in declared_files) > (256 if args.webm else 160) * 1024 * 1024:
+        raise SystemExit('clip byte limits exceeded')
+    if any(frame_counts[name] > (288 if args.webm else 512) for name in declared):
+        raise SystemExit('clip frame limit exceeded')
     (args.out / 'pet.json').write_text(json.dumps(manifest, ensure_ascii=False, indent=1) + '\n')
     if args.zip:
         with zipfile.ZipFile(args.zip, 'w', zipfile.ZIP_STORED) as bundle:

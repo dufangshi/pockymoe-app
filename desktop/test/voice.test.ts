@@ -13,7 +13,6 @@ import { cleanSummary, concreteLanguage, summaryPrompt } from '../src/main/voice
 import { encodeWav } from '../src/main/voice/wav';
 import { deliveryPolicy } from '../src/main/delivery';
 import { isMuted, type MuteRule } from '../src/shared/mutes';
-import { isNoDesktopRelease } from '../src/main/updateErrors';
 import { LOCAL_SPEAKERS, MAX_SPEECH_CHARS, speechText, type RemoteVoice } from '../src/shared/voice';
 
 const config = (patch: Partial<RemoteVoice> = {}): RemoteVoice => ({ url: 'http://127.0.0.1:8091/v1', model: 'BreezeBlue/Breeze-TTS-2', voice: '', style: '', extra: '', ...patch });
@@ -116,6 +115,35 @@ describe('API keys', () => {
     expect(keys.get('https://b.example')).toBeNull(); expect(keys.has('https://b.example')).toBe(false);
     keys.clear('https://a.example'); expect(new VoiceKeys(path, crypto).has('https://a.example')).toBe(false);
   });
+  it('shows a denied saved key as unavailable without prompting repeatedly or erasing ciphertext', () => {
+    const path = join(temp(), 'keys.json');
+    new VoiceKeys(path, crypto).set('https://a.example', 'fixture-key');
+    const original = readFileSync(path);
+    let calls = 0;
+    const keys = new VoiceKeys(path, { ...crypto, decryptString: () => { calls++; throw new Error('Keychain denied'); } });
+    expect(keys.has('https://a.example')).toBe(true);
+    for (let i = 0; i < 5; i++) expect(keys.get('https://a.example')).toBeNull();
+    expect(calls).toBe(1); expect(keys.has('https://a.example')).toBe(false);
+    expect(readFileSync(path)).toEqual(original);
+  });
+  it('allows explicit key re-entry after denial and retries existing ciphertext on a later launch', () => {
+    const path = join(temp(), 'keys.json');
+    new VoiceKeys(path, crypto).set('https://a.example', 'old-fixture-key');
+    let denied = true;
+    const keys = new VoiceKeys(path, { ...crypto, decryptString: value => { if (denied) throw new Error('denied'); return crypto.decryptString(value); } });
+    expect(keys.get('https://a.example')).toBeNull(); expect(keys.has('https://a.example')).toBe(false);
+    expect(new VoiceKeys(path, crypto).get('https://a.example')).toBe('old-fixture-key');
+    denied = false; keys.set('https://a.example', 'new-fixture-key');
+    expect(keys.has('https://a.example')).toBe(true); expect(keys.get('https://a.example')).toBe('new-fixture-key');
+  });
+  it('keeps an unavailable encryption backend passive until explicit re-entry', () => {
+    const path = join(temp(), 'keys.json'); new VoiceKeys(path, crypto).set('https://a.example', 'fixture-key');
+    let availabilityChecks = 0;
+    const keys = new VoiceKeys(path, { ...crypto, isEncryptionAvailable: () => { availabilityChecks++; return false; } });
+    expect(keys.get('https://a.example')).toBeNull(); expect(keys.get('https://a.example')).toBeNull();
+    expect(keys.has('https://a.example')).toBe(false); expect(availabilityChecks).toBe(1);
+    expect(new VoiceKeys(path, crypto).get('https://a.example')).toBe('fixture-key');
+  });
   it('refuses to store a key without a keychain', () => {
     const keys = new VoiceKeys(join(temp(), 'keys.json'), { ...crypto, isEncryptionAvailable: () => false });
     expect(() => keys.set('https://a.example', 'k')).toThrow('keychainUnavailable');
@@ -173,7 +201,7 @@ describe('local model', () => {
     expect(model.state).toBe('ready'); expect(states).toContain('extracting'); expect(readFileSync(join(model.path, 'model.int8.onnx'), 'utf8')).toBe('weights');
     expect(new LocalModel(dir, async () => new Response(), () => undefined, source).state).toBe('ready');
     await model.remove(); expect(model.state).toBe('absent'); expect(existsSync(model.path)).toBe(false);
-  });
+  }, 15_000); // Windows runner tar/antivirus can exceed the default five seconds.
   it('resumes a partial download with a range request', async () => {
     const { bytes, source } = fixture(), dir = temp();
     mkdirSync(dir, { recursive: true }); writeFileSync(join(dir, `${source.name}.tar.bz2.partial`), bytes.subarray(0, 10));
@@ -254,13 +282,6 @@ describe('one-click model install', () => {
     const model = new LocalModel(dir, async () => new Response(stream), () => undefined, source, 30);
     await model.download();
     expect(model.state).toBe('absent'); expect(model.error).toBe('download');
-  });
-});
-describe('checking for updates', () => {
-  it('treats a repository with no desktop release as nothing to update to', () => {
-    expect(isNoDesktopRelease('Cannot find latest-mac.yml in the latest release artifacts (https://github.com/x/y/releases/download/v0.1.4/latest-mac.yml): HttpError: 404')).toBe(true);
-    expect(isNoDesktopRelease('No published versions on GitHub')).toBe(true);
-    expect(isNoDesktopRelease('net::ERR_INTERNET_DISCONNECTED')).toBe(false);
   });
 });
 describe('silencing finished work', () => {

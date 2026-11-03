@@ -308,6 +308,119 @@ class ProductParityTest {
     }
 
     @Test
+    fun connectionPageVisuals() {
+        val args = InstrumentationRegistry.getArguments()
+        val locale = args.getString("locale", "en")!!
+        val dark = args.getString("mode", "light") == "dark"
+        val name =
+            "connect-${args.getString("width", "phone")}-${locale}-${if (dark) "dark" else "light"}"
+        context.getSharedPreferences("remote_codex", Context.MODE_PRIVATE).edit().clear().commit()
+        scenario =
+            ActivityScenario.launch(
+                Intent(context, MainActivity::class.java)
+                    .putExtra("e2eLocale", locale)
+                    .putExtra("e2eDark", dark)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+        var visualContext: Context? = null
+        scenario.use {
+            scenario.onActivity { activity ->
+                val config = android.content.res.Configuration(activity.resources.configuration)
+                config.setLocale(java.util.Locale.forLanguageTag(locale))
+                config.uiMode =
+                    (config.uiMode and
+                        android.content.res.Configuration.UI_MODE_NIGHT_MASK.inv()) or
+                        if (dark) android.content.res.Configuration.UI_MODE_NIGHT_YES
+                        else android.content.res.Configuration.UI_MODE_NIGHT_NO
+                visualContext = activity.createConfigurationContext(config)
+                val page = ConnectionPage(visualContext!!, false, "", "", "", { _, _ -> }, {}, {})
+                activity.setContentView(page.view)
+                androidx.core.view.WindowCompat.getInsetsController(activity.window, page.view)
+                    .apply {
+                        isAppearanceLightStatusBars = !dark
+                        isAppearanceLightNavigationBars = !dark
+                    }
+            }
+            InstrumentationRegistry.getInstrumentation().waitForIdleSync()
+
+            scenario.onActivity { activity ->
+                val decor = activity.window.decorView
+                val button = decor.findViewWithTag<android.widget.Button>("connection-button")
+                assertFalse("empty service disables Connect", button.isEnabled)
+                val input = decor.findViewWithTag<android.widget.EditText>("service-input")
+                val density = activity.resources.displayMetrics.density
+                assertEquals(48, (input.height / density).toInt())
+                assertEquals(14, (input.paddingLeft / density).toInt())
+                assertTrue("content max width", input.width / density <= 420.5f)
+                assertTrue(
+                    "URL input",
+                    input.inputType and android.text.InputType.TYPE_TEXT_VARIATION_URI != 0,
+                )
+            }
+            shot(name)
+            val advanced = if (locale == "zh-CN") "高级" else "Advanced"
+            device.findObject(androidx.test.uiautomator.By.desc(advanced)).click()
+            scenario.onActivity { activity ->
+                activity.window.decorView
+                    .findViewWithTag<android.widget.EditText>("service-input")
+                    .setText("https://app.example.com")
+                assertTrue(
+                    "typed address enables Connect",
+                    activity.window.decorView
+                        .findViewWithTag<android.widget.Button>("connection-button")
+                        .isEnabled,
+                )
+            }
+            shot("$name-advanced")
+            // Render the actual shared native component's stable probing and error states.
+            var page: ConnectionPage? = null
+            scenario.onActivity { activity ->
+                page =
+                    ConnectionPage(
+                        visualContext!!,
+                        false,
+                        "https://app.example.com",
+                        "",
+                        "",
+                        { _, _ -> },
+                        {},
+                        {},
+                    )
+                activity.setContentView(page!!.view)
+                page!!.probing(true)
+            }
+            shot("$name-probing")
+            scenario.onActivity { activity ->
+                val spinner =
+                    activity.window.decorView.findViewWithTag<android.widget.ProgressBar>(
+                        "connection-spinner"
+                    )
+                assertEquals(View.VISIBLE, spinner.visibility)
+                assertEquals(
+                    "",
+                    activity.window.decorView
+                        .findViewWithTag<android.widget.Button>("connection-button")
+                        .text
+                        .toString(),
+                )
+                page!!.probing(false)
+                activity.window.decorView
+                    .findViewWithTag<android.widget.TextView>("connection-error")
+                    .text =
+                    if (locale == "zh-CN") "无法连接，请检查服务地址。"
+                    else "Cannot connect. Check the service address."
+            }
+            shot("$name-error")
+            scenario.onActivity { activity ->
+                activity.setContentView(
+                    ConnectionPage(visualContext!!, true, "", "", "", { _, _ -> }, {}, {}).view
+                )
+            }
+            shot("$name-offline")
+        }
+    }
+
+    @Test
     fun oauthReturnWithLivingActivity() {
         val env = E2eEnv.load()
         scenario =

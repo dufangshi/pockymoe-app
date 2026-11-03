@@ -1,3 +1,4 @@
+import { canUnload, closeForUpdate, UpdateCancelled } from './updateWindows';
 import { hasConnection } from './store';
 import { pageChrome, readPageChrome } from './pageChrome';
 import { t } from '../shared/i18n';
@@ -29,6 +30,45 @@ export class Windows {
   }
   private shownQuick = new WeakSet<BrowserWindow>();
   quitting = false;
+  closingForUpdate = false;
+  private updateWindows: { window: BrowserWindow; path?: string; role?: LocalRole }[] = [];
+  private preparedPages: BrowserWindow[] = [];
+  async closeForUpdate(prepareTimeoutMs = 300_000): Promise<void> {
+    if (this.closingForUpdate) throw new UpdateCancelled();
+    const all = BrowserWindow.getAllWindows().filter(window => !window.isDestroyed());
+    this.updateWindows = all.map(window => ({ window, ...(this.relay.has(window) ? { path: window.webContents.getURL().slice(this.settings.get().webOrigin.length) || '/' } : {}), role: this.local.get(window) }));
+    this.preparedPages = [];
+    try {
+      for (const window of [...this.relay]) {
+        if (window.isDestroyed()) continue;
+        this.preparedPages.push(window);
+        // Tray-initiated updates must not put a confirmation in a hidden page.
+        if (window.isMinimized()) window.restore();
+        window.show(); window.focus();
+        const answer = await this.queryWindow(window, { type: 'prepareUpdate' }, prepareTimeoutMs);
+        if (!answer.ok || !answer.data || typeof answer.data !== 'object' || !('prepared' in answer.data) || answer.data.prepared !== true) throw new UpdateCancelled();
+      }
+      // Check every renderer before closing any. Shared approval survives this
+      // synthetic check, and real beforeunload still has the final veto.
+      for (const window of all) if (!await canUnload(window)) throw new UpdateCancelled();
+      this.closingForUpdate = true;
+      // Data-bearing/utility windows go first; pet close handlers may dispose
+      // their paired local windows only after every guarded page has closed.
+      const guarded = all.filter(window => this.relay.has(window) || this.local.has(window) || window === this.signInWindow);
+      for (const window of [...guarded, ...all.filter(window => !guarded.includes(window))]) if (!await closeForUpdate(window)) throw new UpdateCancelled();
+      if (BrowserWindow.getAllWindows().some(window => !window.isDestroyed())) throw new UpdateCancelled();
+    } catch (error) { await this.restoreAfterUpdate(); throw error; }
+  }
+  async restoreAfterUpdate(): Promise<void> {
+    this.closingForUpdate = false;
+    const prepared = this.preparedPages; this.preparedPages = [];
+    await Promise.allSettled(prepared.filter(window => !window.isDestroyed()).map(window => this.queryWindow(window, { type: 'prepareUpdate', cancel: true }, 1000)));
+    for (const saved of this.updateWindows) if (saved.window.isDestroyed()) {
+      if (saved.path !== undefined) this.createMain(saved.path);
+      else if (saved.role) this.createLocal(saved.role);
+    }
+    this.updateWindows = [];
+  }
   private appearance: Appearance | null = null;
   private chromeEpoch = new WeakMap<BrowserWindow, number>();
   setAppearance(appearance: Appearance): void {
@@ -93,7 +133,7 @@ export class Windows {
     this.relay.add(w);
     w.webContents.on('did-finish-load', () => this.syncPageChrome(w));
     this.secure(w, true);
-    w.on('close', e => { if (!this.quitting) { e.preventDefault(); backgrounded = true; w.hide(); } });
+    w.on('close', e => { if (!this.quitting && !this.closingForUpdate) { e.preventDefault(); backgrounded = true; w.hide(); } });
     w.on('closed', () => {
       this.relay.delete(w); this.ready.delete(webContentsId); this.pending.delete(webContentsId);
       for (const [id, pending] of this.waiters) if (pending.sender === webContentsId) {
@@ -207,6 +247,7 @@ export class Windows {
     if (!this.shownQuick.has(window)) { this.shownQuick.add(window); window.show(); window.focus(); }
   }
   toggleQuick(): void {
+    if (this.closingForUpdate) return;
     const w = [...this.local].find(([, r]) => r === 'quick')?.[0];
     if (w?.isVisible() && w.isFocused()) w.hide(); else this.createLocal('quick');
   }
@@ -219,7 +260,11 @@ export class Windows {
   }
   /** Approving, replying or marking read works from the pet or a notification without raising the window. */
   dispatch(input: CommandInput, focus = !['resolveRequest', 'reply', 'markRead'].includes(input.type), timeoutMs = 15_000): Promise<HostCommandResult> {
+    if (this.closingForUpdate && input.type !== 'prepareUpdate') return Promise.resolve({ ok: false, error: t('应用正在退出') });
     const w = focus ? this.focusMain() : this.main();
+    return this.queryWindow(w, input, timeoutMs);
+  }
+  queryWindow(w: BrowserWindow, input: CommandInput, timeoutMs = 15_000): Promise<HostCommandResult> {
     const command = { ...input, id: randomUUID() } as HostCommand;
     return new Promise(resolve => {
       const id = w.webContents.id;

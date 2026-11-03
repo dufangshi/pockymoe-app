@@ -9,8 +9,8 @@ import type { ActivityEvent, ActivityItem } from '../shared/contract';
 import { ANIMATIONS, frameAt, moodFor } from './animation';
 import { scrollGeometry } from './scroll';
 import { BUBBLE_MS, BubbleQueue } from './bubbles';
-import { clampRect, CONTROLS_CLEARANCE, defaultPosition, dockPosition, exposedRect, petLayout, restorePosition, surfaceLayout, surfaceSide } from './geometry';
-import { importPetPack, loadPetPack, MAX_PACK_BYTES, parseManifest, unpackPetZip, validateAtlas } from './packs';
+import { DEFAULT_FACE_BOX, dockTilt, HEAD_PEEK, clampRect, CONTROLS_CLEARANCE, defaultPosition, dockPosition, exposedRect, petLayout, restorePosition, surfaceLayout, surfaceSide } from './geometry';
+import { importPetPack, loadPetPack, MAX_PACK_BYTES, parseManifest, readClip, unpackPetZip, validateAtlas } from './packs';
 const item = (state: ActivityItem['state'], key = 'd:t'): ActivityItem => ({ key, deviceId: 'd', deviceName: 'Mac', workspaceId: 'w', workspaceLabel: 'Project', threadId: key, title: 'Build', state, since: new Date(0).toISOString(), unread: true });
 const event = (type: ActivityEvent['type'], key = 'd:t', id = key): ActivityEvent => ({ type, alertId: id, item: item(type === 'started' ? 'running' : type === 'resolved' ? 'idle' : type, key), at: new Date(0).toISOString() });
 function crc32(bytes: Buffer): number { let c = -1; for (const byte of bytes) { c ^= byte; for (let i = 0; i < 8; i++) c = c >>> 1 ^ (0xedb88320 & -(c & 1)); } return (c ^ -1) >>> 0; }
@@ -63,7 +63,7 @@ describe('display and dock geometry', () => {
   it('keeps the control capsule under the sprite, also on the right and bottom edges', () => {
     const area = { x: 0, y: 0, width: 1000, height: 800 };
     const sprite = { x: 400, y: 300, width: 128, height: 140 };
-    expect(surfaceLayout(sprite, area, 132, 36).y).toBeGreaterThanOrEqual(sprite.y + sprite.height);
+    expect(surfaceLayout(sprite, area, 132, 36).y).toBe(sprite.y + sprite.height + 6);
     const right = surfaceLayout({ ...sprite, x: 872 }, area, 132, 36);
     expect(right.y).toBeGreaterThanOrEqual(sprite.y + sprite.height); expect(right.x + right.width).toBeLessThanOrEqual(1000);
     expect(surfaceLayout({ ...sprite, y: 700 }, area, 132, 36).y + 36).toBeLessThanOrEqual(700);
@@ -101,6 +101,29 @@ describe('display and dock geometry', () => {
 });
 describe('pack validation and safe import', () => {
   const fixture = fileURLToPath(new URL('../../test/fixtures/pets/placeholder/', import.meta.url));
+  it('imports WebM and optional peek from ZIP, replaces atomically, and rejects renamed container bytes', async () => {
+    const temp = await mkdtemp(join(tmpdir(), 'pet-media-zip-'));
+    try {
+      // EBML structure is tested independently; native CI uses a real generated VP9 clip.
+      const { structuralVideo } = await import('./mediaFixture');
+      const image = await readFile(join(fixture, 'spritesheet.png'));
+      const peek = PNG.sync.write(new PNG({ width: 32, height: 32 }));
+      const manifest = { id: 'media-zip', displayName: 'Media', description: '', spritesheetPath: 'spritesheet.png', remoteCodex: {
+        clipFormat: { mediaType: 'webm-vp9-alpha', fps: 24, columns: 1, width: 648, height: 702 },
+        clips: { idle: [{ path: 'clips/a.webm', frames: 48 }] },
+        peek: { path: 'peek.png', width: 32, height: 32, anchor: [.9,.6], headHeight: .6, bounds: [0,0,1,1] },
+      } };
+      const files = (video: Buffer) => [{ name: 'pet.json', data: Buffer.from(JSON.stringify(manifest)) }, { name: 'spritesheet.png', data: image }, { name: 'peek.png', data: peek }, { name: 'clips/a.webm', data: video }];
+      const source = join(temp,'pack.zip'); await writeFile(source,zip(files(structuralVideo())));
+      const imported = await importPetPack(source,join(temp,'pets'));
+      expect(imported.peekImage).toEqual(peek); expect(await readClip(imported,'clips/a.webm')).toEqual(structuralVideo());
+      await writeFile(source,zip(files(Buffer.from('a WebP renamed as video'))));
+      await expect(importPetPack(source,join(temp,'pets'))).rejects.toThrow('WebM');
+      expect(await readFile(join(imported.directory,'clips/a.webm'))).toEqual(structuralVideo());
+      await writeFile(source,zip(files(structuralVideo()).filter(f=>f.name!=='peek.png')));
+      await expect(importPetPack(source,join(temp,'pets'))).rejects.toThrow('peek');
+    } finally { await rm(temp,{recursive:true,force:true}); }
+  });
   it('accepts a good v1 and v2 atlases and rejects dimensions, unsupported versions, formats and limits', async () => {
     const p = await loadPetPack(fixture); expect(p.manifest.id).toBe('placeholder'); const wrong = Buffer.from(p.image); wrong.writeUInt32BE(1760, 20); expect(() => validateAtlas(wrong, p.manifest)).toThrow('1536×1872'); expect(() => validateAtlas(Buffer.alloc(MAX_PACK_BYTES + 1), p.manifest)).toThrow('8 MB'); expect(() => validateAtlas(Buffer.from('fake'), p.manifest)).toThrow('PNG or WebP'); expect(parseManifest(Buffer.from(JSON.stringify({ ...p.manifest, spriteVersionNumber: 2 }))).spriteVersionNumber).toBe(2); expect(() => parseManifest(Buffer.from(JSON.stringify({ ...p.manifest, spriteVersionNumber: 3 })))).toThrow('spriteVersionNumber'); expect(() => parseManifest(Buffer.from(JSON.stringify({ ...p.manifest, spritesheetPath: '../outside.png' })))).toThrow('spritesheetPath');
   });
@@ -199,12 +222,14 @@ describe('v3 atlas and fixed-window regressions', () => {
       const fixture = fileURLToPath(new URL('../../assets/pets/moe/', import.meta.url));
       const image = await readFile(join(fixture, 'spritesheet.webp')), strip = await readFile(join(fixture, 'sleeping.webp'));
       // A real WebP header: 4 frames of 192×208 in one row.
-      const manifest = (description: string): Buffer => Buffer.from(JSON.stringify({ id: 'custom', displayName: 'Custom', description, spritesheetPath: 'spritesheet.webp', remoteCodex: { clipFormat: { fps: 12, columns: 4, width: 192, height: 208 }, clips: { running: [{ path: 'clips/work.webp', frames: 4 }] } } }));
+      const manifest = (description: string): Buffer => Buffer.from(JSON.stringify({ id: 'custom', displayName: 'Custom', description, spritesheetPath: 'spritesheet.webp', remoteCodex: { clipFormat: { fps: 12, columns: 4, width: 192, height: 208 }, faceBox: [.2, .1, .8, .5], talk: { path: 'clips/talk.webp', frames: 4 }, clips: { running: [{ path: 'clips/work.webp', frames: 4 }] } } }));
       const source = join(temp, 'pet.zip'), pets = join(temp, 'pets');
-      const files = (description: string) => [{ name: 'pet.json', data: manifest(description) }, { name: 'spritesheet.webp', data: image }, { name: 'clips/work.webp', data: strip }];
+      const files = (description: string) => [{ name: 'pet.json', data: manifest(description) }, { name: 'spritesheet.webp', data: image }, { name: 'clips/work.webp', data: strip }, { name: 'clips/talk.webp', data: strip }];
       await writeFile(source, zip(files('first')));
       const first = await importPetPack(source, pets, undefined, ['moe']);
       expect(first.manifest.remoteCodex?.clips?.running).toHaveLength(1);
+      expect(first.manifest.remoteCodex?.talk?.frames).toBe(4);
+      expect((await readClip(first, 'clips/talk.webp'))?.equals(strip)).toBe(true);
       expect((await readFile(join(pets, 'custom/clips/work.webp'))).equals(strip)).toBe(true);
       expect((await loadPetPack(join(pets, 'custom'))).manifest.description).toBe('first');
       await writeFile(source, zip(files('second')));
@@ -231,13 +256,46 @@ describe('v3 atlas and fixed-window regressions', () => {
     expect(frameAt('waving', 10000, false, 2.5, true)).toBe(3);
     for (const frameScale of [0, -1, 100, '2']) expect(() => parseManifest(Buffer.from(JSON.stringify({ ...pack.manifest, remoteCodex: { frameScale } })))).toThrow('frameScale');
   });
-  it.each(['left', 'right', 'top', 'bottom'] as const)('keeps %s dock window on screen while hiding 75 percent inside it', edge => {
+
+  it('validates face boxes and talk clips without changing old packs', () => {
+    const base = { id: 'custom', displayName: 'Custom', description: '', spritesheetPath: 'spritesheet.webp' };
+    const parse = (remoteCodex: unknown) => parseManifest(Buffer.from(JSON.stringify({ ...base, remoteCodex })));
+    const valid = { faceBox: [.4, .2, .6, .36], clipFormat: { fps: 24, columns: 12, width: 384, height: 416 }, clips: {}, talk: { path: 'clips/talk.webp', frames: 4 } };
+    expect(parse(valid).remoteCodex?.talk).toEqual(valid.talk);
+    expect(parse({}).remoteCodex).toBeUndefined();
+    for (const faceBox of [[0, 0, 0, 1], [0, 0, 1, 2], [0, 0, 1], ['0', 0, 1, 1]]) expect(() => parse({ ...valid, faceBox })).toThrow('faceBox');
+    for (const talk of [{ path: '../talk.webp', frames: 3 }, { path: 'clips/talk.webp', frames: 2 }, { path: 'clips/talk.webp', frames: 9 }, null]) expect(() => parse({ ...valid, talk })).toThrow('talk');
+    expect(() => parse({ ...valid, faceBox: undefined })).toThrow('talk');
+    expect(() => parse({ faceBox: valid.faceBox, talk: valid.talk })).toThrow('talk');
+  });
+  it.each(['left', 'right', 'top', 'bottom'] as const)('keeps %s dock window fixed and bisects the declared face', edge => {
     const area = { x: -1440, y: 40, width: 1440, height: 860 };
     const position = restorePosition({ displayId: 2, x: -800, y: 400, edge }, [{ id: 2, workArea: area }], { id: 2, workArea: area }, 128);
     const tucked = petLayout(position, area, 128, { dockAmount: 1 });
     const open = petLayout(position, area, 128, { panel: true, menu: true, bubble: true, chat: true, peek: true, dockAmount: 0 });
     expect(tucked.window).toEqual(open.window);
     expect(tucked.window.x).toBeGreaterThanOrEqual(area.x); expect(tucked.window.y).toBeGreaterThanOrEqual(area.y);
-    expect(Math.abs(edge === 'left' || edge === 'right' ? tucked.pet.x / tucked.pet.width : tucked.pet.y / tucked.pet.height)).toBe(.75);
+    for (const faceBox of [DEFAULT_FACE_BOX, [.4, .24, .62, .36] as [number, number, number, number]]) for (const height of [72, 128, 256]) {
+      const rest = petLayout(position, area, height, { dockAmount: 1, faceBox });
+      const alert = petLayout(position, area, height, { dockAmount: HEAD_PEEK, faceBox });
+      const { width, height: h, x, y } = rest.pet, angle = dockTilt(edge, 1) * Math.PI / 180;
+      const fx = (faceBox[0] + faceBox[2]) / 2 * width - rest.pivot.x;
+      const fy = (faceBox[1] + faceBox[3]) / 2 * h - rest.pivot.y;
+      const cx = rest.pivot.x + fx * Math.cos(angle) - fy * Math.sin(angle) + x;
+      const cy = rest.pivot.y + fx * Math.sin(angle) + fy * Math.cos(angle) + y;
+      if (edge === 'left') expect(cx).toBeCloseTo(0);
+      if (edge === 'right') expect(cx).toBeCloseTo(width);
+      if (edge === 'top') expect(cy).toBeCloseTo(0);
+      if (edge === 'bottom') expect(y + (faceBox[1] + (faceBox[3] - faceBox[1]) * .6) * h).toBeCloseTo(h);
+      expect(Math.abs(alert.pet.x) + Math.abs(alert.pet.y)).toBeLessThan(Math.abs(x) + Math.abs(y));
+      expect(rest.window).toEqual(alert.window);
+      if (rest.clip && (edge === 'left' || edge === 'right')) {
+        expect(cy).toBeCloseTo((faceBox[1] + faceBox[3]) / 2 * h);
+        expect(rest.visible.height).toBeLessThan(h * .5);
+        expect(rest.visible.width).toBeLessThan(width * .4);
+        expect(rest.pivot.y).toBeGreaterThan(faceBox[3] * h);
+        expect(open.clip).toBeNull();
+      }
+    }
   });
 });

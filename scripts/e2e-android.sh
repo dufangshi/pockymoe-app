@@ -135,6 +135,21 @@ adb -s "$SERIAL" shell run-as com.remotecodex.app.debug mkdir -p files
 adb -s "$SERIAL" shell "run-as com.remotecodex.app.debug sh -c 'cat > files/e2e-env.json'" < "$ENV_FILE"
 adb -s "$SERIAL" shell am instrument -w -r -e class 'com.remotecodex.app.ProductParityTest#freshInstallConnectsOnlyToEnteredService' -e envFile /data/user/0/com.remotecodex.app.debug/files/e2e-env.json com.remotecodex.app.debug.test/androidx.test.runner.AndroidJUnitRunner | tee "$ARTIFACTS/fresh-install-test.log"
 rg -q 'OK \([0-9]+ tests?\)' "$ARTIFACTS/fresh-install-test.log"
+if [[ "${ANDROID_CONNECTION_ONLY:-0}" == 1 ]]; then
+  adb -s "$SERIAL" shell am instrument -w -r -e class 'com.remotecodex.app.ProductParityTest#storedRelayIsProbedOnceAndConnectionErrorsStayEditable' -e envFile /data/user/0/com.remotecodex.app.debug/files/e2e-env.json com.remotecodex.app.debug.test/androidx.test.runner.AndroidJUnitRunner | tee "$ARTIFACTS/connection-cases.log"
+  rg -q 'OK \([0-9]+ tests?\)' "$ARTIFACTS/connection-cases.log"
+  for width in phone small; do
+    if [[ "$width" == small ]]; then adb -s "$SERIAL" shell wm size 840x1800; fi
+    for locale in en zh-CN; do
+      for mode in light dark; do
+        adb -s "$SERIAL" shell am instrument -w -r -e class 'com.remotecodex.app.ProductParityTest#connectionPageVisuals' -e locale "$locale" -e mode "$mode" -e width "$width" com.remotecodex.app.debug.test/androidx.test.runner.AndroidJUnitRunner | tee "$ARTIFACTS/visual-$width-$locale-$mode.log"
+        rg -q 'OK \([0-9]+ tests?\)' "$ARTIFACTS/visual-$width-$locale-$mode.log"
+      done
+    done
+  done
+  adb -s "$SERIAL" shell wm size reset
+  exit 0
+fi
 # Exercise the redirect/upgrade and actual system-browser callback paths before signing in.
 for case in storedRelayIsProbedOnceAndConnectionErrorsStayEditable oauthReturnWithLivingActivity; do
   adb -s "$SERIAL" shell am instrument -w -r -e class "com.remotecodex.app.ProductParityTest#$case" -e envFile /data/user/0/com.remotecodex.app.debug/files/e2e-env.json com.remotecodex.app.debug.test/androidx.test.runner.AndroidJUnitRunner | tee "$ARTIFACTS/$case.log"
