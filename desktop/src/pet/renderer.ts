@@ -243,7 +243,7 @@ function renderSprite(): void {
     source.onload = () => { if (spriteImage !== source) return; canvas.width = source.width; canvas.height = source.height; context.clearRect(0, 0, canvas.width, canvas.height); context.drawImage(source, 0, 0); alpha = context.getImageData(0, 0, source.width, source.height).data; };
     source.src = image;
   }
-  paintSprite();
+  paintSprite(); videoPlayer?.invalidate();
 }
 // A pack's clips replace the atlas for the states they cover; any other state, or a clip that
 // fails to decode, draws from the atlas. Sheets are decoded when needed and few are kept.

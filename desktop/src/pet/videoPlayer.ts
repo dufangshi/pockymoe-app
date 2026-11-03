@@ -55,6 +55,14 @@ export class VideoClipPlayer {
     if (!still && !this.completed && now - this.start >= a.clip.frames / fps * 1000 - 1) {
       this.completed = true; this.wanted = null; this.finish(); return;
     }
+    if (still) {
+      a.video.pause();
+      if (a.video.currentTime !== 0) { a.video.currentTime = 0; this.changed = true; }
+    } else if (a.video.paused && !a.video.ended && !this.completed) {
+      this.start = now - a.video.currentTime * 1000;
+      void a.video.play().catch(() => this.failed());
+    }
+    if (a.video.readyState < 2) return;
     const frame = Math.floor(a.video.currentTime * fps + .001);
     if (this.changed || frame !== this.frame) { this.changed = false; this.frame = frame; this.draw(a.video); }
   }
@@ -66,6 +74,7 @@ export class VideoClipPlayer {
     v.playbackRate = 3;
     this.start = performance.now() - (this.active.clip.frames / Number(v.dataset.fps || 24) * 1000 - Math.min(600, Math.max(0, v.duration - v.currentTime) / 3 * 1000));
   }
+  invalidate(): void { this.changed = true; }
   get role(): PetClip['role'] { return this.active?.clip.role; }
   get playing(): boolean { return !!this.active; }
   dispose(): void { this.token++; this.release(this.active); this.release(this.next); this.active = this.next = null; this.wanted = null; }

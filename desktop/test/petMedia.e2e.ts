@@ -28,6 +28,12 @@ test('synthetic VP9 alpha streams through the pet protocol and switches without 
     expect(new Set(sample.records.map(r=>r.path)).size).toBeGreaterThan(1);
     const range=await app.evaluate(async({net},url)=>{const r=await net.fetch(url,{headers:{Range:'bytes=0-3'}});return {status:r.status,type:r.headers.get('content-type'),range:r.headers.get('content-range'),bytes:[...new Uint8Array(await r.arrayBuffer())]};},sample.source);
     expect(range).toMatchObject({status:206,type:'video/webm',bytes:[26,69,223,163]});expect(range.range).toMatch(/^bytes 0-3\//);
+    await sprite.emulateMedia({ reducedMotion: 'reduce' });
+    await expect.poll(() => sprite.locator('video.pet-video').evaluateAll(v => v.every(x => (x as HTMLVideoElement).paused && (x as HTMLVideoElement).currentTime === 0))).toBe(true);
+    await app.evaluate(()=> (globalThis as unknown as {petHarness:{settings(p:unknown):void}}).petHarness.settings({petSize:'M'}));
+    await expect.poll(() => sprite.locator('#clip').evaluate(c => (c as HTMLCanvasElement).width === Math.round(c.clientWidth * devicePixelRatio))).toBe(true);
+    await sprite.emulateMedia({ reducedMotion: 'no-preference' });
+    await expect.poll(() => sprite.locator('video.pet-video').evaluateAll(v => v.some(x => !(x as HTMLVideoElement).paused))).toBe(true);
     await app.evaluate(()=> (globalThis as unknown as {petHarness:{settings(p:unknown):void}}).petHarness.settings({petId:'moe'}));
     await expect(sprite.locator('video.pet-video')).toHaveCount(0);
     expect(await app.evaluate(async({net},url)=>(await net.fetch(url)).status,sample.source)).toBe(404);
