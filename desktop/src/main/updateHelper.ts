@@ -7,6 +7,9 @@ import { swapPreparedUpdate, type SwapJob } from './updateRecovery';
 
 async function main(): Promise<void> {
   const job = JSON.parse(readFileSync(process.argv[2], 'utf8')) as SwapJob;
+  // Publish our live identity before readiness; B must retain A's rollback copy
+  // throughout this helper's five-second startup observation.
+  writeFileSync(join(job.work, 'helper.pid'), String(process.pid), { mode: 0o600, flag: 'wx' });
   writeFileSync(join(job.work, 'ready'), 'ready', { mode: 0o600, flag: 'wx' });
   await swapPreparedUpdate(job, {
     waitForExit: async pid => {

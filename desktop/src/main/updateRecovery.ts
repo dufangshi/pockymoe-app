@@ -1,4 +1,5 @@
-import { lstat, readdir, rename, rm } from 'node:fs/promises';
+import { lstat, open, readdir, rename, rm } from 'node:fs/promises';
+import { constants } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 /** Cleanup never follows links or removes a bundle that this process runs from. */
@@ -13,6 +14,31 @@ export async function recoverUpdateStartup(options: { platform: string; execPath
   const originalName = backup?.[1] || name;
   const alive = (pid: string): boolean => { try { process.kill(Number(pid), 0); return true; } catch (error) { return (error as NodeJS.ErrnoException).code !== 'ESRCH'; } };
   const isDirectory = async (path: string): Promise<boolean> => lstat(path).then(stat => stat.isDirectory() && !stat.isSymbolicLink(), () => false);
+  // B starts while its detached helper still observes startup. The old A PID is
+  // dead by then, but its rollback copy remains live until the helper commits.
+  const activeOwners = new Set<string>();
+  const updates = join(options.userData, 'updates');
+  const readOwnedFile = async (path: string, limit: number): Promise<string> => {
+    const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    try {
+      const stat = await file.stat();
+      if (!stat.isFile() || stat.size > limit) throw new Error('Invalid helper marker');
+      return await file.readFile('utf8');
+    } finally { await file.close(); }
+  };
+  if (await isDirectory(updates)) {
+    for (const entry of await readdir(updates).catch(() => [] as string[])) {
+      const work = join(updates, entry);
+      if (!/^install-[A-Za-z0-9_-]+$/.test(entry) || !await isDirectory(work)) continue;
+      try {
+        const helperPid = (await readOwnedFile(join(work, 'helper.pid'), 32)).trim();
+        if (!/^[1-9]\d{0,9}$/.test(helperPid) || !alive(helperPid)) continue;
+        const job = JSON.parse(await readOwnedFile(join(work, 'job.json'), 32_768)) as Partial<SwapJob>;
+        if (!Number.isSafeInteger(job.pid) || job.pid! <= 0 || job.work !== work || job.current !== join(parent, originalName) || job.sibling !== join(parent, `.Pockymoe-update-${job.pid}.app`)) continue;
+        activeOwners.add(String(job.pid));
+      } catch { /* Invalid, stale or linked markers cannot protect stale files. */ }
+    }
+  }
   if (backup) {
     const original = join(parent, backup[1]);
     const absent = await lstat(original).then(() => false, error => error.code === 'ENOENT');
@@ -26,7 +52,7 @@ export async function recoverUpdateStartup(options: { platform: string; execPath
     const siblingPid = /^\.Pockymoe-update-(\d+)\.app$/.exec(entry)?.[1];
     const backupPid = entry.startsWith(`${originalName}.update-backup-`) ? /\.update-backup-(\d+)$/.exec(entry)?.[1] : undefined;
     const pid = siblingPid || backupPid;
-    if (!pid || alive(pid)) continue;
+    if (!pid || alive(pid) || activeOwners.has(pid)) continue;
     const path = join(parent, entry);
     if (path === current || !await isDirectory(path)) continue;
     // A backup is the only recoverable copy when the original is absent. Keep it.

@@ -47,3 +47,22 @@ it('sweeps stale owned bundles but preserves links, live PID, unrelated files an
   await recoverUpdateStartup({ platform: 'darwin', execPath: join(current, 'Contents/MacOS/Pockymoe'), userData: '/unused' });
   expect(await exists(stale)).toBe(false); expect(await exists(backup)).toBe(false); expect(await exists(current)).toBe(true); expect(await exists(live)).toBe(true); expect(await exists(link)).toBe(true); expect(await readFile(join(external, 'keep'), 'utf8')).toBe('keep');
 });
+it.each(['live', 'stale', 'linkedPid', 'linkedJob', 'linkedWork'])('protects rollback backup during a live helper only: %s', async mode => {
+  const owner = 999999999, current = join(directory, 'Pockymoe.app'), sibling = join(directory, `.Pockymoe-update-${owner}.app`), backup = `${current}.update-backup-${owner}`;
+  const userData = join(directory, 'profile'), updates = join(userData, 'updates'), work = join(updates, 'install-fixture');
+  for (const path of [current, sibling, backup]) await mkdir(path);
+  await mkdir(updates, { recursive: true });
+  const realWork = mode === 'linkedWork' ? join(directory, 'external-work') : work;
+  await mkdir(realWork);
+  if (mode === 'linkedWork') await symlink(realWork, work);
+  const helperPid = mode === 'stale' ? '999999998' : String(process.pid);
+  const marker = join(realWork, 'helper.pid'), jobFile = join(realWork, 'job.json');
+  if (mode === 'linkedPid') { const external = join(directory, 'external-pid'); await writeFile(external, helperPid); await symlink(external, marker); }
+  else await writeFile(marker, helperPid);
+  const jobData = JSON.stringify({ pid: owner, current, sibling, work });
+  if (mode === 'linkedJob') { const external = join(directory, 'external-job'); await writeFile(external, jobData); await symlink(external, jobFile); }
+  else await writeFile(jobFile, jobData);
+  await recoverUpdateStartup({ platform: 'darwin', execPath: join(current, 'Contents/MacOS/Pockymoe'), userData });
+  expect(await exists(backup)).toBe(mode === 'live'); expect(await exists(sibling)).toBe(mode === 'live');
+  expect(await exists(current)).toBe(true);
+});
