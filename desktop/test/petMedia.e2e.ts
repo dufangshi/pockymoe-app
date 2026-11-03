@@ -36,6 +36,28 @@ test('synthetic VP9 alpha streams through the pet protocol and switches without 
     expect(new Set(sample.records.map(r=>r.path)).size).toBeGreaterThan(1);
     const range=await app.evaluate(async({net},url)=>{const r=await net.fetch(url,{headers:{Range:'bytes=0-3'}});return {status:r.status,type:r.headers.get('content-type'),range:r.headers.get('content-range'),bytes:[...new Uint8Array(await r.arrayBuffer())]};},sample.source);
     expect(range).toMatchObject({status:206,type:'video/webm',bytes:[26,69,223,163]});expect(range.range).toMatch(/^bytes 0-3\//);
+    await app.evaluate(()=> (globalThis as unknown as {petHarness:{settings(p:unknown):void}}).petHarness.settings({petEdgeHide:true}));
+    const act = (value: unknown) => sprite.evaluate(v => (window as unknown as {rcDesktop:{pet:{action(v:unknown):Promise<unknown>}}}).rcDesktop.pet.action(v), value);
+    for (const edge of ['top','bottom','right'] as const) {
+      const {bounds,area}=await app.evaluate(({BrowserWindow,screen})=>({bounds:BrowserWindow.getAllWindows().find(w=>!w.getParentWindow())!.getBounds(),area:screen.getPrimaryDisplay().workArea}));
+      const x=edge==='right'?area.x+area.width-bounds.width:area.x+Math.round(area.width/2),y=edge==='top'?area.y:edge==='bottom'?area.y+area.height-bounds.height:area.y+100;
+      await act({type:'dragStart',x:bounds.x,y:bounds.y});await act({type:'dragMove',x,y});await act({type:'dragEnd',x,y});
+      await expect(sprite.locator('#app')).toHaveAttribute('data-edge',edge);await expect(sprite.locator('#app')).toHaveAttribute('data-dock-amount','1');
+      if(edge!=='right'){
+        await expect(sprite.locator('#clip')).toHaveAttribute('data-clip-path','clips/a.webm');await expect(sprite.locator('#clip')).toHaveAttribute('data-media-frame','0');
+        expect(await sprite.locator('#clip').evaluate(c=>({backing:[(c as HTMLCanvasElement).width,(c as HTMLCanvasElement).height],expected:[Math.round(c.clientWidth*devicePixelRatio),Math.round(c.clientHeight*devicePixelRatio)],atlas:getComputedStyle(document.querySelector('#sprite')!).display,visible:getComputedStyle(c).visibility}))).toMatchObject({atlas:'none',visible:'visible'});
+        expect(await sprite.locator('#clip').evaluate(c=>(c as HTMLCanvasElement).width===Math.round(c.clientWidth*devicePixelRatio)&&(c as HTMLCanvasElement).height===Math.round(c.clientHeight*devicePixelRatio))).toBe(true);
+      }
+    }
+    for(const tucked of [false,true]){
+      const samples=await sprite.evaluate(async tucked=>{
+        await (window as unknown as {rcDesktop:{pet:{action(v:unknown):Promise<unknown>}}}).rcDesktop.pet.action({type:'setEdgeHide',value:tucked});
+        while(document.querySelector('#character')!.classList.contains('art-tucked')!==tucked)await new Promise<void>(r=>requestAnimationFrame(()=>r()));
+        const start=performance.now(),result:{body:number;peek:number}[]=[];while(performance.now()-start<350){result.push({body:Number(getComputedStyle(document.querySelector('#clip')!).opacity),peek:Number(getComputedStyle(document.querySelector('#peek-art')!).opacity)});await new Promise<void>(r=>requestAnimationFrame(()=>r()));}return result;
+      },tucked);
+      expect(samples.some(s=>s.body>.01&&s.peek>.01)).toBe(false);expect(samples.at(-1)).toEqual({body:tucked?0:1,peek:tucked?1:0});
+    }
+    await app.evaluate(()=> (globalThis as unknown as {petHarness:{settings(p:unknown):void}}).petHarness.settings({petEdgeHide:false}));
     await sprite.emulateMedia({ reducedMotion: 'reduce' });
     await expect.poll(() => sprite.locator('video.pet-video').evaluateAll(v => v.every(x => (x as HTMLVideoElement).paused && (x as HTMLVideoElement).currentTime === 0))).toBe(true);
     await app.evaluate(()=> (globalThis as unknown as {petHarness:{settings(p:unknown):void}}).petHarness.settings({petSize:'M'}));

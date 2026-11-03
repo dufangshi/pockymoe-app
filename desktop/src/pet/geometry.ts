@@ -67,7 +67,8 @@ export function dockedPose(width: number, height: number, edge: DockEdge | null,
     const x1 = Math.min(width, image.x + (bx + b[2] - b[0]) * image.width), y1 = Math.min(height, image.y + b[3] * image.height);
     return { x: 0, y: 0, pivot: { x: width / 2, y: height / 2 }, clip: null, visible: { x: x0, y: y0, width: Math.max(0, x1 - x0), height: Math.max(0, y1 - y0) } };
   }
-  const headOnly = amount > 0 && (edge === 'left' || edge === 'right') && face[3] - face[1] < .28;
+  const headOnly = amount > 0 && !!edge && face[3] - face[1] < .28;
+  const sideHead = headOnly && (edge === 'left' || edge === 'right');
   const faceX = (face[0] + face[2]) / 2 * width, faceY = (face[1] + face[3]) / 2 * height;
   const pivot = headOnly ? { x: faceX, y: Math.min(1, face[3] + (face[3] - face[1]) * .35) * height } : { x: width / 2, y: height / 2 };
   const angle = dockTilt(edge, amount) * Math.PI / 180;
@@ -76,11 +77,16 @@ export function dockedPose(width: number, height: number, edge: DockEdge | null,
   const x = edge === 'left' ? -center.x * amount : edge === 'right' ? (width - center.x) * amount : 0;
   const eyes = (face[1] + (face[3] - face[1]) * .6) * height;
   // Hold the face at its undocked screen height while it leans around the neck.
-  const y = headOnly ? faceY - center.y : edge === 'top' ? -center.y * amount : edge === 'bottom' ? (height - eyes) * amount : 0;
+  let y = sideHead ? faceY - center.y : edge === 'top' ? -center.y * amount : edge === 'bottom' ? (height - eyes) * amount : 0;
   const fw = face[2] - face[0], fh = face[3] - face[1];
   const left = Math.max(0, face[0] - fw * .65) * width, right = Math.min(1, face[2] + fw * .65) * width;
   const top = Math.max(0, face[1] - fh * 1.4) * height, bottom = Math.min(1, face[3] + fh * .45) * height;
-  // Side peeks show hair, face and neck, never a vertical strip of a long skirt.
+  // Slender packs reveal only crown/hair, face and collarbone at every edge.
+  // Keep the collar cut behind the physical top/bottom edge even during alerts.
+  if (headOnly && (edge === 'top' || edge === 'bottom')) {
+    const collar = rotate(faceX, bottom).y;
+    y = edge === 'top' ? Math.min(y, -collar) : Math.max(y, height - collar);
+  }
   const clip: Rect | null = headOnly ? { x: left, y: top, width: right - left, height: bottom - top } : null;
   const source = clip ?? { x: 0, y: 0, width, height };
   const corners = [[source.x, source.y], [source.x + source.width, source.y], [source.x, source.y + source.height], [source.x + source.width, source.y + source.height]].map(([x, y]) => rotate(x, y));

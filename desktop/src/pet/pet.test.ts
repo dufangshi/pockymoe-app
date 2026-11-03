@@ -289,7 +289,7 @@ describe('v3 atlas and fixed-window regressions', () => {
       if (edge === 'bottom') expect(y + (faceBox[1] + (faceBox[3] - faceBox[1]) * .6) * h).toBeCloseTo(h);
       expect(Math.abs(alert.pet.x) + Math.abs(alert.pet.y)).toBeLessThan(Math.abs(x) + Math.abs(y));
       expect(rest.window).toEqual(alert.window);
-      if (rest.clip) {
+      if (rest.clip && (edge === 'left' || edge === 'right')) {
         expect(cy).toBeCloseTo((faceBox[1] + faceBox[3]) / 2 * h);
         expect(rest.visible.height).toBeLessThan(h * .5);
         expect(rest.visible.width).toBeLessThan(width * .4);

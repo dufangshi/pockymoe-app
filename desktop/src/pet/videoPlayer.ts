@@ -10,6 +10,7 @@ export class VideoClipPlayer {
   private completed = false;
   private changed = true;
   private wanted: PetClip | null = null;
+  private switching: Promise<void> | null = null;
   constructor(private url: (path: string) => string, private draw: (video: HTMLVideoElement) => void, private finish: () => void, private failed: () => void) {}
   private make(clip: PetClip): Slot {
     const video = document.createElement('video'); video.crossOrigin = 'anonymous'; video.muted = true; video.preload = 'auto'; video.playsInline = true; video.hidden = true; video.className = 'pet-video'; document.body.append(video);
@@ -29,12 +30,16 @@ export class VideoClipPlayer {
     slot.video.pause(); slot.video.removeAttribute('src'); slot.video.load(); slot.video.onloadeddata = null; slot.video.onerror = null; slot.video.remove();
   }
   preload(clip: PetClip | null): void {
-    if (!clip || clip.path === this.next?.clip.path) return;
+    if (!clip) { this.release(this.next); this.next = null; return; }
+    if (clip.path === this.next?.clip.path) return;
     this.release(this.next); this.next = this.make(clip);
   }
-  async play(clip: PetClip, fps: number, still: boolean): Promise<void> {
-    if (this.wanted === clip) return;
-    this.wanted = clip; const token = ++this.token;
+  play(clip: PetClip, fps: number, still: boolean): Promise<void> {
+    if (this.wanted === clip) return this.switching ?? Promise.resolve();
+    this.wanted = clip; this.switching = this.activate(clip, fps, still); return this.switching;
+  }
+  private async activate(clip: PetClip, fps: number, still: boolean): Promise<void> {
+    const token = ++this.token;
     const slot = this.next?.clip.path === clip.path ? this.next : null;
     // Release the obsolete preload before opening a replacement: never three decoders.
     if (!slot) { this.release(this.next); this.next = this.make(clip); }
@@ -77,7 +82,8 @@ export class VideoClipPlayer {
     this.start = performance.now() - (this.active.clip.frames / Number(v.dataset.fps || 24) * 1000 - Math.min(600, Math.max(0, v.duration - v.currentTime) / 3 * 1000));
   }
   invalidate(): void { this.changed = true; }
+  get path(): string | null { return this.active?.clip.path ?? null; }
   get role(): PetClip['role'] { return this.active?.clip.role; }
   get playing(): boolean { return !!this.active; }
-  dispose(): void { this.token++; this.release(this.active); this.release(this.next); this.active = this.next = null; this.wanted = null; }
+  dispose(): void { this.token++; this.release(this.active); this.release(this.next); this.active = this.next = null; this.wanted = null; this.switching = null; }
 }

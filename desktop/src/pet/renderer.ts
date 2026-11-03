@@ -192,6 +192,7 @@ root.addEventListener('submit', event => {
   void itemAction({ type: 'reply', key: target.key, text }, 'chat').then(result => { if (state?.accountId !== account) return; sendState = result.ok ? 'sent' : 'error'; if (result.ok && draft === text) draft = ''; renderGlass(); });
 });
 let peekSource: HTMLImageElement | null = null;
+let dockClipHeld = false;
 function paintPeek(): void {
   const ch = root.querySelector('#character'); if (!state || !ch) return;
   let c = ch.querySelector<HTMLCanvasElement>('#peek-art');
@@ -223,14 +224,18 @@ function renderSprite(): void {
   character.style.transform = `translate(${state.pet.x}px,${state.pet.y}px) rotate(${tilt}deg)`;
   character.classList.toggle('has-peek', sideArt);
   const tuckedArt = sideArt && state.dockAmount > 0;
+  // Out, then in: each direction has exactly one visible representation.
+  const wasTucked = character.classList.contains('art-tucked');
   character.classList.toggle('art-tucked', tuckedArt);
+  if (wasTucked !== tuckedArt) character.dataset.peekTransition = tuckedArt ? 'docking' : 'undocking';
   character.style.setProperty('--body-slide', sideArt && tuckedArt ? `${state.edge === 'right' ? state.pet.width : -state.pet.width}px` : '0px');
   paintPeek();
   character.classList.toggle('docked-rest', state.dockAmount === 1);
   character.classList.toggle('sleeping', state.mood === 'sleeping');
   character.classList.toggle('peeking', state.dockAmount > 0 && state.dockAmount < 1);
   root.dataset.mood = state.mood; root.dataset.edge = state.edge ?? ''; root.dataset.dockAmount = String(state.dockAmount);
-  if (animationState !== state.mood || lastEpoch !== state.moodEpoch) {
+  const moodChanged = animationState !== state.mood || lastEpoch !== state.moodEpoch;
+  if (moodChanged) {
     lastEpoch = state.moodEpoch;
     const old = root.querySelector<HTMLElement>('#sprite-old')!, sprite = root.querySelector<HTMLElement>('#sprite')!;
     old.style.cssText = sprite.style.cssText; old.style.opacity = state.dockAmount === 1 ? '0' : '1'; sprite.style.opacity = motion.matches || state.dockAmount === 1 ? '1' : '0';
@@ -243,6 +248,8 @@ function renderSprite(): void {
     source.onload = () => { if (spriteImage !== source) return; canvas.width = source.width; canvas.height = source.height; context.clearRect(0, 0, canvas.width, canvas.height); context.drawImage(source, 0, 0); alpha = context.getImageData(0, 0, source.width, source.height).data; };
     source.src = image;
   }
+  const hold = !!state.clips && !!state.edge && state.dockAmount > 0;
+  if (hold !== dockClipHeld) { dockClipHeld = hold; if (!moodChanged) playClips(); }
   paintSprite(); videoPlayer?.invalidate();
 }
 // A pack's clips replace the atlas for the states they cover; any other state, or a clip that
@@ -269,21 +276,27 @@ function videoCanvas(video: HTMLVideoElement): void {
   const w = Math.round(state.pet.width * devicePixelRatio), h = Math.round(state.pet.height * devicePixelRatio);
   if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
   clipContext ??= c.getContext('2d', { willReadFrequently: true }); if (!clipContext) return;
+  c.dataset.clipPath = videoPlayer?.path ?? ''; c.dataset.renderMode = dockRestClip() ? 'dock-rest' : 'playing';
   c.dataset.mediaSource = video.src; c.dataset.mediaFrame = String(Math.floor(video.currentTime * (state.clips?.format.fps ?? 24) + .001));
   clipContext.globalCompositeOperation = 'copy'; clipContext.imageSmoothingQuality = 'high'; const frame = new VideoFrame(video);
   try { clipContext.drawImage(frame, 0, 0, w, h); } finally { frame.close(); }
   updateHit();
 }
+function dockRestClip(): PetClip | null {
+  if (!state?.clips || !state.edge || state.dockAmount <= 0) return null;
+  return state.clips.states.idle?.find(c => !c.role) ?? state.clips.states[animationState]?.find(c => !c.role) ?? Object.values(state.clips.states).flat().find(c => !c?.role) ?? null;
+}
 function playClips(): void {
   const token = ++clipToken;
   clipSequence ??= state?.clips ? new ClipSequencer(state.clips.states) : null;
-  const clip = !clipSequence ? null : motion.matches ? clipSequence.still(animationState) : clipSequence.next(animationState, Date.now());
+  const docked = dockRestClip();
+  const clip = docked ?? (!clipSequence ? null : motion.matches ? clipSequence.still(animationState) : clipSequence.next(animationState, Date.now()));
   if (!clip) { videoPlayer?.dispose(); clipPlayer = null; root.querySelector('#character')?.classList.remove('clips'); return; }
   if (state?.clips?.format.mediaType === 'webm-vp9-alpha') {
     videoPlayer ??= new VideoClipPlayer(path => state?.clips?.urls?.[path] ?? '', video => { root.querySelector('#character')?.classList.add('clips'); videoCanvas(video); }, () => { if (!ONE_SHOT.includes(animationState) || videoPlayer?.role) playClips(); }, () => { root.querySelector('#character')?.classList.remove('clips'); paintSprite(); });
-    void videoPlayer.play(clip, state.clips.format.fps, motion.matches).then(() => {
+    void videoPlayer.play(clip, state.clips.format.fps, motion.matches || !!docked).then(() => {
       if (token !== clipToken) return;
-      const next = clipSequence?.upcoming(animationState); videoPlayer?.preload(next ?? null);
+      const next = docked ? null : clipSequence?.upcoming(animationState); videoPlayer?.preload(next ?? null);
     });
     return;
   }
@@ -292,6 +305,7 @@ function playClips(): void {
     if (token !== clipToken) return;
     if (!bitmap) { clipPlayer = null; root.querySelector('#character')?.classList.remove('clips'); paintSprite(); return; }
     clipPlayer = { clip, bitmap, start: performance.now(), drawn: -1 };
+    if (docked) { clipPlayer.drawn = 0; drawClip(0); }
     root.querySelector('#character')?.classList.add('clips');
     const next = clipSequence?.upcoming(animationState); if (next && next !== clip) void loadClip(next.path);
   });
@@ -300,6 +314,7 @@ function playClips(): void {
 // clip to the nearer end instead of cutting away from the middle of a movement. An intro has to
 // reach its end, because what follows starts there, and an outro simply finishes.
 function leaveClip(): void {
+  if (dockRestClip()) { playClips(); return; }
   const format = state?.clips?.format;
   if (format?.mediaType && videoPlayer?.playing && !motion.matches) { videoPlayer.leave(); return; }
   if (!clipPlayer || !format || motion.matches || !state?.clips?.states[animationState]) { playClips(); return; }
@@ -363,13 +378,15 @@ function drawClip(index: number): void {
   if (element.width !== width || element.height !== height) { element.width = width; element.height = height; clipContext = null; }
   clipContext ??= element.getContext('2d', { willReadFrequently: true });
   if (!clipContext) return;
+  element.dataset.clipPath = clipPlayer.clip.path; element.dataset.mediaFrame = String(index); element.dataset.renderMode = dockRestClip() ? 'dock-rest' : 'playing';
   clipContext.clearRect(0, 0, width, height); clipContext.imageSmoothingQuality = 'high';
   clipContext.drawImage(clipPlayer.bitmap, (index % format.columns) * format.width, Math.floor(index / format.columns) * format.height, format.width, format.height, 0, 0, width, height);
 }
 function stepClip(now: number): void {
-  if (state?.clips?.format.mediaType) { videoPlayer?.tick(now, state.clips.format.fps, motion.matches); return; }
+  if (state?.clips?.format.mediaType) { videoPlayer?.tick(now, state.clips.format.fps, motion.matches || !!dockRestClip()); return; }
   if (!clipPlayer || !state?.clips) return;
   const format = state.clips.format, { clip } = clipPlayer;
+  if (dockRestClip()) { if (clipPlayer.drawn !== 0) { clipPlayer.drawn = 0; drawClip(0); updateHit(); } return; }
   const { leaving } = clipPlayer;
   if (leaving) {
     const amount = Math.min(1, (now - leaving.start) / leaving.ms), index = Math.round(leaving.from + (leaving.to - leaving.from) * amount);
@@ -416,7 +433,7 @@ function opaqueAt(point: { clientX: number; clientY: number }): boolean {
   const threshold = 24 / feather;
   const talk = root.querySelector<HTMLCanvasElement>('#talk');
   if (character.classList.contains('talking') && talk) return talk.getContext('2d')!.getImageData(Math.floor(x / 192 * talk.width), Math.floor(y / 208 * talk.height), 1, 1).data[3]! > threshold;
-  if (state.dockAmount !== 1 && (clipPlayer || videoPlayer?.playing) && clipContext) { const element = clipContext.canvas; return clipContext.getImageData(Math.floor(x / 192 * element.width), Math.floor(y / 208 * element.height), 1, 1).data[3]! > threshold; }
+  if ((clipPlayer || videoPlayer?.playing) && clipContext) { const element = clipContext.canvas; return clipContext.getImageData(Math.floor(x / 192 * element.width), Math.floor(y / 208 * element.height), 1, 1).data[3]! > threshold; }
   if (!alpha) return false;
   const row = state.dockAmount === 1 || animationState === 'sleeping' && state.sleeping ? 0 : ANIMATIONS[animationState].row;
   return alpha[((row * 208 + y) * (spriteImage?.width ?? 1536) + (state.dockAmount === 1 ? 0 : frame) * 192 + x) * 4 + 3] > threshold;
@@ -477,7 +494,7 @@ bridge.onState(next => {
   if (next.surface === 'sprite') {
     // Another pack's sheets share nothing with this one's.
     const packKey = `${next.packName}#${next.clips?.epoch ?? 0}`;
-    if (packKey !== clipPack) { videoPlayer?.dispose(); videoPlayer = null; clipContext = null; peekSource = null; talkBaseKey = ''; talkBitmap?.close(); talkLoading = ''; talkBitmap = null; talkFrame = -1; clipPack = packKey; for (const entry of clipCache.values()) void entry.then(bitmap => bitmap?.close()); clipCache.clear(); clipSequence = null; clipPlayer = null; clipToken++; lastEpoch = -1; }
+    if (packKey !== clipPack) { videoPlayer?.dispose(); videoPlayer = null; clipContext = null; peekSource = null; talkBaseKey = ''; talkBitmap?.close(); talkLoading = ''; talkBitmap = null; talkFrame = -1; clipPack = packKey; for (const entry of clipCache.values()) void entry.then(bitmap => bitmap?.close()); clipCache.clear(); dockClipHeld = false; clipSequence = null; clipPlayer = null; clipToken++; lastEpoch = -1; }
     renderSprite(); updateHit(); return;
   }
   if (old?.detailOpen && !next.detailOpen) root.querySelector<HTMLButtonElement>('.error-mark[aria-expanded="true"]')?.click();

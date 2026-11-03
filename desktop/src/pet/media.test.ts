@@ -97,3 +97,14 @@ describe('visible-head surfaces', () => {
     for (const peek of [{ ...art,path:'../peek.png' },{ ...art,anchor:[NaN,.5] },{ ...art,headHeight:0 },{ ...art,bounds:[.9,0,.1,1] },{ ...art,alertAnchor:1 },{ ...art,alertAnchor:.1 }]) expect(()=>parseManifest(Buffer.from(JSON.stringify({...base,remoteCodex:{peek}})))).toThrow('peek');
   });
 });
+
+// Slender vertical peeks use the same head/collar limit in rest and alert.
+for (const edge of ['top','bottom'] as const) for (const amount of [1,.6]) it(`slender ${edge}/${amount} never reveals the chest`, () => {
+  const width=189,height=205,face:[number,number,number,number]=[.4,.24,.62,.36];
+  const pose=dockedPose(width,height,edge,amount,face);
+  expect(pose.clip).not.toBeNull();
+  expect(pose.clip!.y+pose.clip!.height).toBeCloseTo((face[3]+(face[3]-face[1])*.45)*height);
+  expect(pose.visible.height).toBeLessThan(height*.36);
+  if(amount===.6){if(edge==='top')expect(pose.visible.y).toBeCloseTo(0);else expect(pose.visible.y+pose.visible.height).toBeCloseTo(height);}
+  expect(dockedPose(width,height,edge,amount,DEFAULT_FACE_BOX).clip).toBeNull();
+});

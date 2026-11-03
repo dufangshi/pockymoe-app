@@ -242,10 +242,11 @@ the full face is visible but the back of the skull and hair still cross the
 physical edge. Without it the crossing stops 4% of image width inside the art
 bounds; the renderer never slides the whole cutout clear of the edge.
 Side docking uses this head alone without rotation, at the undocked face's
-vertical anchor. Alerts slide the same head further into view. A 150 ms
-slide/fade takes the body behind the edge while the head appears; undocking
-reverses it. Painted alpha supplies the click mask. Top/bottom behavior stays
-unchanged. Packs without peek art keep their existing pose geometry with a
+vertical anchor. Alerts slide the same head further into view. The outgoing body/head fades out over 80 ms before the incoming head/body
+fades in over 80 ms; both directions use the same timing and never overlap.
+The body moves behind the physical edge during its outgoing phase. Painted alpha supplies the click mask. Slender packs also cap top/bottom rest and alert reveals at the head, hair and
+collarbone, with the collar cut kept behind the physical edge; no chest is
+revealed. MOE retains its existing top/bottom geometry. Packs without peek art keep their existing pose geometry with a
 feathered lower crop boundary. Docked controls, running stack, bubble and panel
 anchor to `dockedPose(...).visible`: 6 px gap; side edges have an 8 px work-area
 inset and grow inward; top is below, bottom is above. A visible surface keeps
@@ -270,3 +271,10 @@ isolated harness, run it with the explicit Electron project. The dedicated
 `pet-media-windows.yml` job exercises the same native playback, alpha,
 two-decoder handoff, range requests and capability revocation on Windows. No
 custom-character assets or weights are needed or uploaded by that job.
+
+Tucked packs with clips always hold a real first frame from their idle/rest clip
+(or the first available loop when no idle clip is declared), on the full-DPR
+clip canvas. This applies to all four edges and both media formats; the atlas
+is used only for packs/states with no decodable clip. Video decoding pauses on
+frame zero and discards the unused preload while tucked. Dedicated side art
+still covers that held body frame. Alpha hit testing uses the held clip pixels.
