@@ -4,8 +4,8 @@ The main process owns one fixed transparent character window and one reusable,
 parented glass window. Only dragging, size changes and display changes can alter
 character bounds. The glass child resizes to its compact controls, merged activity
 panel, pill bubble or More menu. macOS uses native HUD vibrancy. Windows 11 22H2+ requests native Acrylic in a nontransparent frameless child. Older
-builds use a transparent child with the design’s opaque solid fallback, 1px border and
-12px corners. `POCKYMOE_WINDOWS_GLASS=solid` forces that fallback if real-device QA
+builds use a transparent child with the design’s opaque solid fallback. Theme tokens supply a .5px hairline, 14px capsule /
+12px bubble corners (Terminal stays square), and the shared shadow. `POCKYMOE_WINDOWS_GLASS=solid` forces that fallback if real-device QA
 finds native corner artifacts or flicker. Other platforms retain the translucent fallback. An interactive panel
 focuses and closes on native blur or Esc; passive bubbles never take focus.
 
@@ -162,3 +162,14 @@ per-sheet / 160 MiB total clip limits, including ZIP import. Clips allow up to
 transitions, scaling 15 fps plan durations; an explicit plan `fps` changes that
 source time base. Existing WebP qualities stay unchanged. The pet renderer disables
 Electron background throttling; clip frame selection follows elapsed time via rAF.
+
+Pet surfaces use content widths capped at 280px, centered with a 6px sprite gap.
+Running rows are 28px, with 2px gaps, adjacent device metadata and middle-truncated
+titles; after four rows, a 22px More row opens the existing activity panel. The
+control bar retains 28px hit targets around 24px visual boxes. Sticky bubbles
+use at most three text lines (title plus two summary lines) and expose full text on hover or existing title-button focus,
+without rebuilding rows or moving sprite bounds. Mac tint is 70% / hover 80%;
+Windows Acrylic is 85% / hover 95%, while the solid fallback remains opaque.
+The `compact surfaces` Electron tests cover layout, focus, CSS contrast and an
+optional Windows CI desktop-capture probe. See the Windows design doc for the
+measured CSS values and the distinction from native Acrylic measurements.

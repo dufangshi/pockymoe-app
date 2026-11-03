@@ -63,7 +63,7 @@ describe('display and dock geometry', () => {
   it('keeps the control capsule under the sprite, also on the right and bottom edges', () => {
     const area = { x: 0, y: 0, width: 1000, height: 800 };
     const sprite = { x: 400, y: 300, width: 128, height: 140 };
-    expect(surfaceLayout(sprite, area, 132, 36).y).toBeGreaterThanOrEqual(sprite.y + sprite.height);
+    expect(surfaceLayout(sprite, area, 132, 36).y).toBe(sprite.y + sprite.height + 6);
     const right = surfaceLayout({ ...sprite, x: 872 }, area, 132, 36);
     expect(right.y).toBeGreaterThanOrEqual(sprite.y + sprite.height); expect(right.x + right.width).toBeLessThanOrEqual(1000);
     expect(surfaceLayout({ ...sprite, y: 700 }, area, 132, 36).y + 36).toBeLessThanOrEqual(700);

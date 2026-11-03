@@ -124,6 +124,7 @@ export const english = {
   "发送中…": "Sending…",
   "{count} 完成": "{count} completed",
   "连接 Pockymoe": "Connect to Pockymoe",
+  "其余 {n} 个": "{n} more",
   "贴边时缩到边缘": "Tuck at screen edges",
   "贴边时保留脸部可见，指针靠近时完全探出。": "Keep the face visible at screen edges; slide out when the pointer approaches.",
   "来源": "Source",

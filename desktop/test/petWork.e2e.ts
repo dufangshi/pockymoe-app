@@ -1,3 +1,4 @@
+import { PNG } from 'pngjs';
 import { recordLifecycle } from './lifecycle';
 import { test, expect, _electron as electron, type ElectronApplication, type Page } from '@playwright/test';
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
@@ -460,4 +461,135 @@ test('clips: speech uses the audio envelope on the fixed rest face and resumes t
   expect(samples.at(-1)?.visible).toBe(false);
   await expect(sprite.locator('#character')).not.toHaveClass(/talking/);
   await expect(sprite.locator('#character')).toHaveClass(/clips/);
+});
+
+test('compact surfaces: four 28px rows keep metadata adjacent and open the remaining activities', async () => {
+  await baseline(); await settings({ petEdgeHide: false });
+  const items = Array.from({ length: 6 }, (_, i) => item({ key: `mac:compact-${i}`, threadId: `compact-${i}`, title: `A deliberately long conversation title with a meaningful ending ${i}`, deviceName: 'Studio' }));
+  await sync(items);
+  const sprite = await pet('sprite'), glass = await pet('glass');
+  await sprite.evaluate(() => (window as unknown as { rcDesktop: { pet: { action(value: unknown): Promise<unknown> } } }).rcDesktop.pet.action({ type: 'click' }));
+  await expect(glass.locator('.running-row')).toHaveCount(4);
+  await expect(glass.locator('.running-more')).toHaveText('2 more');
+  const measured = await glass.evaluate(() => {
+    const rect = (s: string) => document.querySelector(s)!.getBoundingClientRect().toJSON();
+    return { root: rect('#app'), row: rect('.running-row'), title: rect('.running-title'), device: rect('.running-device'), more: rect('.running-more'), control: rect('.controls button'), status: rect('.running-row .pockymoe-status-mark') };
+  });
+  expect(measured.root.width).toBeLessThanOrEqual(280); expect(measured.row.height).toBe(28); expect(measured.more.height).toBe(22); expect(measured.control.height).toBe(28); expect(measured.status.width).toBe(8);
+  expect(measured.device.x - measured.title.right).toBeLessThanOrEqual(6.5);
+  await glass.locator('.running-more').click();
+  await expect(glass.locator('.task-row')).toHaveCount(6);
+});
+
+test('compact surfaces: a three-line bubble reveals full text on existing keyboard focus without moving the pet', async () => {
+  await baseline(); await settings({ petEdgeHide: false });
+  const summary = '确认桌面更新后的状态同步、键盘导航和窗口焦点，保留现有未发送的草稿与工作记录。'.repeat(3);
+  await sync([item()]);
+  await sync([item({ state: 'needsInput', request: { id: 'compact-summary', kind: 'approval', summary } })]);
+  const glass = await pet('glass');
+  await expect(glass.locator('.request-summary')).toBeVisible();
+  const before = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find(w => w.webContents.getURL().includes('pet/index.html') && !w.getParentWindow())!.getBounds());
+  const clipped = await glass.locator('.request-summary').evaluate(e => ({ height: e.clientHeight, full: e.scrollHeight }));
+  expect(clipped.height).toBeLessThanOrEqual(34); expect(clipped.full).toBeGreaterThan(clipped.height);
+  await glass.locator('.bubble-title').focus();
+  await expect(glass.getByRole('tooltip')).toHaveText(summary.trim());
+  await expect(glass.locator('.bubble-title')).toBeFocused();
+  expect(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find(w => w.webContents.getURL().includes('pet/index.html') && !w.getParentWindow())!.getBounds())).toEqual(before);
+});
+
+test('compact surfaces: Windows pet tint model keeps text above 4.5 on white and black', async () => {
+  await finish(); const glass = await pet('glass');
+  await glass.evaluate(() => { document.documentElement.dataset.platform = 'win32'; });
+  await glass.mouse.move(500, 500);
+  const results: { pack: string; effective: string; tint: number; minContrast: number }[] = [];
+  for (const pack of ['classic', 'plum-pocket', 'terminal']) for (const effective of ['light', 'dark'] as const) {
+    await app.evaluate((_e, value) => globalThis.__pockymoeDesktopTest.appearance.sync(value), { pack, effective, accent: '#ad782e' });
+    for (const tint of [85, 95, 100]) {
+      await glass.evaluate(solid => { document.documentElement.dataset.glassFallback = String(solid); }, tint === 100);
+      if (tint === 95) await glass.locator('.glass').hover(); else await glass.mouse.move(500, 500);
+      const minContrast = await glass.evaluate(() => {
+        const surface = document.querySelector<HTMLElement>('.glass')!;
+        const style = getComputedStyle(surface), canvas = document.createElement('canvas'); canvas.width = canvas.height = 1;
+        const c = canvas.getContext('2d')!;
+        const rgb = (color: string, backdrop: string) => { c.clearRect(0, 0, 1, 1); c.fillStyle = backdrop; c.fillRect(0, 0, 1, 1); c.fillStyle = color; c.fillRect(0, 0, 1, 1); return [...c.getImageData(0, 0, 1, 1).data].slice(0, 3); };
+        const lum = (rgb: number[]) => rgb.map(v => v / 255).map(v => v <= .04045 ? v / 12.92 : ((v + .055) / 1.055) ** 2.4).reduce((sum, v, i) => sum + v * [.2126, .7152, .0722][i]!, 0);
+        let min = Infinity;
+        for (const backdrop of ['#fff', '#000']) {
+          const bg = lum(rgb(style.backgroundColor, backdrop));
+          for (const color of [style.color, getComputedStyle(document.querySelector('.bubble-device')!).color]) { const fg = lum(rgb(color, backdrop)); min = Math.min(min, (Math.max(bg, fg) + .05) / (Math.min(bg, fg) + .05)); }
+        }
+        return min;
+      });
+      const alpha = await glass.locator('.glass').evaluate(e => { const c = document.createElement('canvas').getContext('2d')!; c.fillStyle = getComputedStyle(e).backgroundColor; c.fillRect(0, 0, 1, 1); return c.getImageData(0, 0, 1, 1).data[3]!; });
+      expect(Math.abs(alpha - tint / 100 * 255)).toBeLessThanOrEqual(1);
+      results.push({ pack, effective, tint, minContrast }); expect(minContrast).toBeGreaterThanOrEqual(4.5);
+    }
+  }
+  const { writeFile } = await import('node:fs/promises');
+  await writeFile(join(evidence, 'pet-tint-contrast-model.json'), JSON.stringify({ kind: 'CSS sRGB alpha model; native Acrylic unverified', results }, null, 2));
+});
+
+test('compact surfaces: native Windows CI acrylic contrast when desktop capture is available', async () => {
+  test.skip(process.platform !== 'win32' || !process.env.CI, 'Native Acrylic requires an interactive Windows CI desktop');
+  test.setTimeout(60_000);
+  await finish(); await movePetUnderPointer();
+  const glass = await pet('glass'); await expect(glass.locator('.bubble')).toBeVisible();
+  const backdropId = await app.evaluate(async ({ BrowserWindow }) => {
+    const glass = BrowserWindow.getAllWindows().find(w => w.webContents.getURL().includes('pet/index.html') && !!w.getParentWindow())!;
+    const b = glass.getBounds(), w = new BrowserWindow({ x: b.x - 24, y: b.y - 24, width: b.width + 48, height: b.height + 48, frame: false, backgroundColor: '#fff' });
+    await w.loadURL('data:text/html,<body style="margin:0;background:white">'); w.show(); glass.showInactive(); return w.id;
+  });
+  const { writeFile } = await import('node:fs/promises');
+  const measurements: { pack: string; effective: string; backdrop: string; contrast: number; nativeBackground: number[]; clearBackdrop: number[] }[] = [];
+  let unavailable = '';
+  try {
+    for (const pack of ['classic', 'plum-pocket', 'terminal']) for (const effective of ['light', 'dark'] as const) for (const backdrop of ['white', 'black']) {
+      await app.evaluate((_e, value) => globalThis.__pockymoeDesktopTest.appearance.sync(value), { pack, effective, accent: '#ad782e' });
+      await app.evaluate(async ({ BrowserWindow }, value) => {
+        const w = BrowserWindow.fromId(value.id)!;
+        const glass = BrowserWindow.getAllWindows().find(w => w.webContents.getURL().includes('pet/index.html') && !!w.getParentWindow())!;
+        const b = glass.getBounds(); w.setBounds({ x: b.x - 24, y: b.y - 24, width: b.width + 48, height: b.height + 48 });
+        await w.webContents.executeJavaScript(`document.body.style.background=${JSON.stringify(value.backdrop)}`); w.show(); glass.showInactive();
+      }, { id: backdropId, backdrop });
+      // DWM material recomposition follows the page paint, rather than its IPC acknowledgement.
+      await glass.waitForTimeout(250);
+      const native = await app.evaluate(async ({ BrowserWindow, screen, desktopCapturer }) => {
+        const w = BrowserWindow.getAllWindows().find(w => w.webContents.getURL().includes('pet/index.html') && !!w.getParentWindow())!, bounds = w.getBounds(), display = screen.getDisplayMatching(bounds);
+        try {
+          const sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: Math.round(display.bounds.width * display.scaleFactor), height: Math.round(display.bounds.height * display.scaleFactor) } });
+          const source = sources.find(s => s.display_id === String(display.id));
+          return { bounds, display: display.bounds, image: source && !source.thumbnail.isEmpty() ? source.thumbnail.toPNG().toString('base64') : null };
+        } catch { return { bounds, display: display.bounds, image: null }; }
+      });
+      if (!native.image) { unavailable = 'Desktop capture unavailable'; break; }
+      const image = PNG.sync.read(Buffer.from(native.image, 'base64')), sx = image.width / native.display.width, sy = image.height / native.display.height;
+      const pixel = (x: number, y: number): number[] => {
+        const px = Math.round((x - native.display.x) * sx), py = Math.round((y - native.display.y) * sy);
+        if (px < 0 || py < 0 || px >= image.width || py >= image.height) return [];
+        return [...image.data.subarray((py * image.width + px) * 4, (py * image.width + px) * 4 + 3)];
+      };
+      const clear = pixel(native.bounds.x - 20, native.bounds.y + 14), expected = backdrop === 'white' ? 255 : 0;
+      if (clear.length !== 3 || clear.some(v => Math.abs(v - expected) > 4)) { unavailable = 'Captured desktop does not show the controlled backdrop'; break; }
+      const colors = await glass.evaluate(() => {
+        const c = document.createElement('canvas').getContext('2d')!;
+        return [getComputedStyle(document.querySelector('.glass')!).color, getComputedStyle(document.querySelector('.bubble-device')!).color].map(color => { c.clearRect(0, 0, 1, 1); c.fillStyle = color; c.fillRect(0, 0, 1, 1); return [...c.getImageData(0, 0, 1, 1).data].slice(0, 3); });
+      });
+      const luminance = (rgb: number[]) => rgb.map(v => v / 255).map(v => v <= .04045 ? v / 12.92 : ((v + .055) / 1.055) ** 2.4).reduce((sum, v, i) => sum + v * [.2126, .7152, .0722][i]!, 0);
+      const nativeBackground = pixel(native.bounds.x + 5, native.bounds.y + 14);
+      if (nativeBackground.length !== 3) { unavailable = 'Native coordinates do not map inside the captured display'; break; }
+      const bg = luminance(nativeBackground);
+      const contrast = Math.min(...colors.map(color => { const fg = luminance(color); return (Math.max(bg, fg) + .05) / (Math.min(bg, fg) + .05); }));
+      measurements.push({ pack, effective, backdrop, contrast, nativeBackground, clearBackdrop: clear });
+      const left = Math.max(0, Math.floor((native.bounds.x - native.display.x) * sx)), top = Math.max(0, Math.floor((native.bounds.y - native.display.y) * sy));
+      if (left >= image.width || top >= image.height) { unavailable = 'Native crop lies outside the captured display'; break; }
+      const crop = new PNG({ width: Math.min(image.width - left, Math.ceil(native.bounds.width * sx)), height: Math.min(image.height - top, Math.ceil(native.bounds.height * sy)) });
+      PNG.bitblt(image, crop, left, top, crop.width, crop.height, 0, 0);
+      await writeFile(join(evidence, `pet-native-acrylic-${pack}-${effective}-${backdrop}.png`), PNG.sync.write(crop));
+      expect(contrast).toBeGreaterThanOrEqual(4.5);
+    }
+  } finally {
+    await app.evaluate(({ BrowserWindow }, id) => BrowserWindow.fromId(id)?.destroy(), backdropId);
+    await writeFile(join(evidence, 'pet-native-acrylic-contrast.json'), JSON.stringify({ kind: 'Native Windows composited desktop background, CSS foreground colors', status: unavailable || measurements.length !== 12 ? 'unverified' : 'measured', reason: unavailable, measurements }, null, 2));
+  }
+  test.skip(!!unavailable, unavailable);
 });

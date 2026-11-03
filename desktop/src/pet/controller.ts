@@ -271,7 +271,7 @@ export function createPetController(deps: PetControllerDeps): PetController {
       case 'setPack': if (packs.some(candidate => candidate.manifest.id === action.id)) deps.settings.set({ petId: action.id }); break;
       case 'reducedMotion': break; // Renderer owns CSS motion and frame stepping.
       case 'surfaceMeasure':
-        if (Number.isFinite(action.width) && Number.isFinite(action.height) && action.width >= 100 && action.width <= 320 && action.height >= 32 && action.height <= 900) {
+        if (Number.isFinite(action.width) && Number.isFinite(action.height) && action.width >= 28 && action.width <= 320 && action.height >= 28 && action.height <= 900) {
           glassSize = { width: Math.ceil(action.width), height: Math.ceil(action.height) };
           // New content picks a side for its own size; the same content growing on hover keeps it.
           const content = `${mode}:${controlsPinned}`;

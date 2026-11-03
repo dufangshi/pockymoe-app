@@ -70,9 +70,9 @@ const LIST_CLEARANCE = 240;
 /** The glass child sits below the pet; only a surface with no room there goes above it. */
 export type SurfaceSide = 'below' | 'above';
 export function surfaceSide(sprite: Rect, area: Rect, height: number): SurfaceSide {
-  return sprite.y + sprite.height + 8 + height <= area.y + area.height ? 'below' : 'above';
+  return sprite.y + sprite.height + 6 + height <= area.y + area.height ? 'below' : 'above';
 }
 /** Pass the side a visible surface already has: growing on hover must not flip it away from the pointer. */
 export function surfaceLayout(sprite: Rect, area: Rect, width: number, height: number, side = surfaceSide(sprite, area, height)): Rect {
-  return clampRect({ x: Math.round(sprite.x + sprite.width / 2 - width / 2), y: Math.round(side === 'below' ? sprite.y + sprite.height + 8 : sprite.y - height - 8), width, height }, area);
+  return clampRect({ x: Math.round(sprite.x + sprite.width / 2 - width / 2), y: Math.round(side === 'below' ? sprite.y + sprite.height + 6 : sprite.y - height - 6), width, height }, area);
 }

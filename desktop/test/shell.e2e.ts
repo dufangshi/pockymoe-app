@@ -409,7 +409,7 @@ for (const material of ['native', 'solid']) for (const pack of packs) for (const
           const context = canvas.getContext('2d')!; context.fillStyle = getComputedStyle(element).backgroundColor;
           context.fillRect(0, 0, 1, 1); return Array.from(context.getImageData(0, 0, 1, 1).data);
         });
-        expect(color[3]).toBeGreaterThanOrEqual(material === 'solid' ? 255 : 244);
+        expect(color[3]).toBeGreaterThanOrEqual(material === 'solid' ? 255 : page.url().includes('/pet/') ? 217 : 244);
       }
     }
     test.info().annotations.push({ type: 'scale', description: `${page.url()}: devicePixelRatio=${violations.devicePixelRatio}` });
