@@ -22,7 +22,7 @@ export interface InstallDependencies {
   write(path: string, value: string, exclusive?: boolean): Promise<void>;
   available(path: string): Promise<bigint>;
   exec(file: string, args: string[]): Promise<{ stdout: string }>;
-  spawn(file: string, args: string[], options: { env?: Record<string, string>; windowsHide?: boolean }): ChildProcess;
+  spawn(file: string, args: string[], options: { env?: Record<string, string>; windowsHide?: boolean; windowsVerbatimArguments?: boolean }): ChildProcess;
   wait(ms: number): Promise<void>;
   quit(): void;
 }
@@ -55,8 +55,10 @@ export async function prepareInstall(file: string, entry: SignedUpdate, deps: In
         // Recheck after document confirmation; do not quit into a full disk.
         await sufficientSpace(dirname(deps.execPath), entry, deps);
         await deps.write(join(deps.userData, 'updates/install-attempt.json'), JSON.stringify({ currentVersion: deps.version, targetVersion: entry.version }));
-        // oneClick NSIS honors /S --force-run for silent per-user installation.
-        const child = deps.spawn(file, ['/S', '--updated', '--force-run'], { windowsHide: true });
+        // Pin the destination to this running copy, even if registry state points elsewhere.
+        // NSIS requires an unquoted final /D= remainder, including any spaces.
+        // Bypass Node/libuv argument quoting; the preceding switches contain no spaces.
+        const child = deps.spawn(file, ['/S', '--updated', '--force-run', `/D=${dirname(deps.execPath)}`], { windowsHide: true, windowsVerbatimArguments: true });
         await launched(child); state = 'committed'; child.unref(); deps.quit();
       }
     };
