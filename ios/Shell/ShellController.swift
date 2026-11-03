@@ -15,7 +15,14 @@ final class NativeWebView: WKWebView {
     // The full-screen SwiftUI host has no inherited safe area; WebKit still
     // needs the physical window insets for the page's CSS env() values.
     var hostSafeArea = UIEdgeInsets.zero
-    override var safeAreaInsets: UIEdgeInsets { window?.safeAreaInsets ?? hostSafeArea }
+    var keyboardObscuresBottom = false
+    override var safeAreaInsets: UIEdgeInsets {
+        var insets = window?.safeAreaInsets ?? hostSafeArea
+        // The keyboard already covers the home indicator. Passing that bottom
+        // inset through again leaves an empty strip above the keyboard.
+        if keyboardObscuresBottom { insets.bottom = 0 }
+        return insets
+    }
 }
 
 @MainActor
@@ -151,6 +158,11 @@ final class ShellController: UIViewController, WKNavigationDelegate, WKUIDelegat
         if notification.name == UIResponder.keyboardDidHideNotification { keyboardVisible = false }
         else if let frame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect {
             keyboardVisible = window.bounds.intersection(window.convert(frame, from: nil)).height > 100
+        }
+        if web.keyboardObscuresBottom != keyboardVisible {
+            web.keyboardObscuresBottom = keyboardVisible
+            web.safeAreaInsetsDidChange()
+            web.setNeedsLayout()
         }
         // WebKit pans its outer UIScrollView to a focused DOM field even when
         // the SPA has already positioned its composer in the visible viewport.
