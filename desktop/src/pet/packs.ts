@@ -71,7 +71,8 @@ export function parseManifest(data: Buffer): PetManifest {
   if (extensions?.peek !== undefined) {
     const peek = extensions.peek as PeekArt;
     if (!peek || !['peek.png', 'peek.webp'].includes(peek.path) || !Number.isInteger(peek.width) || !Number.isInteger(peek.height) || peek.width < 1 || peek.height < 1 || peek.width > 4096 || peek.height > 4096 || peek.width * peek.height > 8388608 || !Array.isArray(peek.anchor) || peek.anchor.length !== 2 || !peek.anchor.every(n => Number.isFinite(n) && n > 0 && n < 1) || !Number.isFinite(peek.headHeight) || peek.headHeight < .1 || peek.headHeight > 1 || !Array.isArray(peek.bounds) || peek.bounds.length !== 4 || !peek.bounds.every(n => Number.isFinite(n) && n >= 0 && n <= 1) || peek.bounds[0] >= peek.bounds[2] || peek.bounds[1] >= peek.bounds[3]) fail('invalid remoteCodex.peek');
-    remoteCodex.peek = { path: peek.path, width: peek.width, height: peek.height, anchor: [...peek.anchor], headHeight: peek.headHeight, bounds: [...peek.bounds] } as PeekArt;
+    if (peek.alertAnchor !== undefined && (!Number.isFinite(peek.alertAnchor) || peek.alertAnchor < peek.anchor[0] || peek.alertAnchor >= peek.bounds[2])) fail('invalid remoteCodex.peek alertAnchor');
+    remoteCodex.peek = { ...(peek.alertAnchor !== undefined ? { alertAnchor: peek.alertAnchor } : {}), path: peek.path, width: peek.width, height: peek.height, anchor: [...peek.anchor], headHeight: peek.headHeight, bounds: [...peek.bounds] } as PeekArt;
   }
   if (extensions?.talk !== undefined) {
     const talk = extensions.talk as PetClip;

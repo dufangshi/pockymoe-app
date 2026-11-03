@@ -9,11 +9,12 @@ export const MINI_HEIGHT = 72;
 export const HEAD_PEEK = .6;
 /** Fractions in the right-edge source image. Anchor is the face/edge crossing;
  * headHeight measures crown-to-chin, bounds exclude transparent padding. */
-export interface PeekArt { path: 'peek.png' | 'peek.webp'; width: number; height: number; anchor: [number, number]; headHeight: number; bounds: [number, number, number, number] }
+export interface PeekArt { path: 'peek.png' | 'peek.webp'; width: number; height: number; anchor: [number, number]; alertAnchor?: number; headHeight: number; bounds: [number, number, number, number] }
 export function peekPose(width: number, height: number, edge: DockEdge, amount: number, face: FaceBox, art: PeekArt): Rect {
   const h = (face[3] - face[1]) * 2 * height / art.headHeight, w = h * art.width / art.height;
   // The cut side stays outside the physical edge, including the alert's fuller face.
-  const crossing = Math.min(.98, art.anchor[0] + (1 - amount) * .65);
+  const alert = art.alertAnchor ?? Math.max(art.anchor[0], art.bounds[2] - .04);
+  const crossing = art.anchor[0] + (alert - art.anchor[0]) * Math.min(1, Math.max(0, (1 - amount) / (1 - HEAD_PEEK)));
   const rightX = width - crossing * w;
   return { x: edge === 'right' ? rightX : width - rightX - w, y: (face[1] + face[3]) / 2 * height - art.anchor[1] * h, width: w, height: h };
 }

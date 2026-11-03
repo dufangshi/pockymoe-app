@@ -85,7 +85,15 @@ describe('visible-head surfaces', () => {
       if(side==='below')expect(surface.y).toBe(Math.round(anchor.y+anchor.height+6));else expect(surface.y+36).toBe(Math.round(anchor.y-6));
     }
   });
+  it('keeps alert hair crossing the edge instead of exposing a floating cutout', () => {
+    const fixed={...art,anchor:[.6,.6] as [number,number],alertAnchor:.8,bounds:[.2,0,.9,1] as [number,number,number,number]};
+    const pose=peekPose(189,205,'right',.6,[.4,.24,.62,.36],fixed);
+    expect(pose.x+fixed.alertAnchor*pose.width).toBeCloseTo(189);
+    expect(pose.x+fixed.bounds[2]*pose.width).toBeGreaterThan(189);
+    const fallback=peekPose(189,205,'right',.6,[.4,.24,.62,.36],{...fixed,alertAnchor:undefined});
+    expect(fallback.x+fixed.bounds[2]*fallback.width).toBeGreaterThan(189);
+  });
   it('rejects unsafe peek paths and nonfinite anchors', () => {
-    for (const peek of [{ ...art,path:'../peek.png' },{ ...art,anchor:[NaN,.5] },{ ...art,headHeight:0 },{ ...art,bounds:[.9,0,.1,1] }]) expect(()=>parseManifest(Buffer.from(JSON.stringify({...base,remoteCodex:{peek}})))).toThrow('peek');
+    for (const peek of [{ ...art,path:'../peek.png' },{ ...art,anchor:[NaN,.5] },{ ...art,headHeight:0 },{ ...art,bounds:[.9,0,.1,1] },{ ...art,alertAnchor:1 },{ ...art,alertAnchor:.1 }]) expect(()=>parseManifest(Buffer.from(JSON.stringify({...base,remoteCodex:{peek}})))).toThrow('peek');
   });
 });

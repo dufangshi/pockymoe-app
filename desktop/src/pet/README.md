@@ -236,6 +236,11 @@ room for the complete gravity-hanging hair and tapered strand tips, with transpa
 margin below. `bounds` must include the hair ends: docked controls go below those
 ends (or above the head when there is insufficient space). Keep the scaled bounds
 inside the fixed pet viewport so near-bottom docking cannot cut them off. Left edges mirror both image and geometry.
+`alertAnchor` optionally gives a second normalized source x crossing for the
+fuller alert (at least anchor.x and strictly inside bounds.x1). Place it where
+the full face is visible but the back of the skull and hair still cross the
+physical edge. Without it the crossing stops 4% of image width inside the art
+bounds; the renderer never slides the whole cutout clear of the edge.
 Side docking uses this head alone without rotation, at the undocked face's
 vertical anchor. Alerts slide the same head further into view. A 150 ms
 slide/fade takes the body behind the edge while the head appears; undocking
