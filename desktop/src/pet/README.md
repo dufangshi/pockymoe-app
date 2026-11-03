@@ -178,3 +178,87 @@ Slender packs side-peek through a face-derived head crop, with a neck pivot and
 fixed face height. Rendering, clipped alpha hit testing and hover bounds share
 `dockedPose`; MOE retains its existing body-centered peek. Compact surfaces use
 the shared status shapes at 10px, including the running ring and waiting bubble.
+
+### Streaming clips and dedicated edge heads
+
+Legacy packs (no `clipFormat.mediaType`) keep their WebP atlas player, six-sheet
+cache, 512-pixel cells, 60 fps / 512-frame caps, 8 MiB per sheet and 160 MiB of
+clips. They require no conversion. New packs opt into streaming explicitly:
+
+```json
+{
+  "remoteCodex": {
+    "clipFormat": {"mediaType":"webm-vp9-alpha","width":648,"height":702,"fps":24,"columns":4},
+    "clips": {"idle":[{"path":"clips/idle.webm","frames":240}]},
+    "faceBox": [0.4,0.24,0.62,0.36],
+    "talk": {"path":"clips/talk.webp","frames":4},
+    "peek": {"path":"peek.png","width":1536,"height":1024,"anchor":[0.9,0.6],"headHeight":0.6,"bounds":[0.42,0,1,1]}
+  }
+}
+```
+
+`columns` still describes the optional **WebP speech strip**; WebM contains
+individual video frames. Talk remains 3–8 complete frames, with the same source
+cell dimensions. Its final canvas, like the animation canvas, uses the full
+CSS size × devicePixelRatio backing size. Resizing or changing scale repaints it.
+
+Streaming limits: 32 MiB per WebM, 256 MiB for all expanded declared pack files,
+12 seconds / 360 frames per clip, ≤30 fps, ≤1024 per axis and ≤786,432 pixels per
+frame. The ordinary thumbnail atlas and speech strip retain their 8 MiB limits.
+Validation checks EBML magic, WebM DocType, a single un-laced VP9 video track,
+alpha metadata, dimensions, default frame duration, block count and container
+duration against the manifest. Extension alone is insufficient. Missing,
+undeclared or mismatching ZIP entries fail before atomic replacement. An old
+client cannot read this opt-in format: install a compatible client **before**
+importing the new pack; keep a backup of the old pack.
+
+Only the isolated local session handles `pockymoe-pet://media/<capability>`.
+An active pack gets random, revocable URLs, not filesystem paths. Responses are
+streamed from an opened regular file with `video/webm`, `Accept-Ranges: bytes`,
+correct bounded/open/suffix single-range 206 responses, 416 for invalid ranges,
+and HEAD support. CORS permits the local file renderer to read its drawn alpha;
+the remote Web partition has no handler or capabilities. CSP allows this media
+scheme only, not arbitrary remote or Blob videos. Video elements are decoded
+natively, drawn to canvas, and removed with their source on eviction. At most
+one active and one upcoming decoder exist. The previous canvas remains until
+its replacement's decoded first frame is ready; no blank intermediate canvas is
+shown. State changes hurry the playing video toward the final rest endpoint
+within 600 ms (legacy WebP retains its nearest-end behavior).
+
+`peek` is optional. Its path is exactly `peek.png` or `peek.webp`; dimensions are
+positive integers ≤2048 and must match the image header. `anchor` is the normalized
+right-source point where the half-face line crosses the screen edge (ordered
+x,y, strictly inside the image). `headHeight` is the normalized crown-to-chin
+height, .1–1; it scales to twice the face-box height. `bounds` is the normalized
+visible-art bounding box `[x0,y0,x1,y1]`, ordered in [0,1]. Keep the cropped face
+side past the anchor so it stays offscreen even in the fuller alert peek. Leave
+room for natural tapered hair tips. Left edges mirror both image and geometry.
+Side docking uses this head alone without rotation, at the undocked face's
+vertical anchor. Alerts slide the same head further into view. A 150 ms
+slide/fade takes the body behind the edge while the head appears; undocking
+reverses it. Painted alpha supplies the click mask. Top/bottom behavior stays
+unchanged. Packs without peek art keep their existing pose geometry with a
+feathered lower crop boundary. Docked controls, running stack, bubble and panel
+anchor to `dockedPose(...).visible`: 6 px gap; side edges have an 8 px work-area
+inset and grow inward; top is below, bottom is above. A visible surface keeps
+its chosen side when it grows, preserving pointer/focus stability.
+
+The pose builder's optional `--webm --sr-weights /local/realesr-animevideov3.pth`
+outputs 648×702 VP9-alpha. Install torch, Pillow, numpy, scipy, OpenCV and
+imageio-ffmpeg in a local build venv and run with `python -I`. Weights are from
+[Real-ESRGAN](https://github.com/xinntao/Real-ESRGAN); inspect downloaded code and
+keep it and weights outside the repository. This tool never downloads them and
+loads weights with `weights_only=True`. It restores each normalized source key
+(including speech and bed poses) once, then applies motion and flow at delivery
+resolution. `--soften .25` lightly softens restored RGB outlines in output pixels;
+alpha is preserved. Flow uses forward/backward consistency, single-source
+warping and rigid head protection. Ambiguous occlusion holds the nearest sharp
+key instead of blending a doubled limb. Atlas output stays compatible. `--peek`
+copies a local approved head asset using metadata from the plan's `peek` field.
+
+`test/petMedia.e2e.ts` generates non-character geometric PNG frames and encodes
+its own alpha WebM with `POCKYMOE_FFMPEG` (or ffmpeg on PATH). After building the
+isolated harness, run it with the explicit Electron project. The dedicated
+`pet-media-windows.yml` job exercises the same native playback, alpha,
+two-decoder handoff, range requests and capability revocation on Windows. No
+custom-character assets or weights are needed or uploaded by that job.

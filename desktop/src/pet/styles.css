@@ -158,3 +158,11 @@ hr { border:0;border-top:1px solid var(--theme-border);margin:4px; }
 @media (hover:hover) { .glass:hover { background:color-mix(in srgb,var(--pet-bg) var(--pet-hover-tint),transparent); } }
 
 .bubble-full-text { position:absolute;left:0;right:0;padding:8px 10px;border-top:.5px solid var(--pet-line);font-size:12px;line-height:17px;overflow-wrap:anywhere;z-index:10; }
+
+/* Dedicated head art never inherits the body's crop or rotation. Move the whole
+   body behind the physical edge while its opacity changes, rather than clipping it. */
+#peek-art { position:absolute;inset:0;width:100%;height:100%;opacity:0;pointer-events:none;transition:opacity 150ms linear; }
+.has-peek #sprite,.has-peek #sprite-old,.has-peek #clip,.has-peek #talk { transition:opacity 150ms linear,translate 150ms ease;translate:var(--body-slide) 0; }
+.has-peek.art-tucked #sprite,.has-peek.art-tucked #sprite-old,.has-peek.art-tucked #clip,.has-peek.art-tucked #talk { opacity:0!important;visibility:visible; }
+.has-peek.art-tucked #peek-art { opacity:1; }
+.has-peek.docked-rest #clip { visibility:visible; }

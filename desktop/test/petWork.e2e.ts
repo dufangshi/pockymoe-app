@@ -1,7 +1,7 @@
 import { PNG } from 'pngjs';
 import { recordLifecycle } from './lifecycle';
 import { test, expect, _electron as electron, type ElectronApplication, type Page } from '@playwright/test';
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { cpSync, writeFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -437,7 +437,7 @@ test('clips: speech uses the audio envelope on the fixed rest face and resumes t
   test.skip(!clipPack, 'POCKYMOE_CLIP_PACK is not set');
   const manifest = JSON.parse(readFileSync(join(clipPack!, 'pet.json'), 'utf8')) as { remoteCodex?: { talk?: unknown } };
   test.skip(!manifest.remoteCodex?.talk, 'Pack has no speech faces');
-  await settings({ petId: clipPackId(), petEdgeHide: false }); await baseline(); await sync([item()]);
+  await settings({ petId: clipPackId(), petEdgeHide: false, petSize: 'L' }); await baseline(); await sync([item()]);
   const sprite = await pet('sprite');
   await expect(sprite.locator('#character')).toHaveClass(/clips/);
   const rate = 24000, count = rate * 3, audio = Buffer.alloc(44 + count * 2);
@@ -449,9 +449,12 @@ test('clips: speech uses the audio envelope on the fixed rest face and resumes t
   const samples = await sprite.evaluate(async () => {
     const result: { face: string; body: string; visible: boolean; level: string | undefined; restBody: string }[] = [];
     const hash = (id: string, bodyOnly = false): string => { const c = document.querySelector<HTMLCanvasElement>(id)!; const data = c.getContext('2d')!.getImageData(0, bodyOnly ? Math.floor(c.height / 2) : 0, c.width, bodyOnly ? Math.floor(c.height / 2) : c.height).data; let hash = 0; for (let i = 0; i < data.length; i += 16) hash = (hash * 31 + data[i]!) | 0; return String(hash); };
-    for (let i = 0; i < 100; i++) { result.push({ face: hash('#talk'), body: hash('#clip'), restBody: hash('#talk', true), visible: document.querySelector<HTMLElement>('#talk')!.style.display !== 'none', level: document.querySelector<HTMLElement>('#talk')!.dataset.level }); await new Promise(resolve => setTimeout(resolve, 35)); }
+    for (let i = 0; i < 100; i++) { result.push({ face: hash('#talk'), body: hash('#clip'), restBody: hash('#talk', true), visible: document.querySelector<HTMLElement>('#talk')!.style.display !== 'none' && document.querySelector('#character')!.classList.contains('talking'), level: document.querySelector<HTMLElement>('#talk')!.dataset.level }); await new Promise(resolve => setTimeout(resolve, 35)); }
     return result;
   });
+  const backing = await sprite.locator('#talk').evaluate(c => ({ width: (c as HTMLCanvasElement).width, height: (c as HTMLCanvasElement).height, cssWidth: document.querySelector('#character')!.clientWidth, cssHeight: document.querySelector('#character')!.clientHeight, dpr: devicePixelRatio }));
+  expect(backing.width).toBe(Math.round(backing.cssWidth * backing.dpr)); expect(backing.height).toBe(Math.round(backing.cssHeight * backing.dpr));
+  writeFileSync(join(evidence, 'speech-samples.json'), JSON.stringify(samples));
   const visible = samples.filter(s => s.visible);
   expect(visible.length).toBeGreaterThan(30);
   expect(new Set(visible.map(s => s.restBody)).size).toBe(1);
@@ -610,7 +613,7 @@ test('review: compact statuses retain the running ring and waiting bubble at 10p
 
 test('clips: slender side peeks crop the body and hit only the visible head', async () => {
   test.skip(!clipPack, 'POCKYMOE_CLIP_PACK is not set');
-  const manifest = JSON.parse(readFileSync(join(clipPack!, 'pet.json'), 'utf8')) as { remoteCodex?: { faceBox?: number[] } };
+  const manifest = JSON.parse(readFileSync(join(clipPack!, 'pet.json'), 'utf8')) as { remoteCodex?: { faceBox?: number[]; peek?: unknown } };
   const face = manifest.remoteCodex?.faceBox;
   test.skip(!face || face[3]! - face[1]! >= .28, 'Requires a slender pack face box');
   await settings({ petId: clipPackId(), petEdgeHide: true }); await baseline();
@@ -634,7 +637,8 @@ test('clips: slender side peeks crop the body and hit only the visible head', as
     // Wait for the existing slide to settle before measuring painted pixels.
     await sprite.waitForTimeout(250);
     const transform = await sprite.locator('#character').evaluate(e => new DOMMatrix(getComputedStyle(e).transform).b);
-    expect(edge === 'left' ? transform : -transform).toBeGreaterThan(.2);
+    if (manifest.remoteCodex?.peek) expect(transform).toBe(0);
+    else expect(edge === 'left' ? transform : -transform).toBeGreaterThan(.2);
     const png = PNG.sync.read(await sprite.screenshot({ omitBackground: true, scale: 'css' }));
     const opaque: { x: number; y: number }[] = []; let belowHead = 0;
     for (let y = 0; y < png.height; y++) for (let x = 0; x < png.width; x++) if (png.data[(y * png.width + x) * 4 + 3]! > 200) { opaque.push({ x, y }); if (y > png.height / 2) belowHead++; }

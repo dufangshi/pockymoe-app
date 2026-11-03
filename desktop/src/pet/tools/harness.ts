@@ -1,9 +1,11 @@
-import { app, BrowserWindow, nativeTheme, screen } from 'electron';
+import { petMediaResponse } from '../media';
+import { app, BrowserWindow, nativeTheme, screen, session, protocol } from 'electron';
 import { join } from 'node:path';
 import { cpSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { createPetController } from '../controller';
 import type { Appearance, ActivityEvent, ActivityHubLike, ActivitySnapshot, DesktopSettings, HostCommand, SettingsStoreLike } from '../../shared/contract';
+protocol.registerSchemesAsPrivileged([{ scheme: 'pockymoe-pet', privileges: { standard: true, secure: true, stream: true, supportFetchAPI: true, corsEnabled: true } }]);
 app.getLocale = () => 'zh-CN';
 app.setPath('userData', mkdtempSync(join(tmpdir(), 'rc-pet-harness-')));
 // Optional local art stays in this isolated profile, never in bundled assets.
@@ -29,6 +31,7 @@ const store: SettingsStoreLike = {
   onChange: (listener) => { settingsListeners.add(listener); return () => settingsListeners.delete(listener); },
 };
 void app.whenReady().then(() => {
+  session.defaultSession.protocol.handle('pockymoe-pet', async request => await petMediaResponse(request) ?? new Response(null, { status: 404 }));
   const controller = createPetController({ openPreferences: () => undefined, mainFocused: () => false, lowerMain: () => undefined, speak: async () => null, summarize: async () => null, hub, settings: store, appearance: () => appearance, onAppearance: (listener) => { appearanceListeners.add(listener); return () => appearanceListeners.delete(listener); }, dispatch: async (command) => { commands.push(command); if (command.type === failingCommand) { await new Promise((resolve) => setTimeout(resolve, 100)); return { ok: false, code: 'needsThread', error: 'needsThread' }; } if (command.type === 'reply') { await new Promise((resolve) => setTimeout(resolve, 120)); if (replyFails) return { ok: false, error: '模拟发送失败，请重试' }; } return { ok: true }; }, shouldSpeak: () => true, petDirectories: [join(process.cwd(), 'assets/pets')] });
   const window = BrowserWindow.getAllWindows().find(view => !view.getParentWindow())!, glass = BrowserWindow.getAllWindows().find(view => !!view.getParentWindow())!;
   const nativeSetBounds = window.setBounds.bind(window); let spriteBoundsCalls = 0; let requestedBounds = window.getBounds();

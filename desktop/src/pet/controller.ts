@@ -1,3 +1,4 @@
+import { petMedia } from './media';
 import { app, BrowserWindow, dialog, ipcMain, nativeImage, nativeTheme, screen } from 'electron';
 import { release } from 'node:os';
 import { windowsGlassMaterial } from '../shared/platform';
@@ -20,6 +21,7 @@ import type { PetAction, PetCue, PetViewState } from './bridge';
 type Command = HostCommand extends infer C ? C extends { id: string } ? Omit<C, 'id'> : never : never;
 export function createPetController(deps: PetControllerDeps): PetController {
   const userPets = join(app.getPath('userData'), 'pets'), positionFile = join(app.getPath('userData'), 'pet-positions.json');
+  let mediaPack: PetPack | null = null, media: ReturnType<typeof petMedia> | null = null;
   let positions: Record<string, PetPosition> = {}, lastDisplayId: number | undefined;
   try {
     const stored = JSON.parse(readFileSync(positionFile, 'utf8'));
@@ -81,12 +83,24 @@ export function createPetController(deps: PetControllerDeps): PetController {
   // Only moving/resizing the character (or a display change) may ever change these bounds.
   function placeSprite(): void {
     const bounds = petLayout(position, display().workArea, petHeight(settings)).window;
-    window.setBounds(bounds); glassSide = null; placeGlass();
+    window.setBounds(bounds); anchorFrom = anchorTo = null; glassSide = null; placeGlass();
   }
+  let anchorFrom: ReturnType<typeof visiblePetRect> | null = null, anchorTo: ReturnType<typeof visiblePetRect> | null = null, anchorAt = 0;
   let glassSize = { width: 132, height: 36 }, glassSide: SurfaceSide | null = null, glassContent = '';
   function placeGlass(): void {
-    glassSide ??= surfaceSide(window.getBounds(), display().workArea, glassSize.height);
-    const bounds = surfaceLayout(window.getBounds(), display().workArea, glassSize.width, glassSize.height, glassSide);
+    const edge = dockAmount > 0 ? position.edge : null;
+    let anchor = edge ? visiblePetRect() : window.getBounds();
+    const now = Date.now();
+    if (!glass.isVisible()) { anchorFrom = anchorTo = anchor; anchorAt = now; }
+    const interpolate = () => {
+      const t = Math.min(1, (now - anchorAt) / 150);
+      return anchorFrom && anchorTo ? { x: anchorFrom.x + (anchorTo.x - anchorFrom.x) * t, y: anchorFrom.y + (anchorTo.y - anchorFrom.y) * t, width: anchorFrom.width + (anchorTo.width - anchorFrom.width) * t, height: anchorFrom.height + (anchorTo.height - anchorFrom.height) * t } : anchor;
+    };
+    if (anchorTo && JSON.stringify(anchorTo) !== JSON.stringify(anchor)) { anchorFrom = interpolate(); anchorTo = anchor; anchorAt = now; }
+    else if (!anchorTo) { anchorFrom = anchorTo = anchor; anchorAt = now; }
+    anchor = interpolate();
+    glassSide ??= edge === 'top' ? 'below' : edge === 'bottom' ? 'above' : surfaceSide(anchor, display().workArea, glassSize.height);
+    const bounds = surfaceLayout(anchor, display().workArea, glassSize.width, glassSize.height, glassSide, edge);
     const before = glass.getBounds();
     if (Object.keys(bounds).some(key => bounds[key as keyof typeof bounds] !== before[key as keyof typeof before])) glass.setBounds(bounds);
   }
@@ -163,12 +177,14 @@ export function createPetController(deps: PetControllerDeps): PetController {
     const bubble = snoozed ? null : bubbles.current;
     mode = panel ? 'panel' : menu ? 'menu' : bubble && !controlsPinned ? 'bubble' : 'controls';
     const controlsShown = near || controlsPinned;
-    const layout = petLayout(position, display().workArea, petHeight(settings), { dockAmount, faceBox: pack?.manifest.remoteCodex?.faceBox });
+    const layout = petLayout(position, display().workArea, petHeight(settings), { dockAmount, faceBox: pack?.manifest.remoteCodex?.faceBox, peekArt: pack?.manifest.remoteCodex?.peek });
     const effectiveTargets = [...new Map([...items, ...targets.values(), ...recent.map(item => ({ ...item, workspaceId: '', state: 'idle' as const, since: new Date(0).toISOString(), unread: false }))].map(item => [item.key, item])).values()];
+    if (mediaPack !== pack) { media?.dispose(); mediaPack = pack ?? null; media = pack ? petMedia(pack) : null; }
     const sleeping = pack?.manifest.remoteCodex?.sleeping;
     const shared = { appearance, glassFallback: process.platform === 'win32' && windowsGlassMaterial(release(), process.env.POCKYMOE_WINDOWS_GLASS === 'solid') === 'solid', accountId, items, recent, targets: effectiveTargets, mood: drag?.moved && pack?.manifest.remoteCodex?.clips?.dragging ? 'dragging' : moods.value(items, now, snoozed), moodEpoch, pinned: controlsPinned && !panel && !menu,
+      peekArt: pack?.peekImage && pack.manifest.remoteCodex?.peek ? { ...pack.manifest.remoteCodex.peek, imageUrl: `data:image/${pack.manifest.remoteCodex.peek.path.endsWith('png') ? 'png' : 'webp'};base64,${pack.peekImage.toString('base64')}` } : undefined,
       faceBox: pack?.manifest.remoteCodex?.faceBox, talk: pack?.manifest.remoteCodex?.talk,
-      clips: pack?.manifest.remoteCodex?.clips && pack.manifest.remoteCodex.clipFormat ? { format: pack.manifest.remoteCodex.clipFormat, states: pack.manifest.remoteCodex.clips, epoch: packEpoch } : null,
+      clips: pack?.manifest.remoteCodex?.clips && pack.manifest.remoteCodex.clipFormat ? { format: pack.manifest.remoteCodex.clipFormat, states: pack.manifest.remoteCodex.clips, epoch: packEpoch, urls: media?.urls } : null,
       // Timing stays here: while the pointer holds a bubble, its restart must not reach the renderer as a change.
       bubble: bubble && { ...bubble, createdAt: 0, shownAt: null },
       settings: { petSize: settings.petSize, petMini: settings.petMini, petSound: settings.petSound, petVoice: settings.petVoice, petId: settings.petId, petMutes: settings.petMutes },
@@ -365,7 +381,7 @@ export function createPetController(deps: PetControllerDeps): PetController {
   const displayChanged = (): void => { position = restorePosition(position, screen.getAllDisplays(), screen.getPrimaryDisplay(), petHeight(settings)); placeSprite(); savePosition(); emit(); };
   screen.on('display-removed', displayChanged); screen.on('display-metrics-changed', displayChanged);
   function visiblePetRect() {
-    const layout = petLayout(position, display().workArea, petHeight(settings), { dockAmount, faceBox: pack?.manifest.remoteCodex?.faceBox });
+    const layout = petLayout(position, display().workArea, petHeight(settings), { dockAmount, faceBox: pack?.manifest.remoteCodex?.faceBox, peekArt: pack?.manifest.remoteCodex?.peek });
     const { visible } = layout, bounds = window.getBounds();
     return { ...visible, x: bounds.x + visible.x, y: bounds.y + visible.y };
   }
@@ -383,6 +399,7 @@ export function createPetController(deps: PetControllerDeps): PetController {
     // A docked pet shows only its head for an alert, and tucks back in when the alert is gone.
     const alerting = !!bubbles.current && !(settings.snoozeUntil && Date.parse(settings.snoozeUntil) > now);
     dockAmount = position.edge && settings.petEdgeHide !== false && !peek ? alerting ? HEAD_PEEK : 1 : 0;
+    if (glass.isVisible()) placeGlass();
     emit();
   };
   const timer = setInterval(() => {
@@ -406,7 +423,7 @@ export function createPetController(deps: PetControllerDeps): PetController {
     glass.removeListener('close', closeGlass); window.removeListener('close', closeSprite);
     for (const unsubscribe of unsubscribes) unsubscribe();
     screen.removeListener('display-removed', displayChanged); screen.removeListener('display-metrics-changed', displayChanged);
-    ipcMain.removeListener('rcDesktop:pet:ready', onReady); ipcMain.removeListener('rcDesktop:pet:hitTest', onHitTest); ipcMain.removeHandler('rcDesktop:pet:action'); ipcMain.removeHandler('rcDesktop:pet:clip');
+    ipcMain.removeListener('rcDesktop:pet:ready', onReady); ipcMain.removeListener('rcDesktop:pet:hitTest', onHitTest); ipcMain.removeHandler('rcDesktop:pet:action'); media?.dispose(); ipcMain.removeHandler('rcDesktop:pet:clip');
     // Windows may already be destroying a native owner's children while closed
     // is delivered. Let that stack unwind before retiring the surviving window.
     if (destroyWindows) setImmediate(() => {

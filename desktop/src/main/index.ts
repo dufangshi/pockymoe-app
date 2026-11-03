@@ -1,7 +1,7 @@
 import { recoverUpdateStartup } from './updateRecovery';
 import { hasConnection } from './store';
 import { t, getLocale, setLocale } from '../shared/i18n';
-import { app, BrowserWindow, dialog, globalShortcut, ipcMain, nativeTheme, Notification, session, shell, type IpcMainEvent, type IpcMainInvokeEvent } from 'electron';
+import { app, BrowserWindow, dialog, globalShortcut, ipcMain, nativeTheme, Notification, session, protocol, shell, type IpcMainEvent, type IpcMainInvokeEvent } from 'electron';
 import { localFileMatches } from './platform';
 import { release } from 'node:os';
 import { saveName, windowsGlassMaterial } from '../shared/platform';
@@ -25,6 +25,8 @@ import { nativeNotificationId } from './windowsToast';
 import { LocalMessages } from './messages';
 import { PetCatalog } from './petCatalog';
 import { VoiceService } from './voice';
+
+protocol.registerSchemesAsPrivileged([{ scheme: 'pockymoe-pet', privileges: { standard: true, secure: true, stream: true, supportFetchAPI: true, corsEnabled: true } }]);
 
 declare const __UPDATER_TEST_BUILD__: boolean;
 async function bootstrap(): Promise<void> {
@@ -94,7 +96,7 @@ else {
     const petDirectories = [app.isPackaged ? join(process.resourcesPath, 'pets') : join(app.getAppPath(), 'assets/pets'), join(dataDir, 'pets')];
     mkdirSync(petDirectories[1], { recursive: true });
     const petCatalog = new PetCatalog(petDirectories);
-    session.defaultSession.protocol.handle('pockymoe-pet', request => petCatalog.asset(request.url));
+    session.defaultSession.protocol.handle('pockymoe-pet', request => petCatalog.asset(request));
     const petModules = import.meta.glob('../pet/controller.ts', { eager: true }) as Record<string, { createPetController(deps: PetControllerDeps): PetController }>;
     const petModule = Object.values(petModules)[0];
     const startPet = (): void => {
