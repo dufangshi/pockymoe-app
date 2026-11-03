@@ -1,5 +1,5 @@
 import type { PetClip } from './packs';
-type Slot = { clip: PetClip; video: HTMLVideoElement; ready: Promise<void>; disposed: boolean };
+type Slot = { clip: PetClip; video: HTMLVideoElement; ready: Promise<void>; disposed: boolean; callback: number | null };
 /** Two native decoders, no frame atlas, Blob copies, or decoded-frame cache. */
 export class VideoClipPlayer {
   private active: Slot | null = null;
@@ -13,7 +13,7 @@ export class VideoClipPlayer {
   constructor(private url: (path: string) => string, private draw: (video: HTMLVideoElement) => void, private finish: () => void, private failed: () => void) {}
   private make(clip: PetClip): Slot {
     const video = document.createElement('video'); video.crossOrigin = 'anonymous'; video.muted = true; video.preload = 'auto'; video.playsInline = true; video.hidden = true; video.className = 'pet-video'; document.body.append(video);
-    const slot: Slot = { clip, video, ready: Promise.resolve(), disposed: false };
+    const slot: Slot = { clip, video, ready: Promise.resolve(), disposed: false, callback: null };
     slot.ready = new Promise<void>((resolve, reject) => {
       video.onloadeddata = () => resolve(); video.onerror = () => reject(new Error('pet video decode failed'));
       video.src = this.url(clip.path); video.load();
@@ -24,7 +24,9 @@ export class VideoClipPlayer {
   }
   private release(slot: Slot | null): void {
     if (!slot || slot.disposed) return;
-    slot.disposed = true; slot.video.pause(); slot.video.removeAttribute('src'); slot.video.load(); slot.video.onloadeddata = null; slot.video.onerror = null; slot.video.remove();
+    slot.disposed = true;
+    if (slot.callback !== null) { slot.video.cancelVideoFrameCallback(slot.callback); slot.callback = null; }
+    slot.video.pause(); slot.video.removeAttribute('src'); slot.video.load(); slot.video.onloadeddata = null; slot.video.onerror = null; slot.video.remove();
   }
   preload(clip: PetClip | null): void {
     if (!clip || clip.path === this.next?.clip.path) return;
@@ -48,7 +50,7 @@ export class VideoClipPlayer {
     } catch { if (token === this.token) { this.dispose(); this.failed(); } }
   }
   private videoFrames(slot: Slot): void {
-    slot.video.requestVideoFrameCallback(() => { if (this.active !== slot || slot.disposed) return; this.changed = true; this.videoFrames(slot); });
+    slot.callback = slot.video.requestVideoFrameCallback(() => { slot.callback = null; if (this.active !== slot || slot.disposed) return; this.changed = true; this.videoFrames(slot); });
   }
   tick(now: number, fps: number, still: boolean): void {
     const a = this.active; if (!a) return;

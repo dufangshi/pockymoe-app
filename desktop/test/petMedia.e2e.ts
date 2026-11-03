@@ -13,6 +13,14 @@ test('synthetic VP9 alpha streams through the pet protocol and switches without 
   try{
     await expect.poll(()=>app.windows().length).toBe(2);
     let sprite=app.windows()[0];for(const p of app.windows()){await p.waitForFunction(()=>document.body.dataset.surface);if(await p.locator('body').getAttribute('data-surface')==='sprite')sprite=p;}
+    await sprite.evaluate(() => {
+      const pending = new Set<number>(), request = HTMLVideoElement.prototype.requestVideoFrameCallback, cancel = HTMLVideoElement.prototype.cancelVideoFrameCallback;
+      HTMLVideoElement.prototype.requestVideoFrameCallback = function (callback) {
+        let id = 0; id = request.call(this, (now, metadata) => { pending.delete(id); callback(now, metadata); }); pending.add(id); return id;
+      };
+      HTMLVideoElement.prototype.cancelVideoFrameCallback = function (id) { pending.delete(id); cancel.call(this, id); };
+      Object.assign(window, { pendingVideoCallbacks: () => pending.size });
+    });
     await app.evaluate(()=> (globalThis as unknown as {petHarness:{settings(p:unknown):void}}).petHarness.settings({petId:'synthetic',petSize:'L'}));
     await expect(sprite.locator('#character')).toHaveClass(/clips/);
     await expect(sprite.locator('video.pet-video')).toHaveCount(2);
@@ -36,6 +44,7 @@ test('synthetic VP9 alpha streams through the pet protocol and switches without 
     await expect.poll(() => sprite.locator('video.pet-video').evaluateAll(v => v.some(x => !(x as HTMLVideoElement).paused))).toBe(true);
     await app.evaluate(()=> (globalThis as unknown as {petHarness:{settings(p:unknown):void}}).petHarness.settings({petId:'moe'}));
     await expect(sprite.locator('video.pet-video')).toHaveCount(0);
+    expect(await sprite.evaluate(() => (window as unknown as { pendingVideoCallbacks(): number }).pendingVideoCallbacks())).toBe(0);
     expect(await app.evaluate(async({net},url)=>(await net.fetch(url)).status,sample.source)).toBe(404);
   }finally{await app.close();rmSync(root,{recursive:true,force:true});}
 });
