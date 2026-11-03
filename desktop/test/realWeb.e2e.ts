@@ -62,7 +62,17 @@ for (const surface of ['main', 'map', 'devices'] as const) for (const pack of ['
     } else {
       await app.evaluate((_electron, type: 'openMap' | 'openDevices') => { void globalThis.__pockymoeDesktopTest.windows.dispatch({ type }); }, surface === 'map' ? 'openMap' : 'openDevices');
       await expect(page.locator(surface === 'map' ? '.thread-map-canvas' : '.pd-page').first()).toBeVisible({ timeout: 20_000 });
-      if (surface === 'devices') await expect(page.locator('.pd-account-usage')).toContainText('gpt-5.4', { timeout: 15_000 });
+      if (surface === 'devices') {
+        const devices = page.locator('.pd-page');
+        // Seeded history can fall on yesterday when CI crosses midnight; inspect
+        // that history through the real range control rather than assuming Today.
+        stage = 'device history range';
+        const allTime = devices.getByRole('button', { name: 'All time', exact: true });
+        await allTime.click();
+        await expect(allTime).toHaveAttribute('aria-pressed', 'true');
+        stage = 'device historical usage';
+        await expect(devices.locator('.pd-account-usage')).toContainText('gpt-5.4', { timeout: 15_000 });
+      }
     }
     if (surface === 'map') await page.locator('.thread-map-filter').hover(); else await page.mouse.move(700, 12);
     await expect(page.locator('.thread-map-tip').first()).toBeHidden();

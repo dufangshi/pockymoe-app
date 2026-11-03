@@ -21,11 +21,11 @@ function wav(): Buffer {
   b.write('RIFF', 0); b.writeUInt32LE(36 + n * 2, 4); b.write('WAVEfmt ', 8); b.writeUInt32LE(16, 16); b.writeUInt16LE(1, 20); b.writeUInt16LE(1, 22); b.writeUInt32LE(24000, 24); b.writeUInt32LE(48000, 28); b.writeUInt16LE(2, 32); b.writeUInt16LE(16, 34); b.write('data', 36); b.writeUInt32LE(n * 2, 40);
   return b;
 }
-const FIXTURE = `<!doctype html><meta charset="utf-8"><title>Fixture</title><script>window.commands=[];window.pockymoeHost?.onCommand(command=>{window.commands.push(command);
+const FIXTURE = `<!doctype html><meta charset="utf-8"><title>Fixture</title><script>window.commands=[];window.fixtureReady=false;const installFixture=()=>{window.pockymoeHost?.onCommand(command=>{window.commands.push(command);
   const data=command.type==='turnText'?{request:'修一下登录白屏',answer:'白屏已修好，原因是回调读取了未加载的用户信息。'}:command.type==='listConnections'?[{deviceId:'old',deviceName:'wsl',id:'c2',name:'Older',protocol:'openai_chat',model:'small',supervisorVersion:'0.13.41',needsUpdate:true},{deviceId:'mac',deviceName:'MacBook',id:'c1',name:'Main',protocol:'openai_chat',model:'small',supervisorVersion:'0.13.43',needsUpdate:false}]:command.type==='listMuteTargets'?{devices:[{id:'mac',label:'MacBook Pro'},{id:'pc',label:'Windows PC'}],workspaces:[{id:'mac:rc',label:'remoteCodex · MacBook Pro'}],threads:[{id:'mac:thread-1',label:'修复登录状态同步 · remoteCodex'}]}:command.type==='connectionModels'?[{id:'small',name:'Small model'},{id:'large',name:'Large model'}]:command.type==='completeWithConnection'?{text:'连接总结：白屏修好了。'}:undefined;
   if(command.type==='connectionModels'&&window.failModels){window.pockymoeHost.commandResult(command.id,{ok:false,error:'upstream refused'});return;}
   if(command.type==='completeWithConnection'&&command.connectionId==='c2'){window.pockymoeHost.commandResult(command.id,{ok:false,code:'supervisorTooOld',error:'x'});return;}
-  window.pockymoeHost.commandResult(command.id,{ok:true,...(data?{data}:{})});});</script>`;
+  window.pockymoeHost.commandResult(command.id,{ok:true,...(data?{data}:{})});});window.fixtureReady=true;};if(document.readyState==='loading')addEventListener('DOMContentLoaded',installFixture,{once:true});else installFixture();</script>`;
 test.beforeAll(async () => {
   server = createServer((req, res) => {
     let body = '';
@@ -57,6 +57,9 @@ test.beforeEach(async () => {
   await expect.poll(() => app.windows().some(window => window.url().startsWith(origin))).toBe(true);
   page = app.windows().find(window => window.url().startsWith(origin))!;
   await page.waitForLoadState('domcontentloaded');
+  // Match the real Web's post-mount command registration. An inline head script
+  // can announce readiness before the initial navigation event clears it.
+  await expect.poll(() => page.evaluate(() => (window as unknown as { fixtureReady?: boolean }).fixtureReady)).toBe(true);
   await expect.poll(() => page.evaluate(() => !!window.pockymoeHost)).toBe(true);
   await page.evaluate(() => window.pockymoeHost!.capabilities());
 });

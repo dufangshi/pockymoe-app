@@ -1,7 +1,7 @@
 import { t } from '../shared/i18n';
 import { app, Menu, nativeImage, nativeTheme, Tray, type BrowserWindow, type MenuItemConstructorOptions } from 'electron';
 import { join } from 'node:path';
-import type { ActivityItem, ActivitySnapshot, Appearance, DesktopSettings } from '../shared/contract';
+import type { ActivityItem, ActivitySnapshot, Appearance, DesktopSettings, UpdateState } from '../shared/contract';
 import { activitySecondary, conversationKey, groupActivities } from '../shared/activityGroups';
 import { alertId, type ActivityHub } from './activity';
 import { itemPath } from './notifications';
@@ -49,6 +49,9 @@ export class DesktopTray {
     this.pendingWindows.set(window, ready); window.once('ready-to-show', ready);
     window.once('closed', () => this.pendingWindows.delete(window));
   };
+  private updaterState?: () => UpdateState;
+  private installUpdate?: () => void;
+  setUpdates(state: () => UpdateState, install: () => void): void { this.updaterState = state; this.installUpdate = install; this.update(); }
   menuLabels: string[] = [];
   private appearance: Appearance | null = null;
   setAppearance(appearance: Appearance): void { this.appearance = { ...appearance }; this.update(); }
@@ -57,7 +60,7 @@ export class DesktopTray {
     this.tray.setToolTip('Pockymoe');
     if (process.platform === 'win32') app.on('browser-window-created', this.windowCreated);
     if (process.platform === 'win32') this.tray.on('click', () => this.tray.popUpContextMenu());
-    if (process.platform !== 'win32') this.tray.on('double-click', () => windows.focusMain());
+    if (process.platform !== 'win32') this.tray.on('double-click', () => { if (!windows.closingForUpdate) windows.focusMain(); });
     this.unsubscribers = [hub.onSnapshot(() => this.update()), settings.onChange(() => this.update())];
     nativeTheme.on('updated', this.themeUpdated);
     this.update();
@@ -109,8 +112,10 @@ export class DesktopTray {
       snooze: () => this.settings.set({ snoozeUntil: Date.parse(settings.snoozeUntil || '') > Date.now() ? null : new Date(Date.now() + 3600_000).toISOString() }),
       map: () => { void this.windows.dispatch({ type: 'openMap' }); },
       reveal: item => { void this.windows.dispatch({ type: 'revealInMap', key: item.key }); },
-      main: () => this.windows.focusMain(), settings: () => this.windows.createLocal('preferences'), quit: () => app.quit()
+      main: () => { if (!this.windows.closingForUpdate) this.windows.focusMain(); }, settings: () => { if (!this.windows.closingForUpdate) this.windows.createLocal('preferences'); }, quit: () => app.quit()
     });
+    const update = this.updaterState?.();
+    if (update?.version && ['ready', 'error'].includes(update.status)) template.splice(template.length - 2, 0, { label: t('重启以更新到 {version}', { version: update.version }), enabled: update.retryAllowed !== false, click: () => this.installUpdate?.() });
     this.menuLabels = template.map(i => i.label || '');
     const menu = Menu.buildFromTemplate(template);
     if (this.live()) this.tray.setContextMenu(menu);

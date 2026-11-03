@@ -26,11 +26,11 @@ loopback (`localhost`, `127.0.0.1`, `[::1]`).
 
 ## Install and use
 
-macOS: open the DMG and copy **Pockymoe.app** to Applications, or extract the ZIP.
+macOS (Apple silicon): open the DMG and copy **Pockymoe.app** to Applications.
 Windows: run the one-click NSIS installer (current user, no administrator prompt),
 then open Pockymoe from the Start menu or desktop shortcut. Uninstall keeps user data. The development-signed macOS builds produced by the
 QA command below are **not notarized** and are for local developer testing;
-normal distribution requires a Developer ID signature and notarization. Windows
+public builds use a dedicated non-personal self-signed identity and are not notarized; macOS may require explicit approval in Privacy & Security. Windows
 builds without an Authenticode certificate are unsigned.
 
 On first launch, enter your Pockymoe address, for example
@@ -178,10 +178,88 @@ window is 560 px wide and fits its contents. Pet-specific checks belong to the p
 
 ## Packaging, signing and packaged-app QA
 
-The architecture comes from the CLI. `dist:mac` / `dist:win` intentionally request
-both supported architectures; use a single flag for a focused local build.
-Artifacts are named `Pockymoe-<version>-<os>-<arch>.<ext>`. Local outputs are under
-`desktop/release/`, which is ignored by git. These commands never publish.
+Public releases contain exactly three files:
+
+- `Pockymoe-<version>-android.apk` (signed with the existing local Android key)
+- `Pockymoe-<version>-mac-arm64.dmg` (Apple silicon only, dedicated non-personal Pockymoe signature)
+- `Pockymoe-<version>-win-x64.exe` (x64 NSIS only)
+
+No ZIP, combined installer, update manifests or blockmaps are published. Builder
+targets and scripts pin these architectures; the packaging regression rejects
+extra targets/architectures or an updater dependency. Local outputs are ignored.
+
+From the repository root on the Apple silicon signing Mac, bump the desktop
+version, Android `versionName` and Android `versionCode` in a reviewed commit.
+The versionCode must exceed the latest release APK's value. Merge first, then
+use a **clean `main` matching freshly fetched `origin/main`**:
+
+```sh
+scripts/release-client.sh 0.3.0
+# Explicit separate publishing invocation, after reviewing the first output:
+scripts/release-client.sh 0.3.0 --publish --notes-file /absolute/release-notes.md \
+  --output .local/client-release/0.3.0-publish
+```
+
+Copy `desktop/release-notes-template.md` when preparing publication notes; it
+includes the short macOS Keychain prompt notice.
+
+`--publish` rebuilds and verifies before `gh release create --target <full SHA>
+--latest --notes-file ...`. It never updates an existing release. Each invocation
+requires an empty output folder and refuses extra files rather than deleting
+anything. Default output is `.local/client-release/<version>` and contains only
+the three named artifacts. Intermediate builds, extraction and smoke profiles
+use a temporary directory. To verify an unmerged **clean candidate branch**,
+`--validate` runs the same real build/scan/signature/startup gates, bypassing only
+the main/origin check; it cannot be combined with `--publish`. Every unpublished
+run, including normal builds on `main`, signs update metadata with a fresh
+throwaway Ed25519 key held only in memory. It never reads the production metadata
+private key. Validation notes and their public key are saved beside the output
+folder, named `<output-folder>-validation-notes.md` and
+`<output-folder>-validation-public-key.pem`, for independent verification:
+
+```sh
+node scripts/update-signatures.cjs verify 0.3.0 .local/client-release/0.3.0 \
+  .local/client-release/0.3.0-validation-notes.md \
+  .local/client-release/0.3.0-validation-public-key.pem
+```
+
+These validation signatures are rejected by production clients. Only explicit
+`--publish`, from clean `main` matching freshly fetched `origin/main`, accesses
+the production metadata key. The signing tool repeats that source gate.
+
+The script builds the Mac app with hardened runtime off, then signs it using the
+stable self-signed **Pockymoe** certificate in a dedicated local keychain. This
+avoids publishing a developer's name/email and pins the leaf certificate for
+update installation checks. `scripts/setup-client-signing.py` reuses that identity;
+no system trust change or lasting keychain-search-list change is required. Builder
+trusted-identity discovery cannot find this untrusted certificate, so the script
+signs explicitly and packages the prebuilt app into the DMG. Gatekeeper warnings
+on first install are expected. It briefly launches the built bundle with an
+isolated empty profile and loads its packaged voice addon. All five Windows speech
+files and PE headers are checked in the unpacked app and extracted NSIS payload.
+The APK is built through `scripts/assemble-signed-apk.sh`; its certificate must
+match the latest APK, and versionCode must increase. GitHub lookup failures stop
+the build; absence of a previous APK is reported. Keys stay on this Mac, never CI.
+
+Every artifact is scanned with `scripts/check-production-address.py`, including
+the entire read-only mounted DMG volume root (including its hidden files and
+artwork), extracted ASARs, NSIS app payload and expanded APK. The app inside the
+final DMG must also pass the pinned leaf-certificate check.
+The guard reads the hashed production fragment, local Git email/full name,
+Keychain signing identities/emails, and optional newline-separated private values
+from `POCKYMOE_PRIVATE_IDENTIFIERS_FILE`. Values stay in memory; only hit paths
+are reported. Never put private values into arguments or tracked files.
+
+Release metadata is signed with Ed25519 and appended to the notes in one
+`<!-- pockymoe-updates-v1 ... -->` HTML comment. It binds each desktop artifact's
+`version`, `platform`, `fileName`, `sha256` and `size`; no fourth asset is needed.
+For publication, generated `<version>-release-notes.md` sits **beside** the output
+folder. Unpublished runs write the validation notes/public key described above.
+`--publish --notes-file FILE` rebuilds and signs current production metadata before creating
+the release, so stale hashes from an earlier build are never reused.
+
+The release script never touches `/Applications/Pockymoe.app`. A separate local
+development-signed build/install is optional; do not distribute that identity.
 
 For a local Apple Development identity already present in Keychain (substitute
 your own identity; no personal identity is committed):
@@ -191,12 +269,18 @@ pnpm build
 export CSC_NAME='Apple Development: Your Name (TEAMID)'
 pnpm exec electron-builder --mac --arm64 --dir --publish never \
   -c.mac.identity="$CSC_NAME" -c.mac.notarize=false
-pnpm exec electron-builder --mac dmg zip --arm64 \
+pnpm exec electron-builder --mac dmg --arm64 \
   --prepackaged release/mac-arm64/Pockymoe.app --publish never \
   -c.mac.identity="$CSC_NAME" -c.mac.notarize=false
 codesign --verify --deep --strict --verbose=2 release/mac-arm64/Pockymoe.app
 spctl -a -vv release/mac-arm64/Pockymoe.app
 ```
+
+For a separate local development-signed install, quit your existing client yourself,
+then copy `release/mac-arm64/Pockymoe.app` into Applications in Finder. Packaging
+and tests never perform that copy. Keep the development identity consistent for
+local testing. Its identity differs from the public Pockymoe certificate, so the
+update icon opens the release page instead of replacing this development copy.
 
 Hardened runtime remains enabled. `build/entitlements.mac.plist` grants Electron's
 JIT/executable-memory requirements and deliberately has **no APNs entitlement**
@@ -318,16 +402,15 @@ map and device images are **isolated Web contract fixtures**, not the separately
 deployed Web UI. They verify the host surface and command routing; real Web-page
 visual acceptance remains a separate Windows gate.
 
-Cross-build both architectures on this Mac without running the Windows binaries:
+Cross-build Windows x64 on this Mac without running the Windows binaries:
 
 ```sh
 pnpm build
-pnpm exec electron-builder --win --x64 --arm64 --dir --publish never
+pnpm exec electron-builder --win --x64 --dir --publish never
 node scripts/verify-windows-package.cjs release/win-unpacked x64
-node scripts/verify-windows-package.cjs release/win-arm64-unpacked arm64
 ```
 
-pnpm explicitly installs Darwin and Windows native packages for both architectures.
+pnpm installs only the Darwin arm64 and Windows x64 native speech packages.
 `afterPack` keeps the target package and verifies the unpacked `.node` plus all four
 DLLs, including each PE machine header. Windows runtime support checks these files
 before offering local speech. Windows 11 build 22621+ requests Mica; older Windows
@@ -346,19 +429,124 @@ still uses the OS error box because the local UI cannot run.
 
 The [Windows design acceptance](../docs/desktop-windows.zh.md#8-验收) still needs
 real-Windows checks of installer, full-screen overlays, taskbar placement, mixed
-DPI and arm64 execution. Cross-build checks do not prove the app runs on Windows.
+DPI and x64 execution. Cross-build checks do not prove the app runs on Windows.
 Task-specific evidence and audit reports belong in ignored `.scratch/` directories.
 
 ## Distribution and platform gates
 
 ```sh
-pnpm dist:mac  # arm64 + x64 dmg + zip, --publish never
-pnpm dist:win  # x64 + arm64 NSIS, --publish never
+pnpm dist:mac  # arm64 DMG only, --publish never
+pnpm dist:win  # x64 NSIS only, --publish never
 ```
 
-Updater: GitHub `dufangshi/pockymoe-app`; packaged apps ask before downloading
-and restarting. Signing/notarization credentials belong to the release
-environment. App artwork is the current upstream `public/pockymoe-icon.png`,
+### In-app updates
+
+Packaged apps check the public GitHub Releases API at startup, every six hours,
+and on wake (at most once per hour), through Electron `net` with ETag and the system proxy. Checks remain
+gated until a connection is configured. Rate limits/network failures stay quiet
+and retry at the next check; preview tags are never stable updates. Versions are
+compared numerically. `0.2.0` has no updater: download the next release manually
+once to enter this update path.
+
+A newer release is downloaded silently to `userData/updates/`. Before showing the
+rail icon, the client checks the compiled Ed25519 key's signature and the exact
+version/platform/name/size/hash. It checks the cached file again before installing.
+Interrupted files are never ready; old downloads are removed after verification.
+Download/hash/free-space failures back off exponentially per version, persisted
+across launches and capped at 24 hours. An installation needs at least three
+times the artifact size in free space. At most three failed install attempts of
+one version are allowed in a launch; restarting the client resets that limit.
+There is no runtime environment override for a production feed or verification
+key. Acceptance builds explicitly compile a separate fixture key and feed.
+A missing or bad signature on a higher version shows only
+**发现版本 {version}，但无法验证它的签名，不提供更新** with **好** on a manual
+check. There is no release link, download offer or rail icon for that release.
+Preferences reports **已是最新版本**, **正在下载**, **更新已就绪** or **暂时无法检查更新**.
+The tray offers **重启以更新到 {version}** when ready.
+
+The Web host contract adds `features.updates` and optional
+`updates.state()/onChange()/install()`. The page can request only the verified
+update, with no install arguments. The rail's accent circle appears after
+verification. When the page has unsent composer drafts or unsaved documents,
+it asks before requesting installation. Save or send them before continuing. Main closes
+windows before teardown. If any refuses to unload, it cancels with
+**有未保存的文件，已取消更新**, leaving the app running and the icon ready. Failed installs
+retain the icon and expose ErrorMark retry/download actions. Older hosts and
+plain browsers have no icon.
+
+On macOS the current and staged app must both pass strict leaf-certificate
+verification. A read-only DMG is copied to a temporary sibling; a detached helper
+waits for exit, renames, launches the new app, then removes the backup. An early
+launch failure restores and relaunches the old app, and reports the failure after
+restart. Startup repairs an orphaned backup and removes stale staged siblings,
+backups and installers for the running version. Non-writable, translocated,
+disk-image or differently signed copies
+(including a development-signed installation) open the release page instead.
+Tests never replace `/Applications/Pockymoe.app`.
+
+On Windows the verified x64 one-click per-user NSIS installer runs detached with
+`/S --updated --force-run`; `--updated` allows the old process to close gracefully
+and `--force-run` relaunches even in silent mode. An attempt marker is written
+before launching it; an old-version restart after an incomplete attempt shows
+**上次更新没有完成** with retry/download actions. User data remains in place.
+Electron `net` writes no Mark of the Web stream; CI tests genuine A→B installer
+relaunch and preserved cookie/encrypted secret, while interactive SmartScreen
+behavior still needs real-device observation.
+
+**macOS Keychain prompt:** macOS may ask once after each update. Choose **Always
+Allow** to keep sign-in and saved voice keys. If you deny access, sign in and enter
+voice keys again; the client keeps secure Keychain storage and never substitutes
+a mock Keychain or basic password store. Inaccessible voice keys stay encrypted
+and are not repeatedly decrypted during that launch.
+
+A stable self-signed identity does not establish an
+Apple TeamIdentifier. In the real updater A→B test macOS attached a build-specific
+`cdhash` partition ACL to the fixture Safe Storage item; B requested Keychain
+access despite the unchanged leaf certificate/designated requirement. The signed-DMG
+swap/relaunch succeeded, then B blocked in `SecItemCopyMatching`. No system
+trust/ACL changes are made to hide this. A Keychain prompt or sign-in recovery may
+be needed; seamless sign-in must not be assumed.
+
+**Draft limitation:** Web composer drafts are currently an in-memory Map, including
+File attachments. They survive route changes but **do not survive a full client
+quit/relaunch**. The page names conversations with unsent text or attachments in the primary
+**更新并重启？** confirmation, alongside unsaved-document counts. The tray follows
+the same page flow. With nothing unsent or unsaved, updating is immediate; cancel to keep working or save/send them first. The updater
+does not claim to preserve them. Agents continue running on their Supervisors.
+
+### Key backup and rotation
+
+Run `node scripts/update-signatures.cjs init` only for explicit initial provisioning
+on the signing Mac. The production Ed25519 key is `client-update-ed25519.pem`
+beside the Android keystore in the private mobile-release directory; only
+`desktop/build/update-public-key.pem` is committed. Private key files remain
+mode `0600`, as do the local release credentials. Back up these and the dedicated
+Mac signing keychain/certificate/private key securely offline. Never upload them
+to CI or a repository, or print their contents.
+
+This separation prevents someone who only compromises the GitHub account or
+release assets from forging an update that installed clients accept. File mode
+`0600` restricts access by other local users; it does **not** protect keys from
+code running as this Mac user, which can also access local signing and GitHub
+credentials. The keys stay usable for unattended releases; they are not a
+sandbox for unreviewed code running under this account. Validation uses a fresh
+throwaway Ed25519 metadata key and cannot produce production-trusted release
+notes. The stable Mac code-signing certificate is a separate key: validation
+still uses that certificate so the installed app's leaf pin can be tested.
+
+The current updater trusts one metadata public key and one Mac certificate pin;
+there is no automatic rotation protocol. Replacing either directly requires
+people to download/install the new client manually once. Seamless planned
+rotation first needs a reviewed client change that accepts both old and next
+keys/pins, delivered in an old-key-signed release while the old Mac identity still
+matches. Only after that transition is installed can a subsequent release switch
+to the new keys. Keep the old signing keys while older clients need a bridge.
+If a private key is lost, or a trust root must be revoked without that transition,
+existing clients cannot safely self-update. Tell users through a separately
+trusted channel to download/install manually once; the app never offers a link
+from an unsigned or invalidly signed release.
+
+App artwork is the current upstream `public/pockymoe-icon.png`,
 converted to ICNS/ICO; monochrome tray and count overlays are vector-derived.
 Rebuild assets with Pillow: `python scripts/generate-icons.py` on macOS.
 

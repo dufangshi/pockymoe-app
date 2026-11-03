@@ -1,6 +1,6 @@
 {
   "name": "@pockymoe/desktop",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "Pockymoe desktop client",
   "author": "Pockymoe",
@@ -13,11 +13,10 @@
     "lint": "eslint .",
     "test": "vitest run",
     "test:e2e": "pnpm build && playwright test --project=electron",
-    "dist:mac": "pnpm build && electron-builder --mac --arm64 --x64 --publish never",
-    "dist:win": "pnpm build && electron-builder --win --x64 --arm64 --publish never"
+    "dist:mac": "pnpm build && electron-builder --mac dmg --arm64 --publish never",
+    "dist:win": "pnpm build && electron-builder --win nsis --x64 --publish never"
   },
   "dependencies": {
-    "electron-updater": "^6.6.2",
     "sherpa-onnx-node": "2.0.1"
   },
   "devDependencies": {
@@ -51,12 +50,14 @@
         "arm64",
         "x64"
       ]
+    },
+    "overrides": {
+      "sherpa-onnx-node>sherpa-onnx-darwin-x64": "-",
+      "sherpa-onnx-node>sherpa-onnx-win-arm64": "-"
     }
   },
   "optionalDependencies": {
     "sherpa-onnx-darwin-arm64": "2.0.1",
-    "sherpa-onnx-darwin-x64": "2.0.1",
-    "sherpa-onnx-win-arm64": "2.0.1",
     "sherpa-onnx-win-x64": "2.0.1"
   }
 }

@@ -27,6 +27,7 @@ export interface HostCapabilities {
     multiWindow: boolean;
     nativeSave: boolean;
     badge: boolean;
+    updates: boolean;
   };
 }
 
@@ -104,6 +105,7 @@ export type HostCommand =
   | { id: string; type: 'reply'; deviceId: string; threadId: string; text: string }
   | { id: string; type: 'revealInMap'; key: string }
   | { id: string; type: 'openMap' }
+  | { id: string; type: 'prepareUpdate'; cancel?: boolean }
   | { id: string; type: 'newThread' }
   | { id: string; type: 'openDevices' }
   /** Text of a finished turn, for spoken summaries. Answers in `data`. */
@@ -181,7 +183,16 @@ export interface Appearance {
 }
 
 /** Exposed as window.pockymoeHost to the configured webOrigin's top frame only. */
+export interface UpdateState {
+  status: 'idle' | 'downloading' | 'ready' | 'installing' | 'error';
+  version?: string;
+  error?: string;
+  releaseUrl?: string;
+  retryAllowed?: boolean;
+}
+
 export interface PockymoeHost {
+  updates?: { state(): Promise<UpdateState>; onChange(listener: (state: UpdateState) => void): () => void; install(): void };
   capabilities(): Promise<HostCapabilities>;
   activity: { sync(snapshot: ActivitySnapshot): void };
   onCommand(listener: (command: HostCommand) => void): () => void;
@@ -249,6 +260,7 @@ export type PetMood =
 /** Implemented by desktop/src/pet/controller.ts; created and owned by the main process. */
 export interface PetControllerDeps {
   hub: ActivityHubLike;
+  isUpdating?(): boolean;
   settings: SettingsStoreLike;
   /** Run a command in the relay page; only commands that show something raise the main window. */
   dispatch(command: Omit<HostCommand, 'id'>): Promise<HostCommandResult>;

@@ -385,8 +385,8 @@ export function createPetController(deps: PetControllerDeps): PetController {
   }, 100);
   // Stop native-window polling before Electron begins destroying those windows.
   const beforeQuit = (): void => { quitting = true; dispose(false); };
-  const closeGlass = (event: Electron.Event): void => { if (!quitting) { event.preventDefault(); dismissSurface(); } };
-  const closeSprite = (event: Electron.Event): void => { if (!quitting) { event.preventDefault(); deps.settings.set({ petVisible: false }); } };
+  const closeGlass = (event: Electron.Event): void => { if (!quitting && !deps.isUpdating?.()) { event.preventDefault(); dismissSurface(); } };
+  const closeSprite = (event: Electron.Event): void => { if (!quitting && !deps.isUpdating?.()) { event.preventDefault(); deps.settings.set({ petVisible: false }); } };
   const nativeClosed = (): void => dispose();
   glass.on('close', closeGlass); window.on('close', closeSprite);
   app.once('before-quit', beforeQuit);

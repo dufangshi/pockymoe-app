@@ -16,18 +16,17 @@ for (const profile of ['fresh', 'legacy', 'saved', 'relay-only', 'relay-failed']
   if (profile !== 'fresh') writeFileSync(join(dir, 'settings.json'), JSON.stringify({ petVisible: false, petVoice: profile === 'legacy', ...(profile === 'saved' ? { webOrigin: origin, relayOrigin: origin } : profile.startsWith('relay-') ? { relayOrigin: origin } : {}) }));
   const bootstrap = join(dir, 'bootstrap.cjs');
   // Observe before importing main, with real startup enabled, no credentials,
-  // and a simulated packaged updater that counts checks without downloading.
+  // and a simulated release redirect that counts checks without network access.
   writeFileSync(bootstrap, `
     const {app, net, session} = require('electron');
     app.setAppPath(${JSON.stringify(resolve('.'))});
     global.startupRequests = []; global.updateChecks = 0;
     Object.defineProperty(app, 'isPackaged', {get: () => true});
     app.setAsDefaultProtocolClient = () => true;
-    require(${JSON.stringify(resolve('node_modules/electron-updater'))}).autoUpdater.checkForUpdates = async () => { global.updateChecks++; return null; };
     const nodeFetch = global.fetch;
     global.fetch = (url, ...args) => { global.startupRequests.push(String(url)); return nodeFetch(url, ...args); };
     const fetch = net.fetch.bind(net);
-    net.fetch = (url, ...args) => { global.startupRequests.push(String(url)); return fetch(url, ...args); };
+    net.fetch = (url, ...args) => { if (String(url).endsWith('/releases/latest')) { global.updateChecks++; return Promise.resolve(new Response(JSON.stringify({tag_name:'v0.2.0',prerelease:false,draft:false}), {status:200})); } global.startupRequests.push(String(url)); return fetch(url, ...args); };
     app.whenReady().then(() => {
       for (const s of [session.defaultSession, session.fromPartition('persist:remote-codex')])
         s.webRequest.onBeforeRequest({urls:['http://*/*','https://*/*']}, (details, callback) => {

@@ -27,12 +27,16 @@ mac:
   entitlementsInherit: build/entitlements.mac.plist
   target:
     - target: dmg
-    - target: zip
+      arch: [arm64]
 win:
   icon: build/icon.ico
   target:
     - target: nsis
+      arch: [x64]
+dmg:
+  writeUpdateInfo: false
 nsis:
+  differentialPackage: false
   include: build/installer.nsh
   oneClick: true
   perMachine: false
@@ -42,7 +46,3 @@ nsis:
 protocols:
   name: Pockymoe
   schemes: [pockymoe, remotecodex]
-publish:
-  provider: github
-  owner: dufangshi
-  repo: pockymoe-app
