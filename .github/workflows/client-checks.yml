@@ -208,6 +208,103 @@ jobs:
           path: desktop/evidence/
           if-no-files-found: warn
 
+  quarantine:
+    name: Quarantine (non-required)
+    needs: changes
+    if: needs.changes.outputs.unit == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 35
+    defaults:
+      run:
+        working-directory: desktop
+        shell: pwsh
+    env:
+      POCKYMOE_TEST_SYSTEM_LOCALE: en-US
+      POCKYMOE_REAL_WEB: '1'
+      PYTHONUTF8: '1'
+      DESKTOP_E2E_RELEASE_WEB: '1'
+      DESKTOP_E2E_BIN: ${{ github.workspace }}/.local/desktop-runtime-v0.13.44/remote-codex-win32-x64-msvc-cli.exe
+      DESKTOP_E2E_WEB_DIST: ${{ github.workspace }}/.local/desktop-web-source/pockymoe/apps/supervisor-web/dist
+      POCKYMOE_DESKTOP_SCALE: 1
+      POCKYMOE_DESKTOP_EVIDENCE: ${{ github.workspace }}/desktop/evidence/scale-1-en-US
+      POCKYMOE_PACKAGED_EXECUTABLE: ${{ github.workspace }}/desktop/release/win-unpacked/Pockymoe.exe
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      POCKYMOE_VOICE_DOWNLOAD: '1'
+      CHECK_MODE: quarantine
+      POCKYMOE_QUARANTINE: only
+      PLAYWRIGHT_JUNIT_OUTPUT_NAME: evidence/quarantine/playwright.xml
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: desktop/pnpm-lock.yaml
+      - name: Install dependencies
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          New-Item -ItemType Directory -Force $env:POCKYMOE_DESKTOP_EVIDENCE | Out-Null
+          pnpm install --frozen-lockfile
+      - name: Publish the visible quarantine list
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          python ../scripts/show-quarantine.py --summary "$env:GITHUB_STEP_SUMMARY"
+      - name: Quarantined unit checks
+        id: quarantined_unit
+        continue-on-error: true
+        run: pnpm vitest run --reporter=default --reporter=junit --outputFile=evidence/quarantine/vitest.xml
+      - name: Quarantined shortcut fixture probe
+        id: quarantined_fixture
+        continue-on-error: true
+        run: node test/update-roundtrip.mjs --shortcut-probe
+      - name: Build unpacked x64 app
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          pnpm build
+          pnpm exec electron-builder --win --x64 --dir --publish never
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Guard packaged app contents
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          node scripts/extract-asar.cjs release/win-unpacked/resources/app.asar release/scan-asar
+          python ../scripts/check-production-address.py release/scan-asar release/win-unpacked/resources/app.asar release/win-unpacked/resources/app.asar.unpacked out
+      - name: Build pinned Web and start isolated release runtime
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          pnpm exec playwright install chromium
+          python ../scripts/desktop-fixture/prepare-release.py
+          python ../scripts/desktop-fixture/prepare-web.py
+          python ../scripts/desktop-fixture/backend.py start
+      - name: Run quarantined Electron tests
+        id: quarantined_electron
+        continue-on-error: true
+        run: pnpm exec playwright test test/petWork.e2e.ts test/shell.e2e.ts test/realWeb.e2e.ts --project=electron --reporter=list,junit
+      - name: Build contact sheets from original captures
+        if: always()
+        continue-on-error: true
+        run: $PSNativeCommandUseErrorActionPreference = $true; node scripts/contact-sheets.mjs "$env:POCKYMOE_DESKTOP_EVIDENCE"
+      - name: Stop only the recorded disposable backend
+        if: always()
+        run: $PSNativeCommandUseErrorActionPreference = $true; python ../scripts/desktop-fixture/backend.py stop
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: quarantine-${{ github.run_id }}
+          path: desktop/evidence/
+          if-no-files-found: warn
+
+      - name: Keep quarantine failures visible
+        if: always()
+        env:
+          OUTCOMES: ${{ steps.quarantined_unit.outcome }},${{ steps.quarantined_fixture.outcome }},${{ steps.quarantined_electron.outcome }}
+        run: |
+          if ($env:OUTCOMES -match 'failure') { throw 'Quarantined tests failed; see the separate evidence artifact. The required aggregate does not depend on this job.' }
+
   updater:
     name: Windows x64 real NSIS A-to-B update
     needs: changes

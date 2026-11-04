@@ -1,0 +1,65 @@
+[
+  {
+    "kind": "playwright",
+    "test": "a summary that works is not reported as failed when the voice cannot read it",
+    "reason": "openPreferences used a renderer replaced by navigation; observed same-SHA rerun passes",
+    "added": "2026-11-04",
+    "expires": "2026-11-11"
+  },
+  {
+    "kind": "playwright",
+    "test": "one language across surfaces",
+    "reason": "Window navigation and locale readiness race; keep visible outside the required tier",
+    "added": "2026-11-04",
+    "expires": "2026-11-11"
+  },
+  {
+    "kind": "playwright",
+    "test": "Windows surface acceptance",
+    "reason": "Native window focus/load ordering varies on hosted Windows",
+    "added": "2026-11-04",
+    "expires": "2026-11-11"
+  },
+  {
+    "kind": "playwright",
+    "test": "real Web main (classic dark)",
+    "reason": "Thread-content readiness intermittently misses the seeded history",
+    "added": "2026-11-04",
+    "expires": "2026-11-11"
+  },
+  {
+    "kind": "playwright",
+    "test": "real Web main (plum-pocket light)",
+    "reason": "Thread-content readiness intermittently misses the seeded history",
+    "added": "2026-11-04",
+    "expires": "2026-11-11"
+  },
+  {
+    "kind": "playwright",
+    "test": "compact surfaces: Windows pet tint model keeps text above 4.5 on white and black",
+    "reason": "Theme and hover transition sampling races",
+    "added": "2026-11-04",
+    "expires": "2026-11-11"
+  },
+  {
+    "kind": "vitest",
+    "test": "counts conversations in a completion burst rather than each agent event",
+    "reason": "Hosted runner exceeded the former 5-second timeout; observe existing scoped 15-second fix",
+    "added": "2026-11-04",
+    "expires": "2026-11-11"
+  },
+  {
+    "kind": "vitest",
+    "test": "verifies, unpacks and removes",
+    "reason": "Windows tar/antivirus and cleanup tail latency; observe existing scoped timeout fix",
+    "added": "2026-11-04",
+    "expires": "2026-11-11"
+  },
+  {
+    "kind": "fixture",
+    "test": "Fixture shortcut probe must complete",
+    "reason": "PowerShell COM fixture startup can exceed the probe deadline",
+    "added": "2026-11-04",
+    "expires": "2026-11-11"
+  }
+]

@@ -50,7 +50,7 @@ for (const surface of ['main', 'map', 'devices'] as const) for (const pack of ['
     stage = `open ${surface}`;
     if (surface === 'main') {
       const device = fixture.devices[0];
-      await app.evaluate((_electron, path) => { void globalThis.__pockymoeDesktopTest.windows.dispatch({ type: 'navigate', path }); }, `/devices/${device.id}/threads/${device.scenarios.events}`);
+      await app.evaluate((_electron, path) => globalThis.__pockymoeDesktopTest.windows.dispatch({ type: 'navigate', path }), `/devices/${device.id}/threads/${device.scenarios.events}`);
       stage = 'thread navigation URL';
       await expect(page).toHaveURL(new RegExp(`/threads/${device.scenarios.events}`));
       stage = 'thread content';

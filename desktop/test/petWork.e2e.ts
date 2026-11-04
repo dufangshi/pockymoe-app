@@ -146,6 +146,9 @@ test('working: the pet shows work while a thread runs', async () => {
 const speaker = { petVoice: true, petVoiceProvider: 'compatible' as const, petVoiceSpeed: 1, petVoiceSummary: true, petSummaryLanguage: 'zh-CN' as const };
 const remoteVoice = (): Partial<DesktopSettings> => ({ ...speaker, petVoiceRemotes: { compatible: { url: `${origin}/v1`, model: 't', voice: '', style: '', extra: '' } } });
 const openPreferences = async (): Promise<Page> => {
+  await expect.poll(() => app.windows().some(candidate => !candidate.isClosed() && candidate.url().startsWith(origin)), { message: 'The live fixture window must survive navigation' }).toBe(true);
+  page = app.windows().find(candidate => !candidate.isClosed() && candidate.url().startsWith(origin))!;
+  await page.waitForLoadState('domcontentloaded');
   // fixtureReady is only a renderer flag: a late main navigation reset can clear
   // Windows.ready after the inline listener registered. Re-register idempotently
   // after load, then roundtrip the same-frame IPC before discovery can queue.
@@ -559,6 +562,11 @@ test('compact surfaces: Windows pet tint model keeps text above 4.5 on white and
     for (const tint of [85, 95, 100]) {
       await glass.evaluate(solid => { document.documentElement.dataset.glassFallback = String(solid); }, tint === 100);
       if (tint === 95) await glass.locator('.glass').hover(); else await glass.mouse.move(500, 500);
+      await expect.poll(() => glass.locator('.glass').evaluate((element, expectedTint) => {
+        const c = document.createElement('canvas').getContext('2d')!;
+        c.fillStyle = getComputedStyle(element).backgroundColor; c.fillRect(0, 0, 1, 1);
+        return Math.abs(c.getImageData(0, 0, 1, 1).data[3]! - expectedTint / 100 * 255);
+      }, tint)).toBeLessThanOrEqual(1);
       const minContrast = await glass.evaluate(() => {
         const surface = document.querySelector<HTMLElement>('.glass')!;
         const style = getComputedStyle(surface), canvas = document.createElement('canvas'); canvas.width = canvas.height = 1;
