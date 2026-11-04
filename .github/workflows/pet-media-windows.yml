@@ -1,7 +1,5 @@
 name: Pet VP9 alpha on Windows
 on:
-  pull_request:
-    paths: ['desktop/**', '.github/workflows/pet-media-windows.yml']
   workflow_dispatch:
 permissions:
   contents: read

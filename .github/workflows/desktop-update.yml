@@ -1,11 +1,5 @@
 name: Desktop signed update roundtrip
 on:
-  pull_request:
-    paths:
-      - 'desktop/**'
-      - 'scripts/release-client.sh'
-      - 'scripts/release_client.py'
-      - '.github/workflows/desktop-update.yml'
   workflow_dispatch:
 permissions:
   contents: read
