@@ -372,6 +372,8 @@ validation. Evidence/logs are uploaded even on failure. The dated quarantine lis
 an expiry seven days after addition. A separate non-required Windows job executes
 the listed tests and uploads JUnit, traces and screenshots; its failure is visible
 but is excluded from `Client checks complete`. Expired entries emit warnings.
+The synthetic media test launches the lockfile-installed Electron binary explicitly,
+so an implicit Playwright download cannot consume its behavior-test deadline.
 Local commands keep running the complete selected set; CI filters apply only on
 CI. No new `test.skip` or global retries are used. There are no
 signing credentials or publish/release steps.

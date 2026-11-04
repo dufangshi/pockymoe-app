@@ -1,4 +1,9 @@
 import { test, expect, _electron as electron } from '@playwright/test';
+import { createRequire } from 'node:module';
+
+// Use the lockfile-installed binary; Playwright's implicit download can consume
+// the entire behavior-test deadline on a cold hosted runner.
+const installedElectron = createRequire(import.meta.url)('electron') as string;
 import { mkdtempSync, rmSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve, join } from 'node:path';
@@ -9,7 +14,7 @@ test('synthetic VP9 alpha streams through the pet protocol and switches without 
   test.setTimeout(45_000);
   const root=mkdtempSync(join(tmpdir(),'pet-synthetic-'));const pack=join(root,'pack');mkdirSync(pack);generateMediaFixture(pack);
   const out=process.env.POCKYMOE_DESKTOP_EVIDENCE || join(tmpdir(),'pet-media-evidence');
-  const app=await electron.launch({args:[resolve(out,'pet/qa1/harness/main/index.js')],env:{...process.env,POCKYMOE_CLIP_PACK:pack,ELECTRON_RENDERER_URL:''}});
+  const app=await electron.launch({executablePath:installedElectron,args:[resolve(out,'pet/qa1/harness/main/index.js')],env:{...process.env,POCKYMOE_CLIP_PACK:pack,ELECTRON_RENDERER_URL:''}});
   try{
     await expect.poll(()=>app.windows().length).toBe(2);
     let sprite=app.windows()[0];for(const p of app.windows()){await p.waitForFunction(()=>document.body.dataset.surface);if(await p.locator('body').getAttribute('data-surface')==='sprite')sprite=p;}
