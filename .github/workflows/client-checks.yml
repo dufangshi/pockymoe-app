@@ -10,9 +10,9 @@ on:
       validation:
         description: Run the selected path tier or the full four-lane matrix
         required: true
-        default: auto
+        default: full
         type: choice
-        options: [auto, full]
+        options: [full]
 
 permissions:
   contents: read
@@ -52,7 +52,7 @@ jobs:
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before || github.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-          FULL_CI: ${{ github.event_name == 'workflow_dispatch' && inputs.validation == 'full' || contains(toJSON(github.event.pull_request.labels), 'full-ci') }}
+          FULL_CI: ${{ github.event_name == 'workflow_dispatch' && inputs.validation == 'full' || contains(github.event.pull_request.labels.*.name, 'full-ci') }}
         run: |
           set -euo pipefail
           args=()
@@ -116,6 +116,18 @@ jobs:
           node-version: 24
           cache: pnpm
           cache-dependency-path: desktop/pnpm-lock.yaml
+      - name: Set public download cache directories
+        run: |
+          "ELECTRON_CACHE=$env:RUNNER_TEMP/electron-download-cache" >> $env:GITHUB_ENV
+          "ELECTRON_BUILDER_CACHE=$env:RUNNER_TEMP/electron-builder-download-cache" >> $env:GITHUB_ENV
+      - uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/electron-download-cache
+          key: electron-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('desktop/pnpm-lock.yaml') }}
+      - uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/electron-builder-download-cache
+          key: electron-builder-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('desktop/pnpm-lock.yaml') }}
       - name: Install frozen dependencies
         run: $PSNativeCommandUseErrorActionPreference = $true; pnpm install --frozen-lockfile
       - name: Typecheck and unit tests
@@ -161,6 +173,18 @@ jobs:
           node-version: 24
           cache: pnpm
           cache-dependency-path: desktop/pnpm-lock.yaml
+      - name: Set public download cache directories
+        run: |
+          "ELECTRON_CACHE=$env:RUNNER_TEMP/electron-download-cache" >> $env:GITHUB_ENV
+          "ELECTRON_BUILDER_CACHE=$env:RUNNER_TEMP/electron-builder-download-cache" >> $env:GITHUB_ENV
+      - uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/electron-download-cache
+          key: electron-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('desktop/pnpm-lock.yaml') }}
+      - uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/electron-builder-download-cache
+          key: electron-builder-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('desktop/pnpm-lock.yaml') }}
       - name: Install dependencies
         run: |
           $PSNativeCommandUseErrorActionPreference = $true
@@ -251,6 +275,18 @@ jobs:
           node-version: 24
           cache: pnpm
           cache-dependency-path: desktop/pnpm-lock.yaml
+      - name: Set public download cache directories
+        run: |
+          "ELECTRON_CACHE=$env:RUNNER_TEMP/electron-download-cache" >> $env:GITHUB_ENV
+          "ELECTRON_BUILDER_CACHE=$env:RUNNER_TEMP/electron-builder-download-cache" >> $env:GITHUB_ENV
+      - uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/electron-download-cache
+          key: electron-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('desktop/pnpm-lock.yaml') }}
+      - uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/electron-builder-download-cache
+          key: electron-builder-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('desktop/pnpm-lock.yaml') }}
       - name: Install dependencies
         run: |
           $PSNativeCommandUseErrorActionPreference = $true
@@ -336,6 +372,18 @@ jobs:
           node-version: 24
           cache: pnpm
           cache-dependency-path: desktop/pnpm-lock.yaml
+      - name: Set public download cache directories
+        run: |
+          "ELECTRON_CACHE=$env:RUNNER_TEMP/electron-download-cache" >> $env:GITHUB_ENV
+          "ELECTRON_BUILDER_CACHE=$env:RUNNER_TEMP/electron-builder-download-cache" >> $env:GITHUB_ENV
+      - uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/electron-download-cache
+          key: electron-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('desktop/pnpm-lock.yaml') }}
+      - uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/electron-builder-download-cache
+          key: electron-builder-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('desktop/pnpm-lock.yaml') }}
       - run: $PSNativeCommandUseErrorActionPreference = $true; pnpm install --frozen-lockfile
       - run: $PSNativeCommandUseErrorActionPreference = $true; node test/update-roundtrip.mjs --self-test
       - run: $PSNativeCommandUseErrorActionPreference = $true; node test/update-roundtrip.mjs --diagnostics-only
@@ -371,6 +419,18 @@ jobs:
           node-version: 24
           cache: pnpm
           cache-dependency-path: desktop/pnpm-lock.yaml
+      - name: Set public download cache directories
+        run: |
+          "ELECTRON_CACHE=$env:RUNNER_TEMP/electron-download-cache" >> $env:GITHUB_ENV
+          "ELECTRON_BUILDER_CACHE=$env:RUNNER_TEMP/electron-builder-download-cache" >> $env:GITHUB_ENV
+      - uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/electron-download-cache
+          key: electron-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('desktop/pnpm-lock.yaml') }}
+      - uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/electron-builder-download-cache
+          key: electron-builder-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('desktop/pnpm-lock.yaml') }}
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'

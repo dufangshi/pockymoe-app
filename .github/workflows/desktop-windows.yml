@@ -1,6 +1,12 @@
 name: Desktop Windows parity
 on:
   workflow_dispatch:
+    inputs:
+      validation:
+        description: Explicit legacy full Windows matrix (prefer Client checks)
+        type: choice
+        default: full
+        options: [full]
 permissions:
   contents: read
 jobs:
