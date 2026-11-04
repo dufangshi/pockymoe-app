@@ -4,16 +4,20 @@ options:
   deploymentTarget:
     iOS: "17.0"
   createIntermediateGroups: true
+configFiles:
+  Debug: Config/Build.xcconfig
+  Release: Config/Build.xcconfig
 settings:
   base:
-    PRODUCT_BUNDLE_IDENTIFIER: com.remotecodex.app
     IPHONEOS_DEPLOYMENT_TARGET: "17.0"
     SWIFT_VERSION: "5.9"
+    MARKETING_VERSION: "0.2.0"
+    CURRENT_PROJECT_VERSION: "2"
     TARGETED_DEVICE_FAMILY: "1,2"
     CODE_SIGNING_ALLOWED: "YES"
     CODE_SIGNING_REQUIRED: "NO"
     CODE_SIGN_IDENTITY: ""
-    DEVELOPMENT_TEAM: ""
+    DEVELOPMENT_TEAM: $(POCKYMOE_DEVELOPMENT_TEAM)
     APS_ENVIRONMENT: development
   configs:
     Release:
@@ -23,54 +27,55 @@ targets:
     type: application
     platform: iOS
     sources:
-      - path: RemoteCodex
-      - path: ../web/native-bridge.js
+      - path: Shell
+        excludes: ["*.plist", "*.entitlements"]
+      - path: Shared
+      - path: ../web/pockymoe-host.js
         buildPhase: resources
+      - path: ../web/ios-viewport.js
+        buildPhase: resources
+      - path: LiveActivity/Assets.xcassets
+      - path: RemoteCodex/Resources
+    preBuildScripts:
+      - name: Configure app-bound hosts
+        script: /usr/bin/python3 "$SRCROOT/../scripts/ios-app-bound-domains.py"
+        inputFiles: ["$(SRCROOT)/Shell/Info.plist", "$(SRCROOT)/Shell/Info-Debug.plist"]
+        outputFiles: ["$(DERIVED_FILE_DIR)/Shell-Info.plist"]
+        basedOnDependencyAnalysis: false
     settings:
       base:
-        INFOPLIST_FILE: RemoteCodex/Info.plist
+        INFOPLIST_FILE: $(DERIVED_FILE_DIR)/Shell-Info.plist
         GENERATE_INFOPLIST_FILE: false
-        PRODUCT_BUNDLE_IDENTIFIER: com.remotecodex.app
+        PRODUCT_BUNDLE_IDENTIFIER: $(POCKYMOE_BUNDLE_ID)
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
-        PRODUCT_NAME: Remote Codex
-    info:
-      path: RemoteCodex/Info.plist
-      properties:
-        CFBundleURLTypes:
-          - CFBundleURLName: com.remotecodex.app
-            CFBundleURLSchemes:
-              - remotecodex
-        NSAppTransportSecurity:
-          NSAllowsArbitraryLoads: true
-          NSAllowsArbitraryLoadsInWebContent: true
-          NSAllowsLocalNetworking: true
-        NSLocalNetworkUsageDescription: Remote Codex connects to your relay on the local network.
-        NSCameraUsageDescription: Take a photo to attach to your prompt.
-        NSPhotoLibraryUsageDescription: Select images to attach to your prompt.
-        WKAppBoundDomains: [app.example.com, localhost, 127.0.0.1]
-        UILaunchScreen: {}
-        UIBackgroundModes:
-          - fetch
-          - processing
-        BGTaskSchedulerPermittedIdentifiers:
-          - com.remotecodex.app.watch
-    entitlements:
-      path: RemoteCodex/RemoteCodex.entitlements
-      properties:
-        aps-environment: $(APS_ENVIRONMENT)
+        PRODUCT_NAME: Pockymoe
+        CODE_SIGN_ENTITLEMENTS: $(POCKYMOE_APP_ENTITLEMENTS)
+    dependencies:
+      - target: PockymoeLiveActivity
+  PockymoeLiveActivity:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: LiveActivity
+        excludes: ["*.plist", "*.entitlements"]
+      - path: Shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(POCKYMOE_WIDGET_BUNDLE_ID)
+        GENERATE_INFOPLIST_FILE: false
+        INFOPLIST_FILE: LiveActivity/Info.plist
+        CODE_SIGN_ENTITLEMENTS: $(POCKYMOE_WIDGET_ENTITLEMENTS)
+        SKIP_INSTALL: true
+        APPLICATION_EXTENSION_API_ONLY: true
   RemoteCodexUITests:
     type: bundle.ui-testing
     platform: iOS
-    sources:
-      - path: RemoteCodexUITests
+    sources: [RemoteCodexUITests]
     settings:
       base:
         GENERATE_INFOPLIST_FILE: true
         PRODUCT_BUNDLE_IDENTIFIER: com.remotecodex.app.uitests
         TEST_TARGET_NAME: RemoteCodex
-        CODE_SIGNING_ALLOWED: "YES"
-        CODE_SIGNING_REQUIRED: "NO"
-        CODE_SIGN_IDENTITY: ""
     dependencies:
       - target: RemoteCodex
 schemes:
@@ -80,6 +85,5 @@ schemes:
         RemoteCodex: all
         RemoteCodexUITests: [test]
     test:
-      targets:
-        - RemoteCodexUITests
+      targets: [RemoteCodexUITests]
       gatherCoverageData: false

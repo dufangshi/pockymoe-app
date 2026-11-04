@@ -28,6 +28,13 @@ xcuserdata/
 
 __pycache__/
 
+# Swift package test products and local build logs
+ios/.build/
+.local-*.log
+
 # Local task evidence and pnpm cache
 .scratch/
 .pnpm-store/
+
+# Private iOS deployment allowlist
+ios/Local.xcconfig

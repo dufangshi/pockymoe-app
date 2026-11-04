@@ -34,7 +34,15 @@ Back navigation matches the web product header:
 - Account → previous screen
 - Guide / portal → Relay home
 
+## iOS thin shell
+
+See [iOS shell and ActivityKit](docs/ios-shell.md) and the approved
+[mobile design](docs/mobile-design.zh.md). The iOS target now uses the
+`window.pockymoeHost` contract; the older mobile notes below describe Android
+and the retired iOS implementation, not verification of the new shell.
+
 Android now uses the thin `pockymoeHost` shell and one account Live Update; see [Android shell](docs/android-shell.md) for the contract, system limitations and isolated E2E commands.
+
 
 ## Login
 
@@ -49,7 +57,8 @@ While signed in, the app reads the relay's durable account completion feed. It n
 
 For iOS production pushes, configure `REMOTE_CODEX_APNS_KEY_PATH` (a protected `.p8` file), `REMOTE_CODEX_APNS_KEY_ID`, `REMOTE_CODEX_APNS_TEAM_ID`, and `REMOTE_CODEX_APNS_TOPIC` (the signed bundle identifier) on the relay. Enable Push Notifications for the app's signing profile. Debug uses Apple's sandbox, Release uses production. Tokens register through the authenticated `/relay/account/notifications/native` endpoint and deliveries are revoked with the account session. Push payloads contain routing identifiers and generic completion copy, not decrypted prompts or responses.
 
-iOS uses real Service Workers through `WKAppBoundDomains`. For a deployment such as `app.example.com`, add the required hosts to `ios/project.yml` and regenerate the project. Keep the generated allowlist aligned with your deployment. Native file exports currently have a 32 MB limit and show an error above it.
+iOS uses real Service Workers through `WKAppBoundDomains`. Supply Web hosts in the ignored `ios/Local.xcconfig`; Release fails without that setting. Hosts are readable in the distributed app. See [the iOS shell guide](docs/ios-shell.md). Native file exports have a 32 MB limit.
+
 
 ## Requirements
 
