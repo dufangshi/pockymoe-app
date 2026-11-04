@@ -195,7 +195,8 @@ jobs:
             pnpm exec playwright test test/connection.e2e.ts test/startup.e2e.ts test/shutdown.e2e.ts test/shell.e2e.ts --grep 'typed relay|cold-window readiness|startup|shutdown|one language across surfaces \(classic light\)|split origins bridge' --project=electron --reporter=list
           }
       - name: Build contact sheets from original captures
-        if: always()
+        if: always() && env.CHECK_MODE == 'full'
+        continue-on-error: true
         run: $PSNativeCommandUseErrorActionPreference = $true; node scripts/contact-sheets.mjs "$env:POCKYMOE_DESKTOP_EVIDENCE"
       - name: Stop only the recorded disposable backend
         if: always()
