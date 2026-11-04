@@ -378,7 +378,10 @@ changes run the real Windows NSIS A-to-B roundtrip; Android changes run Android
 unit tests. The optional `full-ci` label or manual `workflow_dispatch` with
 `validation=full` runs all four Windows scale/locale lanes and the complete Electron
 suite. The old desktop/update/pet workflows remain manual-only for explicit full
-validation. Evidence/logs are uploaded even on failure. The dated quarantine list is `test/quarantine.json`: each test has a reason and
+validation. Evidence/logs are uploaded even on failure. Electron and electron-builder public
+downloads use an OS/architecture/lockfile cache, in addition to pnpm store caching.
+PR caches remain scoped to their PR refs; signed packages, fixture profiles, keys
+and release artifacts are never cached or promoted across trust boundaries. The dated quarantine list is `test/quarantine.json`: each test has a reason and
 an expiry seven days after addition. A separate non-required Windows job executes
 the listed tests and uploads JUnit, traces and screenshots; its failure is visible
 but is excluded from `Client checks complete`. Expired entries emit warnings.
