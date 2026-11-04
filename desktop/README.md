@@ -360,17 +360,16 @@ artifacts require a full run.
 
 ### Windows build and acceptance
 
-`../.github/workflows/desktop-windows.yml` runs on `windows-latest` x64 for desktop
-pull requests and manual dispatch. It installs frozen dependencies, typechecks,
-runs all unit tests, builds the unpacked application and runs all Electron
-Playwright suites against `release/win-unpacked/Pockymoe.exe`. Two jobs request
-100% and 150% scale; acceptance annotations record actual renderer pixel ratios.
-Classic, Plum Pocket and Terminal are captured in light/dark with native material
-and forced fallback. Set `POCKYMOE_WINDOWS_GLASS=solid` before launch if real-device
-QA finds Acrylic corner artifacts or flicker; other values keep the native preference. Evidence/logs are
-uploaded even on failure. The voice release-download test is enabled, exercising
-model extraction and actual synthesis through the packaged native addon.
-There are no signing credentials or publish/release steps.
+`.github/workflows/client-checks.yml` is the required client aggregate for pull
+requests and the final merged SHA on main. It classifies the diff before starting product jobs: documentation and
+version-only changes run the allowlist and address guard; desktop or pet changes
+run one Windows lane with the relevant Playwright specification; updater/installer
+changes run the real Windows NSIS A-to-B roundtrip; Android changes run Android
+unit tests. The optional `full-ci` label or manual `workflow_dispatch` with
+`validation=full` runs all four Windows scale/locale lanes and the complete Electron
+suite. The old desktop/update/pet workflows remain manual-only for explicit full
+validation. Evidence/logs are uploaded even on failure. There are no
+signing credentials or publish/release steps.
 
 From a fresh Windows clone, with Node 24 and pnpm 10 installed (PowerShell):
 

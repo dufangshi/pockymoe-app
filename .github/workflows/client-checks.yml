@@ -1,0 +1,312 @@
+name: Client checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+  workflow_dispatch:
+    inputs:
+      validation:
+        description: Run the selected path tier or the full four-lane matrix
+        required: true
+        default: auto
+        type: choice
+        options: [auto, full]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: client-checks-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  changes:
+    name: Select client checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      tier: ${{ steps.classify.outputs.tier }}
+      unit: ${{ steps.classify.outputs.unit }}
+      mode: ${{ steps.classify.outputs.mode }}
+      version_only: ${{ steps.classify.outputs.version_only }}
+      windows: ${{ steps.classify.outputs.windows }}
+      windows_matrix: ${{ steps.classify.outputs.windows_matrix }}
+      updater: ${{ steps.classify.outputs.updater }}
+      pet_media: ${{ steps.classify.outputs.pet_media }}
+      android: ${{ steps.classify.outputs.android }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Validate classifier regressions
+        run: python3 -m unittest discover -s scripts -p test_classify_client_change.py
+      - name: Classify changed paths
+        id: classify
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before || github.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          FULL_CI: ${{ github.event_name == 'workflow_dispatch' && inputs.validation == 'full' || contains(toJSON(github.event.pull_request.labels), 'full-ci') }}
+        run: |
+          set -euo pipefail
+          args=()
+          if [ "$FULL_CI" = true ]; then args+=(--full); fi
+          classification="$(python3 scripts/classify-client-change.py "$BASE_SHA" "$HEAD_SHA" "${args[@]}")"
+          python3 - "$classification" >> "$GITHUB_OUTPUT" <<'PY'
+          import json, sys
+          data = json.loads(sys.argv[1])
+          for key, value in data.items():
+              if isinstance(value, (dict, list, bool)):
+                  value = json.dumps(value, separators=(',', ':'))
+              print(f'{key}={value}')
+          PY
+          echo "tier=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["tier"])' "$classification")" >> "$GITHUB_STEP_SUMMARY"
+
+  production-address:
+    name: Production address guard
+    needs: changes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python scripts/check-production-address.py
+
+  version-only:
+    name: Version-only allowlist
+    needs: changes
+    if: needs.changes.outputs.version_only == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Recheck the exact version field allowlist
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before || github.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: python3 scripts/classify-client-change.py "$BASE_SHA" "$HEAD_SHA" --assert-version-only
+
+  unit:
+    name: Relevant desktop unit checks
+    needs: changes
+    if: needs.changes.outputs.unit == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: desktop
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: desktop/pnpm-lock.yaml
+      - name: Install frozen dependencies
+        run: $PSNativeCommandUseErrorActionPreference = $true; pnpm install --frozen-lockfile
+      - name: Typecheck and unit tests
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          pnpm typecheck
+          pnpm vitest run
+
+  windows:
+    name: Windows selected (${{ matrix.scale }}, ${{ matrix.locale }})
+    needs: changes
+    if: needs.changes.outputs.windows == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.changes.outputs.windows_matrix) }}
+    defaults:
+      run:
+        working-directory: desktop
+        shell: pwsh
+    env:
+      POCKYMOE_TEST_SYSTEM_LOCALE: ${{ matrix.locale }}
+      POCKYMOE_REAL_WEB: '1'
+      PYTHONUTF8: '1'
+      DESKTOP_E2E_RELEASE_WEB: '1'
+      DESKTOP_E2E_BIN: ${{ github.workspace }}/.local/desktop-runtime-v0.13.44/remote-codex-win32-x64-msvc-cli.exe
+      DESKTOP_E2E_WEB_DIST: ${{ github.workspace }}/.local/desktop-web-source/pockymoe/apps/supervisor-web/dist
+      POCKYMOE_DESKTOP_SCALE: ${{ matrix.scale }}
+      POCKYMOE_DESKTOP_EVIDENCE: ${{ github.workspace }}/desktop/evidence/scale-${{ matrix.scale }}-${{ matrix.locale }}
+      POCKYMOE_PACKAGED_EXECUTABLE: ${{ github.workspace }}/desktop/release/win-unpacked/Pockymoe.exe
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      POCKYMOE_VOICE_DOWNLOAD: '1'
+      CHECK_MODE: ${{ needs.changes.outputs.mode }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: desktop/pnpm-lock.yaml
+      - name: Install dependencies
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          New-Item -ItemType Directory -Force $env:POCKYMOE_DESKTOP_EVIDENCE | Out-Null
+          pnpm install --frozen-lockfile
+      - name: Build unpacked x64 app
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          pnpm build
+          pnpm exec electron-builder --win --x64 --dir --publish never
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Guard packaged app contents
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          node scripts/extract-asar.cjs release/win-unpacked/resources/app.asar release/scan-asar
+          python ../scripts/check-production-address.py release/scan-asar release/win-unpacked/resources/app.asar release/win-unpacked/resources/app.asar.unpacked out
+      - name: Build pinned Web and start isolated release runtime
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          pnpm exec playwright install chromium
+          python ../scripts/desktop-fixture/prepare-release.py
+          python ../scripts/desktop-fixture/prepare-web.py
+          python ../scripts/desktop-fixture/backend.py start
+      - name: Run the selected Electron specification
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          if ($env:CHECK_MODE -eq 'full') {
+            pnpm exec playwright test --project=electron --reporter=list
+          } elseif ($env:CHECK_MODE -eq 'pet') {
+            pnpm exec playwright test test/petWork.e2e.ts --grep 'clicking the pet|working:|summary' --project=electron --reporter=list
+          } elseif ($env:CHECK_MODE -eq 'desktop-pet') {
+            pnpm exec playwright test test/petWork.e2e.ts test/shell.e2e.ts --grep 'clicking the pet|working:|summary|one language across surfaces \(classic light\)|split origins bridge' --project=electron --reporter=list
+          } else {
+            pnpm exec playwright test test/connection.e2e.ts test/startup.e2e.ts test/shutdown.e2e.ts test/shell.e2e.ts --grep 'typed relay|cold-window readiness|startup|shutdown|one language across surfaces \(classic light\)|split origins bridge' --project=electron --reporter=list
+          }
+      - name: Build contact sheets from original captures
+        if: always()
+        run: $PSNativeCommandUseErrorActionPreference = $true; node scripts/contact-sheets.mjs "$env:POCKYMOE_DESKTOP_EVIDENCE"
+      - name: Stop only the recorded disposable backend
+        if: always()
+        run: $PSNativeCommandUseErrorActionPreference = $true; python ../scripts/desktop-fixture/backend.py stop
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: client-windows-${{ matrix.scale }}-${{ matrix.locale }}-${{ github.run_id }}
+          path: desktop/evidence/
+          if-no-files-found: warn
+
+  updater:
+    name: Windows x64 real NSIS A-to-B update
+    needs: changes
+    if: needs.changes.outputs.updater == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: desktop
+        shell: pwsh
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      POCKYMOE_UPDATE_EVIDENCE: ${{ github.workspace }}/desktop/evidence/update-roundtrip
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: desktop/pnpm-lock.yaml
+      - run: $PSNativeCommandUseErrorActionPreference = $true; pnpm install --frozen-lockfile
+      - run: $PSNativeCommandUseErrorActionPreference = $true; node test/update-roundtrip.mjs --self-test
+      - run: $PSNativeCommandUseErrorActionPreference = $true; node test/update-roundtrip.mjs --diagnostics-only
+      - run: $PSNativeCommandUseErrorActionPreference = $true; node test/update-roundtrip.mjs
+      - if: always()
+        run: $PSNativeCommandUseErrorActionPreference = $true; git diff --exit-code -- src/main/index.ts package.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: client-windows-update-${{ github.run_id }}
+          path: desktop/evidence/update-roundtrip/
+          if-no-files-found: warn
+
+  pet-media:
+    name: Pet media acceptance
+    needs: changes
+    if: needs.changes.outputs.pet_media == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: desktop
+        shell: pwsh
+    env:
+      POCKYMOE_DESKTOP_EVIDENCE: ${{ github.workspace }}/.local/pet-media
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: desktop/pnpm-lock.yaml
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: $PSNativeCommandUseErrorActionPreference = $true; pnpm install --frozen-lockfile
+      - name: Install the local test encoder
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          python -m pip install imageio-ffmpeg==0.8.1
+          $encoder = python -I -c "import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())"
+          "POCKYMOE_FFMPEG=$encoder" >> $env:GITHUB_ENV
+      - run: $PSNativeCommandUseErrorActionPreference = $true; pnpm typecheck
+      - run: $PSNativeCommandUseErrorActionPreference = $true; pnpm exec vitest run --config src/pet/vitest.config.ts
+      - run: $PSNativeCommandUseErrorActionPreference = $true; pnpm exec electron-vite build --config src/pet/tools/electron.config.ts
+      - run: $PSNativeCommandUseErrorActionPreference = $true; pnpm exec playwright test test/petMedia.e2e.ts --project=electron --reporter=list
+
+  android:
+    name: Android unit checks
+    needs: changes
+    if: needs.changes.outputs.android == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Run Android unit tests
+        working-directory: android
+        run: ./gradlew --no-daemon :app:testDebugUnitTest
+
+  result:
+    name: Client checks complete
+    needs: [changes, production-address, version-only, unit, windows, updater, pet-media, android]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require selected checks to succeed
+        env:
+          RESULTS: ${{ join(needs.*.result, ',') }}
+        run: |
+          case ",$RESULTS," in
+            *,failure,*|*,cancelled,*) echo "Selected client check failed: $RESULTS"; exit 1 ;;
+          esac
