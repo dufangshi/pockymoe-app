@@ -10,9 +10,9 @@ on:
       validation:
         description: Run the selected path tier or the full four-lane matrix
         required: true
-        default: auto
+        default: full
         type: choice
-        options: [auto, full]
+        options: [full]
 
 permissions:
   contents: read
@@ -52,7 +52,7 @@ jobs:
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before || github.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-          FULL_CI: ${{ github.event_name == 'workflow_dispatch' && inputs.validation == 'full' || contains(toJSON(github.event.pull_request.labels), 'full-ci') }}
+          FULL_CI: ${{ github.event_name == 'workflow_dispatch' && inputs.validation == 'full' || contains(github.event.pull_request.labels.*.name, 'full-ci') }}
         run: |
           set -euo pipefail
           args=()
