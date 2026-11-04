@@ -3,11 +3,12 @@ import { createRequire } from 'node:module';
 
 // Use the lockfile-installed binary; Playwright's implicit download can consume
 // the entire behavior-test deadline on a cold hosted runner.
-const installedElectron = createRequire(import.meta.url)('electron') as string;
 import { mkdtempSync, rmSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve, join } from 'node:path';
 import { generateMediaFixture } from './petMediaFixture';
+
+const installedElectron = createRequire(resolve('package.json'))('electron') as string;
 
 test('synthetic VP9 alpha streams through the pet protocol and switches without blanking', async () => {
   test.skip(!process.env.POCKYMOE_FFMPEG, 'Dedicated pet-media CI supplies the local synthetic encoder');
