@@ -96,6 +96,10 @@ final class ShellController: UIViewController, WKNavigationDelegate, WKUIDelegat
         web.alpha = 0
         web.navigationDelegate = self; web.uiDelegate = self
         web.allowsLinkPreview = false
+        // Keep the WebView's native history gesture available as a fallback;
+        // the explicit edge recognizer below sends `back` first so the Web
+        // page can close menus/sheets before consuming in-app history.
+        web.allowsBackForwardNavigationGestures = true
         web.scrollView.bounces = false
         web.scrollView.delegate = self
         NotificationCenter.default.addObserver(self, selector: #selector(keyboardChanged(_:)), name: UIResponder.keyboardWillChangeFrameNotification, object: nil)
@@ -109,7 +113,10 @@ final class ShellController: UIViewController, WKNavigationDelegate, WKUIDelegat
         let height = web.heightAnchor.constraint(equalToConstant: view.bounds.height)
         height.isActive = true; fullHeight = height
         let edge = UIScreenEdgePanGestureRecognizer(target: self, action: #selector(backGesture(_:)))
-        edge.edges = .left; web.addGestureRecognizer(edge)
+        edge.edges = .left
+        edge.cancelsTouchesInView = false
+        edge.isEnabled = true
+        web.addGestureRecognizer(edge)
         routeObservation = web.observe(\.url, options: [.new]) { [weak self] _, _ in
             Task { @MainActor in self?.rememberRoute() }
         }

@@ -85,8 +85,11 @@ The page/Relay owns the proof-bound OAuth handoff; native session data never ent
 the page. Provider credentials and a real provider round trip are separate from
 local sign-in acceptance.
 
-The page owns routes, menus and back ordering. Mobile Preferences and pet methods
-are no-ops. Native exports are limited to 32 MiB. Safe-area geometry reaches CSS
+The page owns routes, menus and back ordering. The shell keeps the left-edge
+gesture enabled and sends the page-owned `back` command before any in-app
+history fallback; at the root with no page history the command is consumed
+without leaving the app. Mobile Preferences and pet methods are no-ops. Native
+exports are limited to 32 MiB. Safe-area geometry reaches CSS
 `env(safe-area-inset-*)` from the physical window; the shell adds viewport-fit=cover and disables scroll inset adjustment. The bottom CSS safe area becomes zero while the keyboard covers the home indicator, and restores when it closes. The WebView height is pinned to the physical window even if SwiftUI proposes a smaller controller. WebKit updates its visual viewport; its automatic outer-scroll panning is suppressed while the keyboard is present, leaving DOM scrollers responsible for focus visibility. `web/ios-viewport.js` supplies safe-area padding to the Web auth surface and full-screen settings sheet: Safari normally supplies its outer chrome, while thread navigation and the map already consume their own insets. It does not change product controls. The loading surface uses the Web’s real logo over the last page background (system light/dark on a fresh install), then fades in the first painted Web frame. Appearance uses the
 page's supplied background, including WebKit-to-sRGB conversion of CSS Color 4
 values, so the next launch does not paint an unrelated root-variable color.
