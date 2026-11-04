@@ -203,7 +203,7 @@ async function selfTest() {
     assert.equal(verify(null, Buffer.from(canonical({ ...records[0], size: records[0].size + 1 })), publicKey, Buffer.from(records[0].signature, 'base64')), false);
     assert.equal(records[0].size, statSync(file).size);
     assert.equal(release.assets[0].name, fileName);
-    if (process.platform === 'win32') seedShortcut(file, join(temporary, 'probe.lnk'), fixtureEnvironment());
+    if (process.platform === 'win32' && process.argv.includes('--shortcut-probe')) seedShortcut(file, join(temporary, 'probe.lnk'), fixtureEnvironment());
     console.log('Updater fixture serialization/signature self-test passed (no installer executed)');
   } finally { rmSync(temporary, { recursive: true, force: true }); }
 }
@@ -384,7 +384,7 @@ async function roundtrip() {
   }
 }
 
-if (process.argv.includes('--self-test')) await selfTest();
+if (process.argv.includes('--self-test') || process.argv.includes('--shortcut-probe')) await selfTest();
 else if (process.argv.includes('--diagnostics-only')) {
   assert.equal(process.platform, 'win32');
   const evidence = resolve(process.env.POCKYMOE_UPDATE_EVIDENCE || join(desktop, 'evidence', 'update-roundtrip'));

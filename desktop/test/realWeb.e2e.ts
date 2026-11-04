@@ -5,6 +5,9 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { auditSurface } from './surfaceAudit';
 
+// Login fixture metadata must not be copied into network/DOM traces.
+// Lifecycle, fixed stage names, JUnit and post-login screenshots remain visible.
+test.use({ trace: 'off' });
 const enabled = process.env.POCKYMOE_REAL_WEB === '1';
 const evidence = join(process.env.POCKYMOE_DESKTOP_EVIDENCE || join(tmpdir(), 'pockymoe-desktop-evidence'), 'real-web');
 for (const surface of ['main', 'map', 'devices'] as const) for (const pack of ['classic', 'plum-pocket', 'terminal']) for (const mode of ['light', 'dark'] as const) test(`real Web ${surface} (${pack} ${mode})`, async () => {
@@ -50,7 +53,7 @@ for (const surface of ['main', 'map', 'devices'] as const) for (const pack of ['
     stage = `open ${surface}`;
     if (surface === 'main') {
       const device = fixture.devices[0];
-      await app.evaluate((_electron, path) => { void globalThis.__pockymoeDesktopTest.windows.dispatch({ type: 'navigate', path }); }, `/devices/${device.id}/threads/${device.scenarios.events}`);
+      await app.evaluate((_electron, path) => globalThis.__pockymoeDesktopTest.windows.dispatch({ type: 'navigate', path }), `/devices/${device.id}/threads/${device.scenarios.events}`);
       stage = 'thread navigation URL';
       await expect(page).toHaveURL(new RegExp(`/threads/${device.scenarios.events}`));
       stage = 'thread content';
