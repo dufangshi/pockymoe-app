@@ -43,6 +43,10 @@ jobs:
           fetch-depth: 0
       - name: Validate classifier regressions
         run: python3 -m unittest discover -s scripts -p test_classify_client_change.py
+      - name: Validate publication safety without building or signing
+        run: |
+          python3 scripts/test_release_client.py
+          python3 -m unittest discover -s scripts -p test_required_aggregate.py
       - name: Classify changed paths
         id: classify
         env:
