@@ -2,7 +2,7 @@
   "name": "@pockymoe/desktop",
   "version": "0.3.2",
   "private": true,
-  "description": "Pockymoe desktop client",
+  "description": "Pockymoe desktop client (CI classification proof)",
   "author": "Pockymoe",
   "license": "MIT",
   "main": "out/main/index.js",
