@@ -203,6 +203,16 @@ scripts/release-client.sh 0.3.0 --publish --notes-file /absolute/release-notes.m
 Copy `desktop/release-notes-template.md` when preparing publication notes; it
 includes the short macOS Keychain prompt notice.
 
+`--publish` first requires `Client checks complete` to have succeeded on the
+exact final SHA in the trusted main push workflow, and rechecks immediately
+before publication. The separate quarantine job may fail without blocking this
+aggregate. Missing, pending, failed or unqueryable aggregate results fail closed
+with a clear message. Emergency `--allow-unchecked-ci REASON` bypasses only this
+CI check; the log records the flag, final SHA and reason SHA256 without printing
+arbitrary incident text. All signing, scanning, certificate, three-file and Mac
+launch gates remain mandatory. Each subprocess has a ten-minute timeout and logs
+only the executable name and elapsed seconds, never arguments or credentials.
+
 `--publish` rebuilds and verifies before `gh release create --target <full SHA>
 --latest --notes-file ...`. It never updates an existing release. Each invocation
 requires an empty output folder and refuses extra files rather than deleting

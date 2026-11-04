@@ -7,10 +7,12 @@ from pathlib import Path
 import platform
 import re
 import shutil
+import signal
 import subprocess
 import tempfile
 import time
 import zipfile
+from required_aggregate import require_aggregate
 
 ROOT = Path(__file__).resolve().parent.parent
 DESKTOP = ROOT / 'desktop'
@@ -18,9 +20,24 @@ REPO = 'dufangshi/pockymoe-app'
 
 
 def run(*args, cwd=ROOT, capture=False, env=None):
-    return subprocess.run([str(arg) for arg in args], cwd=cwd, check=True,
-                          stdout=subprocess.PIPE if capture else None,
-                          stderr=subprocess.PIPE if capture else None, env=env).stdout
+    started = time.monotonic()
+    command = [str(arg) for arg in args]
+    child = subprocess.Popen(command, cwd=cwd, env=env, start_new_session=True,
+                             stdout=subprocess.PIPE if capture else None,
+                             stderr=subprocess.PIPE if capture else None)
+    try:
+        try:
+            output, error = child.communicate(timeout=600)
+        except subprocess.TimeoutExpired:
+            os.killpg(child.pid, signal.SIGKILL)
+            child.communicate()
+            raise RuntimeError(f"Release step {Path(command[0]).name} exceeded ten minutes; its owned process group was stopped") from None
+        if child.returncode:
+            raise subprocess.CalledProcessError(child.returncode, command, output, error)
+        return output
+    finally:
+        # Never log command arguments, environments or signing subjects.
+        print(f"Release step {Path(command[0]).name}: {time.monotonic() - started:.2f}s", flush=True)
 
 
 def git(*args):
@@ -221,15 +238,20 @@ def main():
     parser.add_argument('--output', type=Path, help='Must be empty; defaults to .local/client-release/<version>')
     parser.add_argument('--validate', action='store_true', help='Build/test a clean candidate branch, never publish; main/origin gate is retained for normal release commands')
     parser.add_argument('--publish', action='store_true', help='Explicitly build, verify, then publish from clean main matching origin/main')
+    parser.add_argument('--allow-unchecked-ci', metavar='REASON', help='Emergency publication override for the required CI aggregate; logged with final SHA and a reason digest')
     parser.add_argument('--notes-file', type=Path, help='Required existing release notes file for --publish')
     args = parser.parse_args()
     if platform.system() != 'Darwin' or platform.machine() != 'arm64':
         parser.error('Run on the Apple silicon Mac with the local Android signing key')
+    if args.allow_unchecked_ci is not None and not args.publish:
+        parser.error('--allow-unchecked-ci applies only to --publish')
     if args.validate and args.publish:
         parser.error('--validate cannot publish')
     if args.publish and (not args.notes_file or not args.notes_file.is_file()):
         parser.error('--publish requires --notes-file pointing to an existing file')
     sha = source_gate(args.validate)
+    if args.publish:
+        require_aggregate(REPO, sha, args.allow_unchecked_ci)
     code = versions(args.version)
     output = (args.output or ROOT / '.local/client-release' / args.version).resolve()
     output.mkdir(parents=True, exist_ok=True)
@@ -262,6 +284,7 @@ def main():
     run('node', ROOT / 'scripts/update-signatures.cjs', 'verify', args.version, output, notes, public_key)
     print(f'Metadata: {notes}\nVerification public key: {public_key}')
     if args.publish:
+        require_aggregate(REPO, sha, args.allow_unchecked_ci)
         run('gh', 'release', 'create', f'v{args.version}', '--repo', REPO, '--target', sha,
             '--latest', '--notes-file', notes, *(output / name for name in asset_names(args.version)))
     else:
@@ -271,6 +294,6 @@ def main():
 if __name__ == '__main__':
     try:
         main()
-    except (RuntimeError, subprocess.CalledProcessError) as error:
+    except (RuntimeError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
         # Subprocess output can include signing subjects or credentials: do not echo it.
         raise SystemExit(str(error) if isinstance(error, RuntimeError) else 'Release command failed; no release was published')

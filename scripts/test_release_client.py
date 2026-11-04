@@ -205,8 +205,13 @@ class CommandTests(unittest.TestCase):
 
             argv = ['release-client.sh', '1.2.3', '--output', str(output), '--notes-file', str(notes), *arguments]
             source = [SHA, OTHER_SHA] if changed_source else [SHA, SHA]
-            with patch('sys.argv', argv), patch.object(release.platform, 'system', return_value='Darwin'), patch.object(release.platform, 'machine', return_value='arm64'), patch.object(release, 'source_gate', side_effect=source) as gate, patch.object(release, 'versions', return_value=8), patch.object(release, 'build', side_effect=build), patch.object(release, 'run', side_effect=run), patch.object(release, 'scan') as scan, contextlib.redirect_stdout(io.StringIO()):
+            with patch('sys.argv', argv), patch.object(release.platform, 'system', return_value='Darwin'), patch.object(release.platform, 'machine', return_value='arm64'), patch.object(release, 'source_gate', side_effect=source) as gate, patch.object(release, 'require_aggregate') as aggregate, patch.object(release, 'versions', return_value=8), patch.object(release, 'build', side_effect=build), patch.object(release, 'run', side_effect=run), patch.object(release, 'scan') as scan, contextlib.redirect_stdout(io.StringIO()):
                 release.main()
+            if '--publish' in arguments and not changed_source:
+                self.assertEqual(aggregate.call_count, 2)
+                aggregate.assert_called_with(release.REPO, SHA, None)
+            elif '--publish' not in arguments:
+                aggregate.assert_not_called()
             prepared = (root / ('1.2.3-release-notes.md' if '--publish' in arguments else 'output-validation-notes.md')).read_text()
             return prepared, calls, gate.call_args_list, scan.call_args_list
 
@@ -251,6 +256,18 @@ class CommandTests(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 release.main()
             gate.assert_not_called()
+
+
+class RequiredPublicationTests(unittest.TestCase):
+    def test_red_aggregate_stops_before_build_or_signing(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            notes = Path(temporary) / 'notes.md'
+            notes.write_text('release notes')
+            with patch('sys.argv', ['release-client.sh', '1.2.3', '--publish', '--notes-file', str(notes)]), patch.object(release.platform, 'system', return_value='Darwin'), patch.object(release.platform, 'machine', return_value='arm64'), patch.object(release, 'source_gate', return_value=SHA), patch.object(release, 'require_aggregate', side_effect=RuntimeError('Publication blocked: aggregate is red')), patch.object(release, 'build') as build, patch.object(release, 'run') as run:
+                with self.assertRaisesRegex(RuntimeError, 'Publication blocked'):
+                    release.main()
+                build.assert_not_called()
+                run.assert_not_called()
 
 
 class ValidationSigningTests(unittest.TestCase):
