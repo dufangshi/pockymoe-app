@@ -61,5 +61,61 @@
     "reason": "PowerShell COM fixture startup can exceed the probe deadline",
     "added": "2026-11-04",
     "expires": "2026-11-11"
+  },
+  {
+    "kind": "playwright",
+    "test": "clicking the pet lists what is running and opens it",
+    "reason": "Intermittent command observation after native focus/theme captures; recent history and full run 41763216136; root cause still under investigation",
+    "added": "2026-11-04",
+    "expires": "2026-11-11"
+  },
+  {
+    "kind": "playwright",
+    "test": "with nothing running, the click says so",
+    "reason": "Same-SHA rerun recovered; empty-state observation shares the native window/fixture lifecycle",
+    "added": "2026-11-04",
+    "expires": "2026-11-11"
+  },
+  {
+    "kind": "playwright",
+    "test": "compact surfaces: four 28px rows keep metadata adjacent and open the remaining activities",
+    "reason": "Same-SHA lane rerun recovered; compact panel visibility/focus observation under investigation",
+    "added": "2026-11-04",
+    "expires": "2026-11-11"
+  },
+  {
+    "kind": "playwright",
+    "test": "review: compact statuses retain the running ring and waiting bubble at 10px",
+    "reason": "Same-SHA lane rerun recovered; rendered compact status sampling under investigation",
+    "added": "2026-11-04",
+    "expires": "2026-11-11"
+  },
+  {
+    "kind": "playwright",
+    "test": "summary: marks and explains an upstream on a device that needs updating",
+    "reason": "Earlier same-SHA rerun recovered; preferences fixture discovery lifecycle under investigation",
+    "added": "2026-11-04",
+    "expires": "2026-11-11"
+  },
+  {
+    "kind": "playwright",
+    "test": "summary: falls back to saying it finished when nothing is selected, and has no address field",
+    "reason": "Observed intermittent Windows preferences fixture failure; deterministic summary unit coverage remains required",
+    "added": "2026-11-04",
+    "expires": "2026-11-11"
+  },
+  {
+    "kind": "playwright",
+    "test": "update closes every window only after consent and preserves the app on native unload veto",
+    "reason": "Intermittent native-window lifecycle acceptance; updater unit checks and the genuine NSIS roundtrip remain required",
+    "added": "2026-11-04",
+    "expires": "2026-11-11"
+  },
+  {
+    "kind": "playwright",
+    "test": "custom pickers support keyboard, pet thumbnails/credits and recent quick targets",
+    "reason": "Intermittent native picker focus acceptance; ordinary local-window behavior checks remain required",
+    "added": "2026-11-04",
+    "expires": "2026-11-11"
   }
 ]

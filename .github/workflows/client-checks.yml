@@ -190,9 +190,9 @@ jobs:
           } elseif ($env:CHECK_MODE -eq 'pet') {
             pnpm exec playwright test test/petWork.e2e.ts --grep 'clicking the pet|working:|summary' --project=electron --reporter=list
           } elseif ($env:CHECK_MODE -eq 'desktop-pet') {
-            pnpm exec playwright test test/petWork.e2e.ts test/shell.e2e.ts --grep 'clicking the pet|working:|summary|one language across surfaces \(classic light\)|split origins bridge' --project=electron --reporter=list
+            pnpm exec playwright test test/petWork.e2e.ts test/shell.e2e.ts test/realWeb.e2e.ts --grep 'real Web main \(classic light\)|clicking the pet|working:|summary|one language across surfaces \(classic light\)|split origins bridge' --project=electron --reporter=list
           } else {
-            pnpm exec playwright test test/connection.e2e.ts test/startup.e2e.ts test/shutdown.e2e.ts test/shell.e2e.ts --grep 'typed relay|cold-window readiness|startup|shutdown|one language across surfaces \(classic light\)|split origins bridge' --project=electron --reporter=list
+            pnpm exec playwright test test/connection.e2e.ts test/startup.e2e.ts test/shutdown.e2e.ts test/shell.e2e.ts test/realWeb.e2e.ts --grep 'real Web main \(classic light\)|typed relay|cold-window readiness|startup|shutdown|one language across surfaces \(classic light\)|split origins bridge' --project=electron --reporter=list
           }
       - name: Build contact sheets from original captures
         if: always() && env.CHECK_MODE == 'full'
@@ -209,24 +209,28 @@ jobs:
           if-no-files-found: warn
 
   quarantine:
-    name: Quarantine (non-required)
+    name: Quarantine (non-required, ${{ matrix.scale }}, ${{ matrix.locale }})
     needs: changes
     if: needs.changes.outputs.unit == 'true'
     runs-on: windows-latest
     timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.changes.outputs.windows_matrix) }}
     defaults:
       run:
         working-directory: desktop
         shell: pwsh
     env:
-      POCKYMOE_TEST_SYSTEM_LOCALE: en-US
+      POCKYMOE_TEST_SYSTEM_LOCALE: ${{ matrix.locale }}
       POCKYMOE_REAL_WEB: '1'
       PYTHONUTF8: '1'
       DESKTOP_E2E_RELEASE_WEB: '1'
       DESKTOP_E2E_BIN: ${{ github.workspace }}/.local/desktop-runtime-v0.13.44/remote-codex-win32-x64-msvc-cli.exe
       DESKTOP_E2E_WEB_DIST: ${{ github.workspace }}/.local/desktop-web-source/pockymoe/apps/supervisor-web/dist
-      POCKYMOE_DESKTOP_SCALE: 1
-      POCKYMOE_DESKTOP_EVIDENCE: ${{ github.workspace }}/desktop/evidence/scale-1-en-US
+      POCKYMOE_DESKTOP_SCALE: ${{ matrix.scale }}
+      POCKYMOE_DESKTOP_EVIDENCE: ${{ github.workspace }}/desktop/evidence/quarantine-${{ matrix.scale }}-${{ matrix.locale }}
       POCKYMOE_PACKAGED_EXECUTABLE: ${{ github.workspace }}/desktop/release/win-unpacked/Pockymoe.exe
       CSC_IDENTITY_AUTO_DISCOVERY: 'false'
       POCKYMOE_VOICE_DOWNLOAD: '1'
@@ -283,7 +287,7 @@ jobs:
       - name: Run quarantined Electron tests
         id: quarantined_electron
         continue-on-error: true
-        run: pnpm exec playwright test test/petWork.e2e.ts test/shell.e2e.ts test/realWeb.e2e.ts --project=electron --reporter=list,junit
+        run: pnpm exec playwright test --project=electron --reporter=list,junit
       - name: Build contact sheets from original captures
         if: always()
         continue-on-error: true
@@ -294,7 +298,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: quarantine-${{ github.run_id }}
+          name: quarantine-${{ matrix.scale }}-${{ matrix.locale }}-${{ github.run_id }}
           path: desktop/evidence/
           if-no-files-found: warn
 
