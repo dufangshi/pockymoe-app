@@ -457,3 +457,5 @@ async function decodeImage(window: BrowserWindow, bytes: Buffer): Promise<boolea
   const url = `data:image/webp;base64,${bytes.toString('base64')}`;
   try { return await window.webContents.executeJavaScript(`(async () => { const image = new Image(); image.src = ${JSON.stringify(url)}; try { await image.decode(); return image.naturalWidth === ${dimensions.width} && image.naturalHeight === ${dimensions.height}; } catch { return false; } })()`); } catch { return false; }
 }
+
+// CI selection proof: pet changes use the selected Windows lane.
