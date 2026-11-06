@@ -33,13 +33,17 @@ export function smoothSpeech(previous: number, rms: number, elapsed: number): nu
   return previous + (rms - previous) * (1 - Math.exp(-Math.max(0, elapsed) / (rms > previous ? .06 : .12)));
 }
 export function speechPlaying(): boolean { return speech !== null; }
-export function speechMouth(now: number): 0 | 1 | 2 {
+export function speechLevel(now: number): number {
   if (!speech || !analyser || !samples) return 0;
   analyser.getFloatTimeDomainData(samples);
   const rms = Math.sqrt(samples.reduce((sum, value) => sum + value * value, 0) / samples.length);
   envelope = smoothSpeech(envelope, rms, sampledAt ? (now - sampledAt) / 1000 : 0);
   sampledAt = now;
-  return envelope < .018 ? 0 : envelope < .055 ? 1 : 2;
+  return Math.min(1, Math.max(0, (envelope - .008) / .065));
+}
+export function speechMouth(now: number): 0 | 1 | 2 {
+  speechLevel(now);
+  return !speech || envelope < .018 ? 0 : envelope < .055 ? 1 : 2;
 }
 /** Decodes whatever the voice service produced; a newer alert cuts off the one being read. */
 export async function playSpeech(audio: Uint8Array): Promise<void> {

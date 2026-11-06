@@ -1,3 +1,4 @@
+import type { RivePack } from './rive';
 import { inspectWebM } from './webm';
 import type { PeekArt } from './geometry';
 import type { FaceBox } from './geometry';
@@ -8,10 +9,11 @@ import { basename, join } from 'node:path';
 import { inflateRawSync } from 'node:zlib';
 import { randomUUID } from 'node:crypto';
 
+export const MAX_RIVE_BYTES = 16 * 1024 * 1024;
 export const MAX_PACK_BYTES = 8 * 1024 * 1024;
 const MAX_MANIFEST_BYTES = 16 * 1024;
 export interface SleepingStrip { path: 'sleeping.webp' | 'sleeping.png'; frames: number; durationsMs: number[] }
-export interface PetManifest { id: string; displayName: string; description: string; spritesheetPath: 'spritesheet.png' | 'spritesheet.webp'; spriteVersionNumber?: number; author?: string; license?: string; sourceUrl?: string; licenseUrl?: string; remoteCodex?: { sleeping?: SleepingStrip; peek?: PeekArt; faceBox?: FaceBox; talk?: PetClip; frameScale?: number ; /** A slender figure needs more height than a chibi to read at the same size. */ sizeScale?: number; clipFormat?: ClipFormat; clips?: Partial<Record<ClipState, PetClip[]>> } }
+export interface PetManifest { id: string; displayName: string; description: string; spritesheetPath: 'spritesheet.png' | 'spritesheet.webp'; spriteVersionNumber?: number; author?: string; license?: string; sourceUrl?: string; licenseUrl?: string; remoteCodex?: { rive?: RivePack; sleeping?: SleepingStrip; peek?: PeekArt; faceBox?: FaceBox; talk?: PetClip; frameScale?: number ; /** A slender figure needs more height than a chibi to read at the same size. */ sizeScale?: number; clipFormat?: ClipFormat; clips?: Partial<Record<ClipState, PetClip[]>> } }
 /** One animation drawn from a sheet of frames in `clipFormat`, for art too rich for the atlas's 8 frames a row. */
 export interface PetClip { path: string; frames: number; /** Plays once on entering or leaving its state, outside the cycle. */ role?: 'intro' | 'outro' }
 export interface ClipFormat { mediaType?: 'webm-vp9-alpha'; fps: number; columns: number; width: number; height: number }
@@ -38,6 +40,11 @@ export function parseManifest(data: Buffer): PetManifest {
   if (manifest.spriteVersionNumber !== undefined && ![1, 2].includes(manifest.spriteVersionNumber as number)) fail('spriteVersionNumber must be 1 (8×9) or 2 (8×11)');
   const remoteCodex: PetManifest['remoteCodex'] = {};
   const extensions = manifest.remoteCodex as Record<string, unknown> | undefined;
+  if (extensions?.rive !== undefined) {
+    const r = extensions.rive as RivePack;
+    if (!r || r.path !== 'pet.riv' || ![r.artboard, r.stateMachine].every(n => typeof n === 'string' && n.length > 0 && n.length <= 100) || r.viewModel !== undefined) fail('invalid remoteCodex.rive (prototype requires state-machine inputs)');
+    remoteCodex.rive = { path: 'pet.riv', artboard: r.artboard, stateMachine: r.stateMachine };
+  }
   const extension = extensions?.sleeping as SleepingStrip | undefined;
   if (extension) {
     if (!['sleeping.webp', 'sleeping.png'].includes(extension.path) || !Number.isInteger(extension.frames) || extension.frames < 1 || extension.frames > 8 || !Array.isArray(extension.durationsMs) || extension.durationsMs.length !== extension.frames || !extension.durationsMs.every(duration => Number.isFinite(duration) && duration >= 100 && duration <= 5000)) fail('invalid remoteCodex.sleeping strip');
@@ -136,6 +143,7 @@ export async function loadPetPack(directory: string): Promise<PetPack> {
   const peekImage = manifest.remoteCodex?.peek ? await safeRead(join(directory, manifest.remoteCodex.peek.path), MAX_PACK_BYTES) : undefined;
   if (peekImage) validatePeek(peekImage, manifest);
   await checkClips(directory, manifest);
+  if (manifest.remoteCodex?.rive) checkRive(await safeRead(join(directory, 'pet.riv'), MAX_RIVE_BYTES));
   if (manifest.remoteCodex?.clipFormat?.mediaType && (await lstat(join(directory, 'pet.json'))).size + image.length + (sleepingImage?.length ?? 0) + (peekImage?.length ?? 0) + (await Promise.all(clipPaths(manifest).map(async p => (await lstat(join(directory, p))).size))).reduce((a, b) => a + b, 0) > MAX_MEDIA_PACK_BYTES) fail('pack exceeds 256 MB');
   return { manifest, image, directory, sleepingImage, peekImage };
 }
@@ -217,7 +225,7 @@ export function unpackPetZip(bytes: Buffer): Map<string, Buffer> {
     const kind = mode & 0xf000;
     if (kind && kind !== 0x8000 && kind !== 0x4000) fail('zip symlinks and special files are not allowed');
     if (flags & 1 || ![0, 8].includes(method)) fail('encrypted or unsupported zip compression');
-    if (size > (/\.webm$/.test(name) ? MAX_MEDIA_CLIP_BYTES : MAX_PACK_BYTES) || (total += size) > MAX_ZIP_BYTES) fail('expanded zip exceeds size limit');
+    if (size > (/\.webm$/.test(name) ? MAX_MEDIA_CLIP_BYTES : /(^|\/)pet\.riv$/.test(name) ? MAX_RIVE_BYTES : MAX_PACK_BYTES) || (total += size) > MAX_ZIP_BYTES) fail('expanded zip exceeds size limit');
     if (localOffset + 30 > centralOffset || bytes.readUInt32LE(localOffset) !== 0x04034b50) fail('invalid local header');
     const localNameLength = bytes.readUInt16LE(localOffset + 26), localExtraLength = bytes.readUInt16LE(localOffset + 28);
     const start = localOffset + 30 + localNameLength + localExtraLength;
@@ -235,13 +243,30 @@ export function unpackPetZip(bytes: Buffer): Map<string, Buffer> {
   if (offset !== end) fail('invalid central directory size');
   return entries;
 }
-export async function importPetPack(source: string, userPetsDirectory: string, decode?: (bytes: Buffer) => boolean | Promise<boolean>, reservedIds: readonly string[] = []): Promise<PetPack> {
+function checkRive(bytes: Buffer): void {
+  if (bytes.length < 8 || bytes.length > MAX_RIVE_BYTES || bytes.toString('ascii', 0, 4) !== 'RIVE') fail('Rive file must have RIVE header and be at most 16 MiB');
+}
+export async function readRive(pack: PetPack): Promise<Buffer | null> {
+  if (!pack.manifest.remoteCodex?.rive) return null;
+  const bytes = await safeRead(join(pack.directory, 'pet.riv'), MAX_RIVE_BYTES); checkRive(bytes); return bytes;
+}
+export async function importPetPack(source: string, userPetsDirectory: string, decode?: (bytes: Buffer) => boolean | Promise<boolean>, reservedIds: readonly string[] = [], verifyRive?: (bytes: Buffer, config: RivePack) => Promise<void>): Promise<PetPack> {
   const stat = await lstat(source);
   if (stat.isSymbolicLink()) fail('symlink sources are not allowed');
   let manifest: PetManifest, image: Buffer, sleepingImage: Buffer | undefined, peekImage: Buffer | undefined;
   const clips = new Map<string, Buffer>();
+  let rive: Buffer | undefined;
   if (stat.isDirectory()) {
     ({ manifest, image, sleepingImage, peekImage } = await loadPetPack(source));
+    if (manifest.remoteCodex?.rive) {
+      rive = await safeRead(join(source, 'pet.riv'), MAX_RIVE_BYTES);
+      const allowed = new Set(['pet.json', manifest.spritesheetPath, 'pet.riv', ...clipPaths(manifest), ...(manifest.remoteCodex.sleeping ? [manifest.remoteCodex.sleeping.path] : []), ...(manifest.remoteCodex.peek ? [manifest.remoteCodex.peek.path] : [])]);
+      for (const entry of await readdir(source, { withFileTypes: true })) {
+        if (entry.isDirectory() && entry.name === 'clips' && clipPaths(manifest).length) {
+          for (const file of await readdir(join(source, 'clips'), { withFileTypes: true })) if (!file.isFile() || !allowed.has(`clips/${file.name}`)) fail('folder must contain only pet.json and the files it declares');
+        } else if (!entry.isFile() || !allowed.has(entry.name)) fail('folder must contain only pet.json and the files it declares');
+      }
+    }
     for (const path of clipPaths(manifest)) clips.set(path, await safeRead(join(source, path), clipLimit(manifest, path)));
   }
   else {
@@ -252,6 +277,7 @@ export async function importPetPack(source: string, userPetsDirectory: string, d
     const root = manifests[0].slice(0, -'pet.json'.length);
     manifest = parseManifest(files.get(manifests[0])!);
     if (!manifest.remoteCodex?.clipFormat?.mediaType && (stat.size > MAX_CLIPS_BYTES + 2 * MAX_PACK_BYTES || [...files.values()].reduce((a, b) => a + b.length, 0) > MAX_CLIPS_BYTES + 2 * MAX_PACK_BYTES)) fail('legacy zip exceeds 176 MB');
+    if (manifest.remoteCodex?.rive) { rive = files.get(root + 'pet.riv'); if (!rive) fail('zip is missing pet.riv'); checkRive(rive); }
     peekImage = manifest.remoteCodex?.peek ? files.get(root + manifest.remoteCodex.peek.path) : undefined;
     if (manifest.remoteCodex?.peek && !peekImage) fail('zip is missing peek art');
     if (peekImage) validatePeek(peekImage, manifest);
@@ -263,7 +289,7 @@ export async function importPetPack(source: string, userPetsDirectory: string, d
       checkClipHeader(clip, manifest.remoteCodex!.clipFormat!, path, Math.max(...declaredClips(manifest).filter(c => c.path === path).map(c => c.frames)));
       clips.set(path, clip);
     }
-    if (!atlas || files.size !== (manifest.remoteCodex?.sleeping ? 3 : 2) + (peekImage ? 1 : 0) + clips.size || manifest.remoteCodex?.sleeping && !sleepingImage) fail('zip must contain only pet.json and the files it declares');
+    if (!atlas || files.size !== (manifest.remoteCodex?.sleeping ? 3 : 2) + (peekImage ? 1 : 0) + (rive ? 1 : 0) + clips.size || manifest.remoteCodex?.sleeping && !sleepingImage) fail('zip must contain only pet.json and the files it declares');
     if (sleepingImage) validateSleeping(sleepingImage, manifest);
     image = atlas;
     validateAtlas(image, manifest);
@@ -272,12 +298,19 @@ export async function importPetPack(source: string, userPetsDirectory: string, d
   if (reservedIds.includes(manifest.id)) fail(`pet id ${manifest.id} is built in; give the pack another id`);
   if (image.length + (sleepingImage?.length ?? 0) > MAX_PACK_BYTES) fail('combined spritesheets exceed 8 MB');
   if (decode && (!await decode(image) || peekImage && !await decode(peekImage) || sleepingImage && !await decode(sleepingImage))) fail('cannot decode spritesheet pixels');
+  if (rive && manifest.remoteCodex?.rive) {
+    checkRive(rive);
+    if (rive.length + image.length + (sleepingImage?.length ?? 0) + (peekImage?.length ?? 0) + [...clips.values()].reduce((n, b) => n + b.length, 0) + Buffer.byteLength(JSON.stringify(manifest)) > MAX_MEDIA_PACK_BYTES) fail('pack exceeds 256 MB');
+    if (!verifyRive) fail('Rive import requires isolated runtime verification');
+    await verifyRive(rive, manifest.remoteCodex.rive);
+  }
   await mkdir(userPetsDirectory, { recursive: true });
   const destination = join(userPetsDirectory, manifest.id), staging = join(userPetsDirectory, `.import-${randomUUID()}`);
   await mkdir(staging);
   try {
     await writeFile(join(staging, 'pet.json'), JSON.stringify(manifest, null, 2));
     await writeFile(join(staging, manifest.spritesheetPath), image);
+    if (rive) await writeFile(join(staging, 'pet.riv'), rive);
     if (sleepingImage && manifest.remoteCodex?.sleeping) await writeFile(join(staging, manifest.remoteCodex.sleeping.path), sleepingImage);
     if (peekImage && manifest.remoteCodex?.peek) await writeFile(join(staging, manifest.remoteCodex.peek.path), peekImage);
     if (clips.size) {

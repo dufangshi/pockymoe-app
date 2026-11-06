@@ -278,3 +278,53 @@ clip canvas. This applies to all four edges and both media formats; the atlas
 is used only for packs/states with no decodable clip. Video decoding pauses on
 frame zero and discards the unused preload while tucked. Dedicated side art
 still covers that held body frame. Alpha hit testing uses the held clip pixels.
+
+### Rive packs (branch prototype)
+
+Rive is optional; the atlas, WebP and VP9-alpha players remain available. Declare:
+
+```json
+{"spritesheetPath":"spritesheet.png","remoteCodex":{"rive":{"path":"pet.riv","artboard":"Pet","stateMachine":"Pet"},"faceBox":[0.25,0.28,0.75,0.64]}}
+```
+
+`spritesheetPath` remains the catalog thumbnail and decode-failure fallback. Rive
+wins over clips while loaded. This prototype uses **state-machine inputs**, not a
+ViewModel: omit `viewModel`. A declared ViewModel is rejected explicitly rather
+than silently binding the wrong interface. Names are case-sensitive, and types
+are checked before installation:
+
+| Input | Type / values |
+| --- | --- |
+| `state` | number: idle=0, running=1, waiting=2, failed=3, review=4, sleeping=5, resting=6 |
+| `complete`, `fail`, `poke`, `dragStart`, `land`, `wave` | trigger; fire once per reaction/drag boundary |
+| `mouth` | number 0–1, from the existing Web Audio RMS, 60 ms attack / 120 ms release |
+| `lookX`, `lookY` | number −1…1, from the controller's existing 100 ms cursor poll |
+| `dragging` | bool |
+| `dock` | number: none=0, left=1, right=2, top=3, bottom=4 |
+
+Completion (`waving` or `jumping`) fires `complete`, failure fires `fail`, clicks
+fire `poke`, and drag boundaries fire `dragStart`/`land`. `wave` is available to
+authored packs and preview; there is no separate wave command in the current UI. Repeated
+reaction epochs replay triggers. Sustained controller mood semantics are unchanged.
+`resting` is available to authoring/preview; automatic random resting selection is
+currently the existing clip sequencer's behavior, not added to the Rive controller.
+
+Only `pet.riv` is accepted, up to 16 MiB. ZIPs and Rive folders must contain exactly
+`pet.json`, its atlas, `pet.riv`, and any declared sleeping/peek/clip files. Existing
+path, symlink, image and ZIP limits still apply. Import requires a test-load in a
+fresh sandboxed renderer with no preload or host bridge. It checks selectors and
+all typed inputs, advances each state, disables asset CDN loading, bounds the
+operation to 15 seconds, then destroys the renderer before atomic installation.
+Rive Scripting is **not filtered out**; imported scripts execute in the runtime's
+sandbox. Script authoring is outside the writer's subset.
+
+`@rive-app/webgl2-advanced` is pinned to **2.49.4**, with bundled local primary and
+fallback WASM. The drawer owns advancement, clearing, transparent WebGL2 rendering
+and a one-pixel `readPixels` immediately after drawing. Canvas backing size follows
+full devicePixelRatio. The existing docked geometry/masks still apply. Tucked
+pets stop time advancement; settled machines stop drawing until inputs or size
+change. Runtime failure keeps the atlas visible.
+
+Writer/schema provenance, rig shape, sample build and preview commands are in
+[`art/tools/rive/README.md`](../../art/tools/rive/README.md). This is a prototype,
+not a published pack-format compatibility promise.

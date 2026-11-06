@@ -17,6 +17,6 @@ export default defineConfig({
   preload: { build: { rollupOptions: { input: { relay: resolve('src/preload/relay.ts'), local: resolve('src/preload/local.ts'), ...(existsSync(petPreload) ? { pet: petPreload } : {}) } } } },
   renderer: {
     root: 'src',
-    build: { rollupOptions: { input: { local: resolve('src/local/index.html'), ...(existsSync(petHtml) ? { pet: petHtml } : {}) } } }
+    build: { rollupOptions: { input: { local: resolve('src/local/index.html'), ...(existsSync(petHtml) ? { pet: petHtml, riveValidate: resolve('src/pet/riveValidate.html') } : {}) } } }
   }
 });

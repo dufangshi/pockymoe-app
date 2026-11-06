@@ -1,3 +1,4 @@
+import { RiveDrawer, RIVE_STATES } from './rive';
 import { VideoClipPlayer } from './videoPlayer';
 document.documentElement.dataset.platform = navigator.userAgent.includes('Windows') ? 'win32' : '';
 import './styles.css';
@@ -13,7 +14,7 @@ import { getLocale, setLocale, t, type MessageKey } from '../shared/i18n';
 import { showError } from '../local/errorMark';
 import { commandErrorMessage } from './errors';
 import { scrollGeometry } from './scroll';
-import { playSound, playSpeech, speechMouth, speechPlaying } from './sounds';
+import { playSound, playSpeech, speechMouth, speechLevel, speechPlaying } from './sounds';
 import { isMuted } from '../shared/mutes';
 import { dockedPose, dockTilt, peekPose, DEFAULT_FACE_BOX } from './geometry';
 import { ClipSequencer } from './clipSequence';
@@ -209,7 +210,7 @@ function paintPeek(): void {
 }
 function renderSprite(): void {
   if (!state) return;
-  if (!root.querySelector('#character')) root.innerHTML = `<div id="character" role="button" tabindex="0"><div id="sprite-old"></div><div id="sprite"></div><canvas id="clip"></canvas><canvas id="talk" aria-hidden="true"></canvas><svg class="sleep-motes" viewBox="0 0 36 48" aria-hidden="true"><path d="M7 34h6l-6 6h6"/><path d="M17 24h7l-7 7h7"/><path d="M23 13h5l-5 5h5"/></svg></div>`;
+  if (!root.querySelector('#character')) root.innerHTML = `<div id="character" role="button" tabindex="0"><div id="sprite-old"></div><div id="sprite"></div><canvas id="clip"></canvas><canvas id="rive"></canvas><canvas id="talk" aria-hidden="true"></canvas><svg class="sleep-motes" viewBox="0 0 36 48" aria-hidden="true"><path d="M7 34h6l-6 6h6"/><path d="M17 24h7l-7 7h7"/><path d="M23 13h5l-5 5h5"/></svg></div>`;
   const character = root.querySelector<HTMLElement>('#character')!;
   character.setAttribute('aria-label', t('桌宠，点击查看任务，拖动以移动'));
   character.style.width = `${state.pet.width}px`; character.style.height = `${state.pet.height}px`;
@@ -253,7 +254,53 @@ function renderSprite(): void {
   paintSprite();
   if (clipPlayer && (dockClipHeld || motion.matches)) { clipPlayer.drawn = 0; drawClip(0); }
   videoPlayer?.invalidate();
+  syncRive();
 }
+
+let riveDrawer: RiveDrawer | null = null, riveToken = 0, riveKey = '', riveActive = true, riveAt = 0, riveEpoch = -1, riveDragging = false;
+function syncRive(): void {
+  const config = state?.rive;
+  if (!config || state?.surface !== 'sprite') return;
+  const key = `${state.packName}#${config.epoch}`;
+  if (key === riveKey) return;
+  riveKey = key; const token = ++riveToken;
+  const c = root.querySelector<HTMLCanvasElement>('#rive')!;
+  c.width = Math.round(state.pet.width * devicePixelRatio); c.height = Math.round(state.pet.height * devicePixelRatio);
+  void bridge.clip('pet.riv').then(async bytes => {
+    if (!bytes || token !== riveToken) return;
+    const drawer = await RiveDrawer.load(c, bytes, config);
+    if (token !== riveToken) { drawer.dispose(); return; }
+    riveDrawer = drawer; riveActive = true; riveAt = 0; riveEpoch = -1; riveDragging = false;
+    root.querySelector('#character')?.classList.add('rive');
+  }).catch(error => { console.error('Rive pet failed; using atlas', error); });
+}
+function stepRive(now: number): void {
+  const d = riveDrawer; if (!d || !state) return;
+  const tucked = !!state.edge && state.dockAmount > 0;
+  const w = Math.round(state.pet.width * devicePixelRatio), h = Math.round(state.pet.height * devicePixelRatio);
+  let dirty = false;
+  if (d.canvas.width !== w || d.canvas.height !== h) { d.canvas.width = w; d.canvas.height = h; dirty = true; }
+  const mood = state.mood === 'waving' || state.mood === 'jumping' || state.mood === 'poked' || state.mood === 'landing' || state.mood === 'dragging' ? 'idle' : state.mood;
+  dirty = d.set('state', tucked ? 0 : Math.max(0, (RIVE_STATES as readonly string[]).indexOf(mood.startsWith('running-') ? 'running' : mood))) || dirty;
+  dirty = d.set('mouth', tucked ? 0 : speechLevel(now)) || dirty;
+  const cursor = state.cursor;
+  dirty = d.set('lookX', cursor ? Math.max(-1, Math.min(1, (cursor.x / state.pet.width - .5) * 2)) : 0) || dirty;
+  dirty = d.set('lookY', cursor ? Math.max(-1, Math.min(1, (cursor.y / state.pet.height - .5) * 2)) : 0) || dirty;
+  const dragging = !!state.dragging;
+  if (dragging !== riveDragging) { d.fire(dragging ? 'dragStart' : 'land'); riveDragging = dragging; dirty = true; }
+  dirty = d.set('dragging', dragging) || dirty;
+  dirty = d.set('dock', state.edge ? ['left','right','top','bottom'].indexOf(state.edge) + 1 : 0) || dirty;
+  if (riveEpoch !== state.moodEpoch) {
+    const trigger = ({ waving: 'complete', jumping: 'complete', poked: 'poke', failed: 'fail' } as Record<string,string>)[state.mood];
+    if (trigger && !tucked) { d.fire(trigger); dirty = true; } riveEpoch = state.moodEpoch;
+  }
+  if (dirty || riveActive && !tucked && !motion.matches) {
+    riveActive = d.draw(tucked || motion.matches ? 0 : Math.min(.1, riveAt ? (now - riveAt) / 1000 : 0)).active;
+    updateHit();
+  }
+  riveAt = now;
+}
+
 // A pack's clips replace the atlas for the states they cover; any other state, or a clip that
 // fails to decode, draws from the atlas. Sheets are decoded when needed and few are kept.
 const CLIP_CACHE = 6, ONE_SHOT = ['failed', 'waving', 'jumping', 'poked', 'landing'], LEAVE_MS = 600;
@@ -413,7 +460,7 @@ function paintSprite(): void {
   sprite.style.backgroundPosition = `${-(docked ? 0 : frame) * state.pet.width}px ${sleeping || docked ? 0 : -ANIMATIONS[animationState].row * state.pet.height}px`;
 }
 function opaqueAt(point: { clientX: number; clientY: number }): boolean {
-  if (!state || !(alpha || clipPlayer || videoPlayer?.playing)) return false;
+  if (!state || !(riveDrawer || alpha || clipPlayer || videoPlayer?.playing)) return false;
   if (state.peekArt && state.dockAmount > 0 && (state.edge === 'left' || state.edge === 'right')) {
     const c = root.querySelector<HTMLCanvasElement>('#peek-art');
     const x = Math.floor(point.clientX * devicePixelRatio), y = Math.floor(point.clientY * devicePixelRatio);
@@ -433,6 +480,10 @@ function opaqueAt(point: { clientX: number; clientY: number }): boolean {
   const feather = state.dockAmount > 0 ? Math.min(1, Math.max(0, (bottom - localY) / 12)) : 1;
   if (feather === 0) return false;
   const threshold = 24 / feather;
+  if (riveDrawer) {
+    const pointer = { x: x / 192 * riveDrawer.canvas.width, y: y / 208 * riveDrawer.canvas.height };
+    return riveDrawer.draw(0, pointer).alpha > threshold;
+  }
   const talk = root.querySelector<HTMLCanvasElement>('#talk');
   if (character.classList.contains('talking') && talk) return talk.getContext('2d')!.getImageData(Math.floor(x / 192 * talk.width), Math.floor(y / 208 * talk.height), 1, 1).data[3]! > threshold;
   if ((clipPlayer || videoPlayer?.playing) && clipContext) { const element = clipContext.canvas; return clipContext.getImageData(Math.floor(x / 192 * element.width), Math.floor(y / 208 * element.height), 1, 1).data[3]! > threshold; }
@@ -495,8 +546,8 @@ bridge.onState(next => {
   document.body.dataset.surface = next.surface; root.dataset.visible = String(next.near || next.mode !== 'controls');
   if (next.surface === 'sprite') {
     // Another pack's sheets share nothing with this one's.
-    const packKey = `${next.packName}#${next.clips?.epoch ?? 0}`;
-    if (packKey !== clipPack) { videoPlayer?.dispose(); videoPlayer = null; clipContext = null; peekSource = null; talkBaseKey = ''; talkBitmap?.close(); talkLoading = ''; talkBitmap = null; talkFrame = -1; clipPack = packKey; for (const entry of clipCache.values()) void entry.then(bitmap => bitmap?.close()); clipCache.clear(); dockClipHeld = false; clipSequence = null; clipPlayer = null; clipToken++; lastEpoch = -1; }
+    const packKey = `${next.packName}#${next.rive?.epoch ?? next.clips?.epoch ?? 0}`;
+    if (packKey !== clipPack) { riveToken++; riveKey = ''; riveDrawer?.dispose(); riveDrawer = null; root.querySelector('#character')?.classList.remove('rive'); videoPlayer?.dispose(); videoPlayer = null; clipContext = null; peekSource = null; talkBaseKey = ''; talkBitmap?.close(); talkLoading = ''; talkBitmap = null; talkFrame = -1; clipPack = packKey; for (const entry of clipCache.values()) void entry.then(bitmap => bitmap?.close()); clipCache.clear(); dockClipHeld = false; clipSequence = null; clipPlayer = null; clipToken++; lastEpoch = -1; }
     renderSprite(); updateHit(); return;
   }
   if (old?.detailOpen && !next.detailOpen) root.querySelector<HTMLButtonElement>('.error-mark[aria-expanded="true"]')?.click();
@@ -506,8 +557,8 @@ bridge.onState(next => {
   if (changedMode && next.mode === 'menu') root.querySelector<HTMLElement>('[role^="menuitem"]')?.focus();
 });
 function animate(now: number): void {
-  if (state?.surface === 'sprite') { stepClip(now); paintTalk(now); }
-  if (state?.surface === 'sprite' && !clipPlayer && !videoPlayer?.playing) {
+  if (state?.surface === 'sprite') { if (riveDrawer) stepRive(now); else { stepClip(now); paintTalk(now); } }
+  if (state?.surface === 'sprite' && !riveDrawer && !clipPlayer && !videoPlayer?.playing) {
     const elapsedMs = now - animationStart, idleTime = elapsedMs % 46000;
     const cycle = animationState === 'idle' ? idleTime >= 31000 ? idleTime - 31000 : idleTime >= 14000 ? idleTime - 14000 : idleTime : elapsedMs;
     let next = frameAt(animationState, animationState === 'idle' && cycle > 1100 * state.frameScale ? 0 : cycle, motion.matches, state.frameScale, ONE_SHOT.includes(animationState));

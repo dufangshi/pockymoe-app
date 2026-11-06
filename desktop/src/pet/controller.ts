@@ -1,3 +1,4 @@
+import { verifyRivePack } from './riveValidation';
 import { petMedia } from './media';
 import { app, BrowserWindow, dialog, ipcMain, nativeImage, nativeTheme, screen } from 'electron';
 import { release } from 'node:os';
@@ -12,7 +13,7 @@ import { isMuted, type MuteRule } from '../shared/mutes';
 import { ANIMATIONS } from './animation';
 import { BUBBLE_MS, BubbleQueue } from './bubbles';
 import { dockPosition, HEAD_PEEK, MINI_HEIGHT, PET_HEIGHT, petLayout, restorePosition, surfaceLayout, surfaceSide, type PetPosition, type SurfaceSide } from './geometry';
-import { importPetPack as importPack, listPetPacks, imageDimensions, readClip, type ClipState, type PetPack } from './packs';
+import { importPetPack as importPack, listPetPacks, imageDimensions, readClip, readRive, type ClipState, type PetPack } from './packs';
 import { petConversations } from './conversations';
 import { StableMood, withoutResolvedRequest } from './stability';
 import { configureOverlay, glassOptions, windowWasDestroyed } from './windows';
@@ -183,6 +184,9 @@ export function createPetController(deps: PetControllerDeps): PetController {
     const sleeping = pack?.manifest.remoteCodex?.sleeping;
     const shared = { appearance, glassFallback: process.platform === 'win32' && windowsGlassMaterial(release(), process.env.POCKYMOE_WINDOWS_GLASS === 'solid') === 'solid', accountId, items, recent, targets: effectiveTargets, mood: drag?.moved && pack?.manifest.remoteCodex?.clips?.dragging ? 'dragging' : moods.value(items, now, snoozed), moodEpoch, pinned: controlsPinned && !panel && !menu,
       peekArt: pack?.peekImage && pack.manifest.remoteCodex?.peek ? { ...pack.manifest.remoteCodex.peek, imageUrl: `data:image/${pack.manifest.remoteCodex.peek.path.endsWith('png') ? 'png' : 'webp'};base64,${pack.peekImage.toString('base64')}` } : undefined,
+      rive: pack?.manifest.remoteCodex?.rive ? { ...pack.manifest.remoteCodex.rive, epoch: packEpoch } : undefined,
+      cursor: pack?.manifest.remoteCodex?.rive ? { x: screen.getCursorScreenPoint().x - window.getBounds().x - layout.pet.x, y: screen.getCursorScreenPoint().y - window.getBounds().y - layout.pet.y } : undefined,
+      dragging: !!drag?.moved,
       faceBox: pack?.manifest.remoteCodex?.faceBox, talk: pack?.manifest.remoteCodex?.talk,
       clips: pack?.manifest.remoteCodex?.clips && pack.manifest.remoteCodex.clipFormat ? { format: pack.manifest.remoteCodex.clipFormat, states: pack.manifest.remoteCodex.clips, epoch: packEpoch, urls: media?.urls } : null,
       // Timing stays here: while the pointer holds a bubble, its restart must not reach the renderer as a change.
@@ -297,7 +301,7 @@ export function createPetController(deps: PetControllerDeps): PetController {
       case 'importFolder': case 'importZip': {
         const choice = await dialog.showOpenDialog({ title: t('导入 Codex 宠物包', {}, uiLocale), buttonLabel: t('打开', {}, uiLocale), properties: [action.type === 'importFolder' ? 'openDirectory' : 'openFile'], ...(action.type === 'importZip' ? { filters: [{ name: t('Codex 宠物包', {}, uiLocale), extensions: ['zip'] }] } : {}) });
         if (!choice.canceled && choice.filePaths[0]) {
-          try { const imported = await importPack(choice.filePaths[0], userPets, bytes => decodeImage(window, bytes), await builtInPetIds(deps.petDirectories)); await refreshPacks(); packEpoch++; deps.settings.set({ petId: imported.manifest.id }); }
+          try { const imported = await importPack(choice.filePaths[0], userPets, bytes => decodeImage(window, bytes), await builtInPetIds(deps.petDirectories), verifyRivePack); await refreshPacks(); packEpoch++; deps.settings.set({ petId: imported.manifest.id }); }
           catch (cause) { return { ok: false, error: cause instanceof Error ? cause.message : t('操作失败，请重试', {}, uiLocale) }; }
         } break;
       }
@@ -330,7 +334,7 @@ export function createPetController(deps: PetControllerDeps): PetController {
   };
   const onHitTest = (event: Electron.IpcMainEvent, hit: unknown): void => { if (trusted(event) === window && typeof hit === 'boolean') window.setIgnoreMouseEvents(!hit, { forward: true }); };
   ipcMain.on('rcDesktop:pet:ready', onReady); ipcMain.on('rcDesktop:pet:hitTest', onHitTest);
-  ipcMain.handle('rcDesktop:pet:clip', async (event, path: unknown) => trusted(event) === window && pack && typeof path === 'string' ? readClip(pack, path) : null);
+  ipcMain.handle('rcDesktop:pet:clip', async (event, path: unknown) => trusted(event) === window && pack && typeof path === 'string' ? path === 'pet.riv' ? readRive(pack) : readClip(pack, path) : null);
   ipcMain.handle('rcDesktop:pet:action', (event, value: unknown) => trusted(event) ? action(value) : { ok: false, error: t('不受信任的桌宠页面', {}, uiLocale) });
   const unsubscribes = [deps.onAppearance(next => { appearance = next; if (next.locale) uiLocale = resolveLocale(next.locale); setLocale(uiLocale); emit(); }), deps.hub.onSnapshot(snapshot => {
     if (accountId !== snapshot.accountId) { bubbles.clear(); targets.clear(); completedConversations.clear(); moods.reset(Date.now()); targetKey = null; panel = false; menu = false; }
@@ -442,7 +446,7 @@ export async function importPetPack(deps: { petDirectories: string[]; settings: 
   // One zip holds the whole pet. macOS can also pick a folder in the same dialog.
   const result = await dialog.showOpenDialog(deps.parent, { title: t('导入宠物包'), buttonLabel: t('导入'), properties: process.platform === 'darwin' ? ['openFile', 'openDirectory'] : ['openFile'], filters: [{ name: t('宠物包'), extensions: ['zip'] }] });
   if (result.canceled || !result.filePaths[0]) return;
-  const pack = await importPack(result.filePaths[0], join(app.getPath('userData'), 'pets'), (bytes) => decodeImage(deps.parent, bytes), await builtInPetIds(deps.petDirectories));
+  const pack = await importPack(result.filePaths[0], join(app.getPath('userData'), 'pets'), (bytes) => decodeImage(deps.parent, bytes), await builtInPetIds(deps.petDirectories), verifyRivePack);
   deps.settings.set({ petId: pack.manifest.id });
 }
 /** Bundled packs are the first directory; anything imported can be replaced by importing again. */
