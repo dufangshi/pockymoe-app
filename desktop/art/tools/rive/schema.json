@@ -1,0 +1,790 @@
+{
+  "runtimeCommit": "a658a56a275ba473fe52e9d97a925d2468b0c853",
+  "npmVersion": "2.49.4",
+  "objects": {
+    "backboard": {
+      "type": 23,
+      "props": {}
+    },
+    "artboard": {
+      "type": 1,
+      "props": {
+        "name": [
+          4,
+          "CoreStringType"
+        ],
+        "parentId": [
+          5,
+          "CoreIdType"
+        ],
+        "opacity": [
+          18,
+          "CoreDoubleType"
+        ],
+        "rotation": [
+          15,
+          "CoreDoubleType"
+        ],
+        "scaleX": [
+          16,
+          "CoreDoubleType"
+        ],
+        "scaleY": [
+          17,
+          "CoreDoubleType"
+        ],
+        "x": [
+          13,
+          "CoreDoubleType"
+        ],
+        "y": [
+          14,
+          "CoreDoubleType"
+        ],
+        "blendModeValue": [
+          23,
+          "CoreUintType"
+        ],
+        "additiveAmount": [
+          450,
+          "CoreUintType"
+        ],
+        "drawableFlags": [
+          129,
+          "CoreUintType"
+        ],
+        "clip": [
+          196,
+          "CoreBoolType"
+        ],
+        "width": [
+          7,
+          "CoreDoubleType"
+        ],
+        "height": [
+          8,
+          "CoreDoubleType"
+        ],
+        "styleId": [
+          494,
+          "CoreIdType"
+        ],
+        "fractionalWidth": [
+          706,
+          "CoreDoubleType"
+        ],
+        "fractionalHeight": [
+          707,
+          "CoreDoubleType"
+        ],
+        "originX": [
+          11,
+          "CoreDoubleType"
+        ],
+        "originY": [
+          12,
+          "CoreDoubleType"
+        ],
+        "defaultStateMachineId": [
+          236,
+          "CoreIdType"
+        ],
+        "viewModelId": [
+          583,
+          "CoreIdType"
+        ]
+      }
+    },
+    "node": {
+      "type": 2,
+      "props": {
+        "name": [
+          4,
+          "CoreStringType"
+        ],
+        "parentId": [
+          5,
+          "CoreIdType"
+        ],
+        "opacity": [
+          18,
+          "CoreDoubleType"
+        ],
+        "rotation": [
+          15,
+          "CoreDoubleType"
+        ],
+        "scaleX": [
+          16,
+          "CoreDoubleType"
+        ],
+        "scaleY": [
+          17,
+          "CoreDoubleType"
+        ],
+        "x": [
+          13,
+          "CoreDoubleType"
+        ],
+        "y": [
+          14,
+          "CoreDoubleType"
+        ]
+      }
+    },
+    "image": {
+      "type": 100,
+      "props": {
+        "name": [
+          4,
+          "CoreStringType"
+        ],
+        "parentId": [
+          5,
+          "CoreIdType"
+        ],
+        "opacity": [
+          18,
+          "CoreDoubleType"
+        ],
+        "rotation": [
+          15,
+          "CoreDoubleType"
+        ],
+        "scaleX": [
+          16,
+          "CoreDoubleType"
+        ],
+        "scaleY": [
+          17,
+          "CoreDoubleType"
+        ],
+        "x": [
+          13,
+          "CoreDoubleType"
+        ],
+        "y": [
+          14,
+          "CoreDoubleType"
+        ],
+        "blendModeValue": [
+          23,
+          "CoreUintType"
+        ],
+        "additiveAmount": [
+          450,
+          "CoreUintType"
+        ],
+        "drawableFlags": [
+          129,
+          "CoreUintType"
+        ],
+        "assetId": [
+          206,
+          "CoreIdType"
+        ],
+        "originX": [
+          380,
+          "CoreDoubleType"
+        ],
+        "originY": [
+          381,
+          "CoreDoubleType"
+        ],
+        "fit": [
+          974,
+          "CoreUintType"
+        ],
+        "alignmentX": [
+          975,
+          "CoreDoubleType"
+        ],
+        "alignmentY": [
+          976,
+          "CoreDoubleType"
+        ],
+        "samplerFilter": [
+          1076,
+          "CoreUintType"
+        ],
+        "samplerWrapX": [
+          1077,
+          "CoreUintType"
+        ],
+        "samplerWrapY": [
+          1078,
+          "CoreUintType"
+        ]
+      }
+    },
+    "mesh": {
+      "type": 109,
+      "props": {
+        "name": [
+          4,
+          "CoreStringType"
+        ],
+        "parentId": [
+          5,
+          "CoreIdType"
+        ],
+        "triangleIndexBytes": [
+          223,
+          "CoreBytesType"
+        ]
+      }
+    },
+    "mesh_vertex": {
+      "type": 108,
+      "props": {
+        "name": [
+          4,
+          "CoreStringType"
+        ],
+        "parentId": [
+          5,
+          "CoreIdType"
+        ],
+        "x": [
+          24,
+          "CoreDoubleType"
+        ],
+        "y": [
+          25,
+          "CoreDoubleType"
+        ],
+        "u": [
+          215,
+          "CoreDoubleType"
+        ],
+        "v": [
+          216,
+          "CoreDoubleType"
+        ]
+      }
+    },
+    "bone": {
+      "type": 40,
+      "props": {
+        "name": [
+          4,
+          "CoreStringType"
+        ],
+        "parentId": [
+          5,
+          "CoreIdType"
+        ],
+        "opacity": [
+          18,
+          "CoreDoubleType"
+        ],
+        "rotation": [
+          15,
+          "CoreDoubleType"
+        ],
+        "scaleX": [
+          16,
+          "CoreDoubleType"
+        ],
+        "scaleY": [
+          17,
+          "CoreDoubleType"
+        ],
+        "length": [
+          89,
+          "CoreDoubleType"
+        ]
+      }
+    },
+    "root_bone": {
+      "type": 41,
+      "props": {
+        "name": [
+          4,
+          "CoreStringType"
+        ],
+        "parentId": [
+          5,
+          "CoreIdType"
+        ],
+        "opacity": [
+          18,
+          "CoreDoubleType"
+        ],
+        "rotation": [
+          15,
+          "CoreDoubleType"
+        ],
+        "scaleX": [
+          16,
+          "CoreDoubleType"
+        ],
+        "scaleY": [
+          17,
+          "CoreDoubleType"
+        ],
+        "length": [
+          89,
+          "CoreDoubleType"
+        ],
+        "x": [
+          90,
+          "CoreDoubleType"
+        ],
+        "y": [
+          91,
+          "CoreDoubleType"
+        ]
+      }
+    },
+    "skin": {
+      "type": 43,
+      "props": {
+        "name": [
+          4,
+          "CoreStringType"
+        ],
+        "parentId": [
+          5,
+          "CoreIdType"
+        ],
+        "xx": [
+          104,
+          "CoreDoubleType"
+        ],
+        "yx": [
+          105,
+          "CoreDoubleType"
+        ],
+        "xy": [
+          106,
+          "CoreDoubleType"
+        ],
+        "yy": [
+          107,
+          "CoreDoubleType"
+        ],
+        "tx": [
+          108,
+          "CoreDoubleType"
+        ],
+        "ty": [
+          109,
+          "CoreDoubleType"
+        ]
+      }
+    },
+    "tendon": {
+      "type": 44,
+      "props": {
+        "name": [
+          4,
+          "CoreStringType"
+        ],
+        "parentId": [
+          5,
+          "CoreIdType"
+        ],
+        "boneId": [
+          95,
+          "CoreIdType"
+        ],
+        "xx": [
+          96,
+          "CoreDoubleType"
+        ],
+        "yx": [
+          97,
+          "CoreDoubleType"
+        ],
+        "xy": [
+          98,
+          "CoreDoubleType"
+        ],
+        "yy": [
+          99,
+          "CoreDoubleType"
+        ],
+        "tx": [
+          100,
+          "CoreDoubleType"
+        ],
+        "ty": [
+          101,
+          "CoreDoubleType"
+        ]
+      }
+    },
+    "weight": {
+      "type": 45,
+      "props": {
+        "name": [
+          4,
+          "CoreStringType"
+        ],
+        "parentId": [
+          5,
+          "CoreIdType"
+        ],
+        "values": [
+          102,
+          "CoreUintType"
+        ],
+        "indices": [
+          103,
+          "CoreUintType"
+        ]
+      }
+    },
+    "linear_animation": {
+      "type": 31,
+      "props": {
+        "name": [
+          55,
+          "CoreStringType"
+        ],
+        "fps": [
+          56,
+          "CoreUintType"
+        ],
+        "duration": [
+          57,
+          "CoreUintType"
+        ],
+        "speed": [
+          58,
+          "CoreDoubleType"
+        ],
+        "loopValue": [
+          59,
+          "CoreUintType"
+        ],
+        "workStart": [
+          60,
+          "CoreUintType"
+        ],
+        "workEnd": [
+          61,
+          "CoreUintType"
+        ],
+        "enableWorkArea": [
+          62,
+          "CoreBoolType"
+        ],
+        "quantize": [
+          376,
+          "CoreBoolType"
+        ]
+      }
+    },
+    "keyed_object": {
+      "type": 25,
+      "props": {
+        "objectId": [
+          51,
+          "CoreIdType"
+        ]
+      }
+    },
+    "keyed_property": {
+      "type": 26,
+      "props": {
+        "propertyKey": [
+          53,
+          "CoreUintType"
+        ]
+      }
+    },
+    "keyframe_double": {
+      "type": 30,
+      "props": {
+        "frame": [
+          67,
+          "CoreUintType"
+        ],
+        "interpolationType": [
+          68,
+          "CoreUintType"
+        ],
+        "interpolatorId": [
+          69,
+          "CoreIdType"
+        ],
+        "value": [
+          70,
+          "CoreDoubleType"
+        ]
+      }
+    },
+    "state_machine": {
+      "type": 53,
+      "props": {
+        "name": [
+          55,
+          "CoreStringType"
+        ]
+      }
+    },
+    "state_machine_layer": {
+      "type": 57,
+      "props": {
+        "name": [
+          138,
+          "CoreStringType"
+        ]
+      }
+    },
+    "state_machine_number": {
+      "type": 56,
+      "props": {
+        "name": [
+          138,
+          "CoreStringType"
+        ],
+        "value": [
+          140,
+          "CoreDoubleType"
+        ]
+      }
+    },
+    "state_machine_bool": {
+      "type": 59,
+      "props": {
+        "name": [
+          138,
+          "CoreStringType"
+        ],
+        "value": [
+          141,
+          "CoreBoolType"
+        ]
+      }
+    },
+    "state_machine_trigger": {
+      "type": 58,
+      "props": {
+        "name": [
+          138,
+          "CoreStringType"
+        ]
+      }
+    },
+    "animation_state": {
+      "type": 61,
+      "props": {
+        "flags": [
+          536,
+          "CoreUintType"
+        ],
+        "speed": [
+          292,
+          "CoreDoubleType"
+        ],
+        "animationId": [
+          149,
+          "CoreIdType"
+        ]
+      }
+    },
+    "entry_state": {
+      "type": 63,
+      "props": {
+        "flags": [
+          536,
+          "CoreUintType"
+        ]
+      }
+    },
+    "any_state": {
+      "type": 62,
+      "props": {
+        "flags": [
+          536,
+          "CoreUintType"
+        ]
+      }
+    },
+    "exit_state": {
+      "type": 64,
+      "props": {
+        "flags": [
+          536,
+          "CoreUintType"
+        ]
+      }
+    },
+    "state_transition": {
+      "type": 65,
+      "props": {
+        "stateToId": [
+          151,
+          "CoreIdType"
+        ],
+        "flags": [
+          152,
+          "CoreUintType"
+        ],
+        "duration": [
+          158,
+          "CoreUintType"
+        ],
+        "exitTime": [
+          160,
+          "CoreUintType"
+        ],
+        "interpolationType": [
+          349,
+          "CoreUintType"
+        ],
+        "interpolatorId": [
+          350,
+          "CoreIdType"
+        ],
+        "randomWeight": [
+          537,
+          "CoreUintType"
+        ]
+      }
+    },
+    "transition_number_condition": {
+      "type": 70,
+      "props": {
+        "inputId": [
+          155,
+          "CoreIdType"
+        ],
+        "opValue": [
+          156,
+          "CoreUintType"
+        ],
+        "value": [
+          157,
+          "CoreDoubleType"
+        ]
+      }
+    },
+    "transition_bool_condition": {
+      "type": 71,
+      "props": {
+        "inputId": [
+          155,
+          "CoreIdType"
+        ],
+        "opValue": [
+          156,
+          "CoreUintType"
+        ]
+      }
+    },
+    "transition_trigger_condition": {
+      "type": 68,
+      "props": {
+        "inputId": [
+          155,
+          "CoreIdType"
+        ]
+      }
+    },
+    "blend_state_1d_input": {
+      "type": 76,
+      "props": {
+        "flags": [
+          536,
+          "CoreUintType"
+        ],
+        "inputId": [
+          167,
+          "CoreIdType"
+        ]
+      }
+    },
+    "blend_animation_1d": {
+      "type": 75,
+      "props": {
+        "animationId": [
+          165,
+          "CoreIdType"
+        ],
+        "value": [
+          166,
+          "CoreDoubleType"
+        ]
+      }
+    },
+    "image_asset": {
+      "type": 105,
+      "props": {
+        "name": [
+          203,
+          "CoreStringType"
+        ],
+        "assetId": [
+          204,
+          "CoreUintType"
+        ],
+        "cdnUuid": [
+          359,
+          "CoreBytesType"
+        ],
+        "cdnBaseUrl": [
+          362,
+          "CoreStringType"
+        ],
+        "height": [
+          207,
+          "CoreDoubleType"
+        ],
+        "width": [
+          208,
+          "CoreDoubleType"
+        ],
+        "samplerFilter": [
+          1073,
+          "CoreUintType"
+        ],
+        "samplerWrapX": [
+          1074,
+          "CoreUintType"
+        ],
+        "samplerWrapY": [
+          1075,
+          "CoreUintType"
+        ]
+      }
+    },
+    "file_asset_contents": {
+      "type": 106,
+      "props": {
+        "bytes": [
+          212,
+          "CoreBytesType"
+        ],
+        "signature": [
+          911,
+          "CoreBytesType"
+        ]
+      }
+    },
+    "cubic_ease_interpolator": {
+      "type": 28,
+      "props": {
+        "x1": [
+          63,
+          "CoreDoubleType"
+        ],
+        "y1": [
+          64,
+          "CoreDoubleType"
+        ],
+        "x2": [
+          65,
+          "CoreDoubleType"
+        ],
+        "y2": [
+          66,
+          "CoreDoubleType"
+        ]
+      }
+    }
+  }
+}
