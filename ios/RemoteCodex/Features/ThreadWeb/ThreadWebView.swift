@@ -58,7 +58,7 @@ final class ProductWebController: UIViewController, WKNavigationDelegate, WKUIDe
         view.addSubview(web)
         NSLayoutConstraint.activate([
             web.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
-            web.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor),
+            web.bottomAnchor.constraint(equalTo: view.bottomAnchor),
             web.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             web.trailingAnchor.constraint(equalTo: view.trailingAnchor),
         ])
