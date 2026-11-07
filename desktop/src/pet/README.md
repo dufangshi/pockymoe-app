@@ -341,8 +341,8 @@ motionStart priority and avoid repeatedly transitioning to the current state.
 
 The pet uses the shared ClipSequencer for intro/loop/outro ordering, the 8% idle
 rest chance, 1–4 minute resting duration and wake-up outro. Idle variants are
-shuffled (first neutral beat retained); work and reaction variants cycle. One-shot
-reactions hold their final frame until the controller's reaction expires. Reaction
+shuffled each cycle (neutral intervals retained); work and reaction variants cycle.
+One-shot reactions hold their final frame until the controller's reaction expires. Reaction
 durations come from the motion plan; Rive landing beats run after drag release.
 Time advancement pauses while tucked. This behavior applies only to opt-in Rive
 motion plans; raster packs retain their previous sequencing.

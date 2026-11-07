@@ -18,6 +18,11 @@ describe('Rive motion choreography', () => {
     expect(c.step('running',0,171)?.value).toBe(6);
     expect(c.step('running',.06,231)?.value).toBe(7);
   });
+  it('keeps neutral intervals and reshuffles variants on each idle cycle', () => {
+    const c = new RiveMotionClock({idle:[{value:0,durationMs:100},{value:1,durationMs:100},{value:0,durationMs:100},{value:2,durationMs:100}]},()=>0);
+    const values=Array.from({length:8},(_,i)=>c.step('idle',i ? .11 : 0,i*110)?.value);
+    expect(values).toEqual([0,2,0,1,0,1,0,2]);
+  });
   it('holds one-shot endings and advances variants only on the next reaction', () => {
     const c = new RiveMotionClock({poked:[{value:1,durationMs:100},{value:2,durationMs:100}]});
     expect(c.step('poked',0,0)).toEqual({value:1,restart:true});
