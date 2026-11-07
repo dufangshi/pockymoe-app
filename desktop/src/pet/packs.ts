@@ -328,11 +328,14 @@ export async function importPetPack(source: string, userPetsDirectory: string, d
     if (!verifyRive) fail('Rive import requires isolated runtime verification');
     await verifyRive(rive, manifest.remoteCodex.rive);
   }
+  const manifestJSON = JSON.stringify(manifest);
+  if (Buffer.byteLength(manifestJSON) > MAX_MANIFEST_BYTES) fail('normalized pet.json exceeds 16 KB');
   await mkdir(userPetsDirectory, { recursive: true });
   const destination = join(userPetsDirectory, manifest.id), staging = join(userPetsDirectory, `.import-${randomUUID()}`);
   await mkdir(staging);
   try {
-    await writeFile(join(staging, 'pet.json'), JSON.stringify(manifest, null, 2));
+    // Keep the installed representation within the loader's manifest limit.
+    await writeFile(join(staging, 'pet.json'), manifestJSON);
     await writeFile(join(staging, manifest.spritesheetPath), image);
     if (rive) await writeFile(join(staging, 'pet.riv'), rive);
     if (sleepingImage && manifest.remoteCodex?.sleeping) await writeFile(join(staging, manifest.remoteCodex.sleeping.path), sleepingImage);

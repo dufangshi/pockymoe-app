@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseManifest, importPetPack, MAX_RIVE_BYTES } from './packs';
+import { parseManifest, importPetPack, loadPetPack, MAX_RIVE_BYTES } from './packs';
 import { mkdtemp, mkdir, writeFile, readFile, rm, access, truncate } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -25,6 +25,46 @@ describe('Rive pack import', () => {
       await writeFile(join(source, 'extra.txt'),'unexpected');
       await expect(importPetPack(source,dest,undefined,[],async () => undefined)).rejects.toThrow('only pet.json');
     } finally { await rm(root,{recursive:true,force:true}); }
+  });
+  it('reloads a routing manifest whose pretty-printed form exceeds the input cap', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'rive-large-manifest-'));
+    const source = join(root, 'source');
+    const destination = join(root, 'pets');
+    const clips = Array.from({ length: 100 }, (_, value) => ({
+      value,
+      animation: `motion-${value}`,
+      durationMs: 1000,
+      start: 'rest',
+      end: 'rest',
+    }));
+    const large = {
+      ...manifest,
+      remoteCodex: {
+        rive: {
+          ...manifest.remoteCodex.rive,
+          motions: { idle: [{ value: 0, durationMs: 1000 }] },
+          routing: { maxExitMs: 350, bridges: [], clips },
+        },
+      },
+    };
+    const compact = JSON.stringify(large);
+    expect(Buffer.byteLength(compact)).toBeLessThan(16 * 1024);
+    expect(Buffer.byteLength(JSON.stringify(large, null, 2))).toBeGreaterThan(16 * 1024);
+    try {
+      await mkdir(source);
+      await writeFile(join(source, 'pet.json'), compact);
+      await writeFile(join(source, 'pet.riv'), Buffer.from('RIVE\x07\x00\x00\x00'));
+      await writeFile(
+        join(source, 'spritesheet.png'),
+        await readFile('test/fixtures/pets/placeholder/spritesheet.png'),
+      );
+      const installed = await importPetPack(source, destination, undefined, [], async () => {});
+      const reloaded = await loadPetPack(installed.directory);
+      expect(reloaded.manifest.remoteCodex?.rive?.routing?.clips).toHaveLength(100);
+      expect((await readFile(join(installed.directory, 'pet.json'))).length).toBeLessThan(16 * 1024);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
   it('validates source resolution caps and connected rest routes', () => {
     const route={maxExitMs:350,bridges:[1,2],clips:[{value:0,animation:'idle',durationMs:1000,start:'rest',end:'rest'},{value:1,animation:'in',durationMs:1000,start:'rest',end:'bed'},{value:2,animation:'out',durationMs:1000,start:'bed',end:'rest'}]};
