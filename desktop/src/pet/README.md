@@ -446,23 +446,28 @@ source face chart. This setting preserves existing behavior for other
 packs. Preview capture accepts explicit procedural input overrides for repeatable
 blink, gaze and speech comparisons.
 
-Rive backend selection uses Chromium's `webgl` and `gpu_compositing` feature
-statuses from main. Both must report `enabled` for WebGL2; otherwise the pet
-uses `@rive-app/canvas-advanced`, pinned to the same 2.49.4 runtime. A backend
-change recreates the canvas because context types cannot be changed in place.
-Canvas pixel hits are also pointer-demand-only, capped at 10 Hz and suspended
-while tucked. Canvas does not guarantee a GPU-free skin path: this pinned
-runtime implements image meshes with an internal WebGL2 renderer. Software
-performance must therefore be measured rather than inferred from the name.
+Rive always uses the pinned `@rive-app/webgl2-advanced` runtime. Software WebGL
+presentation can incur Chromium readbacks even with zero app alpha probes. The
+built-app benchmark separates that presentation cost with a matched quad control;
+it does not infer a different renderer from Chromium's feature-status labels.
 
 Optional `routing.reactions` entries declare `{clips, targets, animation,
-durationMs, settleMs}`. These are authored reactions on the current material
+durationMs, settleMs, resumeValue?, resumeTargets?}`. These are authored reactions on the current material
 chart, useful for an event in a lying or suspended pose. The displayed body
 clock decelerates over `settleMs` (50–400 ms), then holds while the separate
 reaction animation plays; it never selects the requested upright clip's body
 drawing. The logical target is reported in `route.value`, while
 `route.animation` and `route.time` identify the actual body sample. A subsequent
-normal motion uses the shared-boundary router. Such a reaction is not a shortcut
+normal motion uses the shared-boundary router. An interrupted reaction first
+returns to its nearer neutral endpoint over at most 250 ms, retaining one exact
+neutral sample before routing the queued request. New requests replace that queue.
+`resumeValue` and `resumeTargets` let non-waking requests resume the held lying
+pose without seeking back to its first frame. These resume targets also apply
+before the first reaction: an idle/waiting request cannot accidentally wake an
+already lying character. Authors select which requests need an awake pose. A routed clip with `nativeExit:true` finishes forward at source
+speed, also when it is used as a bridge. This preserves complete bed-out and
+landing performances; these protected exits deliberately take longer than the
+normal 350 ms accelerated rest route. Such a reaction is not a shortcut
 for a complete waking or landing bridge; authors must supply those performances
 for their desired transitions. Reaction-owned properties must have neutral reset
 keys in every body animation. Import validates references and time bounds, and

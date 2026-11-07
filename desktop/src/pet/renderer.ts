@@ -267,71 +267,200 @@ let riveDrawer: RiveDrawer | null = null, riveToken = 0, riveKey = '', riveActiv
 function syncRive(): void {
   const config = state?.rive;
   if (!config || state?.surface !== 'sprite') return;
-  const backend = state.riveBackend ?? 'webgl2';
-  const key = `${state.packName}#${config.epoch}#${backend}`;
+  const key = `${state.packName}#${config.epoch}`;
   if (key === riveKey) return;
-  riveKey = key; const token = ++riveToken;
+  riveKey = key;
+  const token = ++riveToken;
   let c = root.querySelector<HTMLCanvasElement>('#rive')!;
-  if (riveDrawer) { riveDrawer.dispose(); riveDrawer = null; }
-  // A canvas cannot switch context types when GPU availability changes.
-  const fresh = c.cloneNode(false) as HTMLCanvasElement; c.replaceWith(fresh); c = fresh;
-  Object.assign(c,riveBackingSize(state.pet.width,state.pet.height,devicePixelRatio,config.backing));
-  void bridge.clip('pet.riv').then(async bytes => {
-    if (!bytes || token !== riveToken) return;
-    const drawer = await RiveDrawer.load(c, bytes, config, {}, backend);
-    c.dataset.backend = drawer.backend;
-    if (token !== riveToken) { drawer.dispose(); return; }
-    riveClock = config.motions ? new RiveMotionClock(config.motions, Math.random, !!config.procedural) : null;
-    riveDynamics = config.procedural ? new RiveDynamics() : null; riveGate = new RiveFrameGate(); riveCadence = new RiveSourceCadence(); riveGaze = new RiveGazePulse();
-    riveDrawer = drawer; riveActive = true; riveAt = 0; riveEpoch = -1; riveDragging = false;
-    root.querySelector('#character')?.classList.add('rive');
-  }).catch(error => { console.error('Rive pet failed; using atlas', error); });
+  if (riveDrawer) {
+    riveDrawer.dispose();
+    riveDrawer = null;
+  }
+  // A replacement pack gets a fresh canvas and its own runtime handles.
+  const fresh = c.cloneNode(false) as HTMLCanvasElement;
+  c.replaceWith(fresh);
+  c = fresh;
+  Object.assign(c, riveBackingSize(state.pet.width, state.pet.height, devicePixelRatio, config.backing));
+  void bridge
+    .clip('pet.riv')
+    .then(async (bytes) => {
+      if (!bytes || token !== riveToken) return;
+      const drawer = await RiveDrawer.load(c, bytes, config);
+      c.dataset.backend = drawer.backend;
+      if (token !== riveToken) {
+        drawer.dispose();
+        return;
+      }
+      riveClock = config.motions
+        ? new RiveMotionClock(config.motions, Math.random, !!config.procedural)
+        : null;
+      riveDynamics = config.procedural ? new RiveDynamics() : null;
+      riveGate = new RiveFrameGate();
+      riveCadence = new RiveSourceCadence();
+      riveGaze = new RiveGazePulse();
+      riveDrawer = drawer;
+      riveActive = true;
+      riveAt = 0;
+      riveEpoch = -1;
+      riveDragging = false;
+      root.querySelector('#character')?.classList.add('rive');
+    })
+    .catch((error) => {
+      console.error('Rive pet failed; using atlas', error);
+    });
 }
 function stepRive(now: number): void {
-  const d = riveDrawer; if (!d || !state) return;
+  const d = riveDrawer;
+  if (!d || !state) return;
   const tucked = !!state.edge && state.dockAmount > 0;
   if (tucked) d.suspendHit();
   if (!tucked && d.pollHit()) updateHit();
-  const { width: w, height: h } = riveBackingSize(state.pet.width,state.pet.height,devicePixelRatio,state.rive?.backing);
+  const { width: w, height: h } = riveBackingSize(
+    state.pet.width,
+    state.pet.height,
+    devicePixelRatio,
+    state.rive?.backing,
+  );
   const procedural = state.rive?.procedural;
-  const gazePoint = state.cursor && !tucked && state.cursor.x > -state.pet.width/2 && state.cursor.x < state.pet.width*1.5 && state.cursor.y > -state.pet.height/2 && state.cursor.y < state.pet.height*1.5 ? { x: Math.max(-1,Math.min(1,(state.cursor.x/state.pet.width-.5)*2)), y: Math.max(-1,Math.min(1,(state.cursor.y/state.pet.height-.5)*2)) } : undefined;
-  const gaze = procedural?.transientFace ? riveGaze.sample(now,gazePoint) : undefined;
-  const slow = ['idle','sleeping','resting'].includes(state.mood) && !state.dragging && !speechPlaying();
-  const fps = procedural?.sourceFps ? riveCadence.fps(now, procedural.sourceFps, gaze ? {x:gaze.x,y:gaze.y} : {x: state.cursor?.x ?? 0,y: state.cursor?.y ?? 0}, !!d.route?.leaving || !!gaze?.opacity || !!state.dragging || state.mood === 'landing' || !!riveDynamics?.moving) : procedural && (slow ? procedural.idleFps : procedural.activeFps);
-  const scheduled = procedural ? riveGate.take(now, Number(fps), riveEpoch !== state.moodEpoch || d.canvas.width !== w || d.canvas.height !== h || !tucked && d.needsHitDraw) : null;
+  const gazePoint =
+    state.cursor &&
+    !tucked &&
+    state.cursor.x > -state.pet.width / 2 &&
+    state.cursor.x < state.pet.width * 1.5 &&
+    state.cursor.y > -state.pet.height / 2 &&
+    state.cursor.y < state.pet.height * 1.5
+      ? {
+          x: Math.max(-1, Math.min(1, (state.cursor.x / state.pet.width - 0.5) * 2)),
+          y: Math.max(-1, Math.min(1, (state.cursor.y / state.pet.height - 0.5) * 2)),
+        }
+      : undefined;
+  const gaze = procedural?.transientFace ? riveGaze.sample(now, gazePoint) : undefined;
+  const slow = ['idle', 'sleeping', 'resting'].includes(state.mood) && !state.dragging && !speechPlaying();
+  const fps = procedural?.sourceFps
+    ? riveCadence.fps(
+        now,
+        procedural.sourceFps,
+        gaze ? { x: gaze.x, y: gaze.y } : { x: state.cursor?.x ?? 0, y: state.cursor?.y ?? 0 },
+        !!d.route?.leaving ||
+          !!gaze?.opacity ||
+          !!state.dragging ||
+          state.mood === 'landing' ||
+          !!riveDynamics?.moving,
+      )
+    : procedural && (slow ? procedural.idleFps : procedural.activeFps);
+  const scheduled = procedural
+    ? riveGate.take(
+        now,
+        Number(fps),
+        riveEpoch !== state.moodEpoch ||
+          d.canvas.width !== w ||
+          d.canvas.height !== h ||
+          (!tucked && d.needsHitDraw),
+      )
+    : null;
   if (procedural && scheduled === null) return;
   let dirty = !tucked && d.needsHitDraw;
-  if (d.canvas.width !== w || d.canvas.height !== h) { d.canvas.width = w; d.canvas.height = h; dirty = true; }
-  const dt = procedural ? scheduled! : Math.min(.1, riveAt ? (now - riveAt) / 1000 : 0);
-  const beat = !tucked && !motion.matches ? riveClock?.step(state.dragging ? 'dragging' : state.mood.startsWith('running-') ? 'running' : state.mood, d.route?.leaving ? 0 : dt, now, riveEpoch !== state.moodEpoch) : null;
-  if (beat) { dirty = d.set('motion', beat.value) || dirty; if (beat.restart) { d.fire('motionStart'); dirty = true; } }
-  const mood = state.mood === 'waving' || state.mood === 'jumping' || state.mood === 'poked' || state.mood === 'landing' || state.mood === 'dragging' ? 'idle' : state.mood;
-  dirty = d.set('state', tucked ? 0 : Math.max(0, (RIVE_STATES as readonly string[]).indexOf(mood.startsWith('running-') ? 'running' : mood))) || dirty;
+  if (d.canvas.width !== w || d.canvas.height !== h) {
+    d.canvas.width = w;
+    d.canvas.height = h;
+    dirty = true;
+  }
+  const dt = procedural ? scheduled! : Math.min(0.1, riveAt ? (now - riveAt) / 1000 : 0);
+  const beat =
+    !tucked && !motion.matches
+      ? riveClock?.step(
+          state.dragging ? 'dragging' : state.mood.startsWith('running-') ? 'running' : state.mood,
+          d.route?.leaving ? 0 : dt,
+          now,
+          riveEpoch !== state.moodEpoch,
+        )
+      : null;
+  if (beat) {
+    dirty = d.set('motion', beat.value) || dirty;
+    if (beat.restart) {
+      d.fire('motionStart');
+      dirty = true;
+    }
+  }
+  const mood =
+    state.mood === 'waving' ||
+    state.mood === 'jumping' ||
+    state.mood === 'poked' ||
+    state.mood === 'landing' ||
+    state.mood === 'dragging'
+      ? 'idle'
+      : state.mood;
+  dirty =
+    d.set(
+      'state',
+      tucked
+        ? 0
+        : Math.max(
+            0,
+            (RIVE_STATES as readonly string[]).indexOf(mood.startsWith('running-') ? 'running' : mood),
+          ),
+    ) || dirty;
   dirty = d.set('mouth', tucked ? 0 : speechLevel(now)) || dirty;
   // A sleeping face wakes for a nearby gaze, rather than every distant cursor
   // poll. Other packs keep their existing cursor behavior.
-  const dozingFace = procedural?.eyeOpen && ['sleeping','resting'].includes(state.mood);
-  const cursor = !dozingFace || state.cursor && Math.abs(state.cursor.x-state.pet.width/2)<state.pet.width && Math.abs(state.cursor.y-state.pet.height/2)<state.pet.height ? state.cursor : undefined;
-  dirty = d.set('lookX', gaze ? gaze.x : cursor && !tucked ? Math.max(-1, Math.min(1, (cursor.x / state.pet.width - .5) * 2)) : 0) || dirty;
-  dirty = d.set('lookY', gaze ? gaze.y : cursor && !tucked ? Math.max(-1, Math.min(1, (cursor.y / state.pet.height - .5) * 2)) : 0) || dirty;
-  if (procedural?.eyeOpen) dirty = d.set('eyeOpen', gaze ? gaze.opacity : !!cursor && !tucked ? 1 : 0) || dirty;
+  const dozingFace = procedural?.eyeOpen && ['sleeping', 'resting'].includes(state.mood);
+  const cursor =
+    !dozingFace ||
+    (state.cursor &&
+      Math.abs(state.cursor.x - state.pet.width / 2) < state.pet.width &&
+      Math.abs(state.cursor.y - state.pet.height / 2) < state.pet.height)
+      ? state.cursor
+      : undefined;
+  dirty =
+    d.set(
+      'lookX',
+      gaze
+        ? gaze.x
+        : cursor && !tucked
+          ? Math.max(-1, Math.min(1, (cursor.x / state.pet.width - 0.5) * 2))
+          : 0,
+    ) || dirty;
+  dirty =
+    d.set(
+      'lookY',
+      gaze
+        ? gaze.y
+        : cursor && !tucked
+          ? Math.max(-1, Math.min(1, (cursor.y / state.pet.height - 0.5) * 2))
+          : 0,
+    ) || dirty;
+  if (procedural?.eyeOpen)
+    dirty = d.set('eyeOpen', gaze ? gaze.opacity : !!cursor && !tucked ? 1 : 0) || dirty;
   const dragging = !!state.dragging;
-  if (dragging !== riveDragging) { d.fire(dragging ? 'dragStart' : 'land'); riveDragging = dragging; dirty = true; }
+  if (dragging !== riveDragging) {
+    d.fire(dragging ? 'dragStart' : 'land');
+    riveDragging = dragging;
+    dirty = true;
+  }
   dirty = d.set('dragging', dragging) || dirty;
-  dirty = d.set('dock', state.edge ? ['left','right','top','bottom'].indexOf(state.edge) + 1 : 0) || dirty;
+  dirty = d.set('dock', state.edge ? ['left', 'right', 'top', 'bottom'].indexOf(state.edge) + 1 : 0) || dirty;
   if (riveEpoch !== state.moodEpoch) {
-    const trigger = ({ waving: 'complete', jumping: 'complete', poked: 'poke', failed: 'fail' } as Record<string,string>)[state.mood];
-    if (trigger && !tucked) { d.fire(trigger); dirty = true; } riveEpoch = state.moodEpoch;
+    const trigger = (
+      { waving: 'complete', jumping: 'complete', poked: 'poke', failed: 'fail' } as Record<string, string>
+    )[state.mood];
+    if (trigger && !tucked) {
+      d.fire(trigger);
+      dirty = true;
+    }
+    riveEpoch = state.moodEpoch;
   }
   if (riveDynamics && procedural && !tucked && !motion.matches) {
     // Evaluate body motion first; springs respond to the actual animated root,
     // plus the controller's window drag velocity. Apply their blend inputs at t=0.
     riveActive = d.advance(dt);
     const m = d.artboard.rootBone(procedural.bodyBone).worldTransform();
-    for (const [name,value] of Object.entries(riveDynamics.step(dt,{x:m.tx,y:m.ty,angle:Math.atan2(m.xy,m.xx)},state.dragVelocity))) dirty = d.set(name,value) || dirty;
+    for (const [name, value] of Object.entries(
+      riveDynamics.step(dt, { x: m.tx, y: m.ty, angle: Math.atan2(m.xy, m.xx) }, state.dragVelocity),
+    ))
+      dirty = d.set(name, value) || dirty;
     d.advance(0);
   }
-  if (dirty || (procedural ? d.artboard.didChange() : riveActive) && !tucked && !motion.matches) {
+  if (dirty || ((procedural ? d.artboard.didChange() : riveActive) && !tucked && !motion.matches)) {
     riveActive = d.draw(tucked || motion.matches || riveDynamics ? 0 : dt).active;
     updateHit();
   }

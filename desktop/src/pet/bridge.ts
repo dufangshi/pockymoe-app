@@ -1,11 +1,16 @@
 import type { PetSound } from './sounds';
-import type { ActivityItem, ActivityRecent, Appearance, DesktopSettings, HostCommandResult } from '../shared/contract';
+import type {
+  ActivityItem,
+  ActivityRecent,
+  Appearance,
+  DesktopSettings,
+  HostCommandResult,
+} from '../shared/contract';
 import type { SpriteState } from './animation';
 import type { PetBubble } from './bubbles';
 import type { DockEdge, FaceBox, Rect, PeekArt } from './geometry';
 import type { ClipFormat, PetClip } from './packs';
 export interface PetViewState {
-  riveBackend?: import('./riveBackend').RiveBackend;
   rive?: import('./rive').RivePack & { epoch: number };
   cursor?: { x: number; y: number };
   dragging?: boolean;
@@ -31,7 +36,12 @@ export interface PetViewState {
   faceBox?: FaceBox;
   talk?: PetClip;
   peekArt?: PeekArt & { imageUrl: string };
-  clips: { format: ClipFormat; states: Partial<Record<SpriteState, PetClip[]>>; epoch: number; urls?: Record<string, string> } | null;
+  clips: {
+    format: ClipFormat;
+    states: Partial<Record<SpriteState, PetClip[]>>;
+    epoch: number;
+    urls?: Record<string, string>;
+  } | null;
   bubble: PetBubble | null;
   settings: Pick<DesktopSettings, 'petSize' | 'petMini' | 'petSound' | 'petVoice' | 'petId' | 'petMutes'>;
   imageUrl: string;
@@ -50,7 +60,9 @@ export interface PetViewState {
   panelHeight: number;
   targetKey: string | null;
 }
-export interface PetCue { sound: PetSound }
+export interface PetCue {
+  sound: PetSound;
+}
 export type PetAction =
   | { type: 'open' | 'approve' | 'deny' | 'revealInMap' | 'toggleMute'; key: string }
   | { type: 'reply'; key: string; text: string }
@@ -59,7 +71,9 @@ export type PetAction =
   | { type: 'detail'; value: boolean }
   | { type: 'surfaceMeasure'; width: number; height: number }
   | { type: 'setEdgeHide'; value: boolean }
-  | { type: 'toggleTray' | 'toggleChat' | 'click' | 'openMain' | 'preferences' | 'importFolder' | 'importZip' }
+  | {
+      type: 'toggleTray' | 'toggleChat' | 'click' | 'openMain' | 'preferences' | 'importFolder' | 'importZip';
+    }
   | { type: 'setSize'; size: 'S' | 'M' | 'L' }
   | { type: 'setPack'; id: string }
   | { type: 'setMini' | 'setSound' | 'setVoice' | 'setVisible'; value: boolean }

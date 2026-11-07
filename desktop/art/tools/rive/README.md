@@ -209,25 +209,36 @@ Native benchmark and isolated import verification put their temporary harness
 profiles under the requested output directory. Choose a private output directory
 for private artwork; copied pack files stay there with the rest of the evidence.
 
-For the matched backend controls, run one command from `desktop/` with only the
-two importable packs. Linux uses an isolated Xvfb display for each run; macOS
-uses its normal desktop display and does not force SwiftShader:
+The built application includes a self-contained benchmark command. On macOS,
+quit the normal app, then run the executable inside the built app bundle:
 
 ```sh
-node art/tools/rive/benchmark-suite.mjs /private/Rive.zip /private/WebM.zip /private/benchmark-output
+/Applications/Pockymoe.app/Contents/MacOS/Pockymoe --pet-benchmark \
+  /private/Rive.zip /private/WebM.zip --output /private/benchmark-output
 ```
 
-It builds an isolated pet harness, validates/extracts both ZIPs, and runs WebM,
-a textured WebGL2 quad, forced WebGL2 Rive, forced Canvas Rive and automatic
-backend selection sequentially at DPR 1 and 2, three 60-second runs each.
+Only the built app and the two ZIPs are needed: no source checkout, Node, pnpm,
+Playwright, account or Supervisor. The command validates/imports the packs into
+isolated profiles, then runs WebM, a textured quad and WebGL2 Rive sequentially,
+three 60-second runs each, at the primary display's native DPR. Each run launches
+a fresh process. The middle repetition reverses the order. Keep other CPU/GPU
+work stopped and leave the primary display attached for the measurement.
+
 `backend-medians.json` and the printed table give renderer and GPU process CPU,
-median of their sum, ratios to WebM, logical core count, actual chosen backend,
-and Chromium-native ReadPixels per second from the same GPU-service CDP trace
-window. Native transfers are distinct from the app's pointer alpha probes.
-All runs include the same trace categories. The controls and URL override are
-compiled only into the isolated harness, never the production renderer.
-Use a fresh output directory after changing either ZIP; saved runs may be
-resumed only for identical packs. Keep other CPU/GPU work stopped during a run.
+median of their sum, raw ratios to WebM, logical core count, pack SHA-256s,
+Chromium-native ReadPixels/s and app alpha probes/s. One logical core = 100%;
+GPU process CPU is not physical GPU utilization. Native transfers are distinct
+from app alpha probes. Each run uses the same CDP GPU-service trace categories.
+The software-host diagnostic gate is `(median Rive − median quad) ≤ median WebM`;
+the raw total and ratio remain in the report. Hardware results should be reviewed
+as raw values too. `--seconds 1` is a smoke check and never passes the 60-second
+gate. Choose a new output directory for each benchmark.
+
+Linux can prefix the same built executable command with `xvfb-run -a`. It enables
+SwiftShader only in the Linux benchmark children; macOS retains its normal GPU.
+For local development, substitute `node_modules/electron/dist/electron
+out/main/index.js` after `pnpm build`. The benchmark renderer is a separate entry;
+the normal pet renderer contains neither the quad nor instrumentation wrappers.
 
 The quad control retains the same Rive source clock and procedural spring inputs
 to match its adaptive 24/60 Hz schedule, while replacing all character drawing
