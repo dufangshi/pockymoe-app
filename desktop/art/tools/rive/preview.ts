@@ -16,7 +16,7 @@ const app = await electron.launch({ executablePath: resolve('node_modules/electr
 try {
   const page = await app.firstWindow(); page.on('pageerror', e => console.error(e));
   await page.waitForFunction(() => 'preview' in window);
-  const bytes = [...await readFile(file)];
+  const bytes = (await readFile(file)).toString('base64');
   // Bound hangs in native import or script initialization as well as malformed files.
   let timer: ReturnType<typeof setTimeout> | undefined;
   try { await Promise.race([
@@ -24,10 +24,34 @@ try {
     page.evaluate(async ({ bytes, artboard, stateMachine }) => window.preview.load(bytes, { path: 'pet.riv', artboard, stateMachine }), { bytes, artboard, stateMachine }),
   ]); } finally { clearTimeout(timer); }
   // Image decoding finishes asynchronously after import. Verify visible pixels, not just successful parsing.
-  await page.waitForFunction(() => {
+  const sizeArg = process.argv.indexOf('--size');
+  const size = sizeArg >= 0 ? process.argv[sizeArg + 1].split('x').map(Number) : [384, 416];
+  if (size.length !== 2 || size.some(n => !Number.isInteger(n) || n < 64 || n > 2048)) throw new Error('Invalid --size WIDTHxHEIGHT');
+  await page.evaluate(([w, h]) => window.preview.resize(w, h), size);
+  await page.waitForFunction(async () => {
     const data = window.preview.render(0, 1); const image = new Image(); image.src = data;
-    return image.complete;
+    await image.decode(); return true;
   });
+  const scenarioArg = process.argv.indexOf('--scenarios');
+  if (scenarioArg >= 0) {
+    const scenarios = JSON.parse(await readFile(process.argv[scenarioArg + 1], 'utf8')) as { name: string; values: Record<string, number | boolean>; trigger?: string; frames: number[] }[];
+    for (const scenario of scenarios) {
+      if (!/^[a-zA-Z0-9_-]+$/.test(scenario.name)) throw new Error('Unsafe scenario name');
+      await page.evaluate(async ({ bytes, artboard, stateMachine }) => window.preview.load(bytes, { path: 'pet.riv', artboard, stateMachine }), { bytes, artboard, stateMachine });
+      await page.evaluate(([w, h]) => window.preview.resize(w, h), size);
+      const captures: { label: string; data: string }[] = []; let previous = 0;
+      for (const [i, frame] of scenario.frames.entries()) {
+        const data = await page.evaluate(({ values, trigger, frames }) => window.preview.render(0, frames, values, trigger), { values: scenario.values, trigger: i ? undefined : scenario.trigger, frames: Math.max(1, frame - previous) }); previous = frame;
+        await writeFile(resolve(output, `${scenario.name}-${frame}.png`), Buffer.from(data.split(',')[1], 'base64'));
+        captures.push({ label: `frame=${frame} t=${(frame / 60).toFixed(2)}s`, data });
+      }
+      const sheet = await page.evaluate(({ name, captures }) => window.preview.sheet(name, captures), { name: scenario.name, captures });
+      await writeFile(resolve(output, `${scenario.name}.png`), Buffer.from(sheet.split(',')[1], 'base64'));
+    }
+    console.log(`PASS ${scenarios.length} preview scenarios`);
+    await page.evaluate(async ({ bytes, artboard, stateMachine }) => window.preview.load(bytes, { path: 'pet.riv', artboard, stateMachine }), { bytes, artboard, stateMachine });
+    await page.evaluate(([w, h]) => window.preview.resize(w, h), size);
+  }
   const hashes = new Set<string>();
   for (const [state, name] of ['idle', 'running', 'waiting', 'failed', 'review', 'sleeping', 'resting'].entries()) {
     const frames: { label: string; data: string }[] = [];

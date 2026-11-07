@@ -25,7 +25,7 @@ example. Artboard dimensions, image placement and mesh coordinates are in pixels
 rotations are radians; UV coordinates are normalized. Image placement is the
 image center. Image array order is **front to back** (Rive draws in reverse).
 Mesh vertices are `[x,y,u,v]` relative to the image center; triangle indices are
-unsigned varints. A skinned image must have unit scale and no parent. Skeleton
+unsigned varints. A skinned image must have unit scale; its parent may be an identity opacity group. Skeleton
 parents precede children. A normal child bone starts at the parent's +X tip;
 `offset:true` creates a RootBone with explicit local x/y under its parent.
 Skin/tendon bind transforms are calculated from the rest pose. Distance to bone
@@ -85,3 +85,27 @@ they do not depend on Electron's normalized percentage or sampling intervals. GP
 not hardware GPU busy percentage; virtual/software GPU runs do not measure a
 physical GPU's utilization. The harness has an isolated account/profile, no
 Supervisor connection, and produces pet-window and appearance captures.
+
+`Rig.groups` adds identity-transform opacity nodes. A mesh may use one of these
+as its parent while retaining artboard-space coordinates and skin binds; other
+mesh parents are rejected. This lets a pose fade as one group while independent
+mouth/gaze layers animate its children. Linear keys explicitly write the unset
+interpolator sentinel (`0xffffffff`); cubic keys reference the pinned concrete
+CubicEaseInterpolator.
+
+For authored motion plans or arbitrary contract probes, preview additionally
+accepts `--size 648x702 --scenarios /private/path/scenarios.json`. A scenario is
+`{name, values, trigger?, frames}`: safe filename stem, typed input values, optional
+one-shot trigger, and ascending sample times measured in 60 Hz frames. Each
+scenario starts from a fresh machine and writes individual frames plus a labelled
+sheet. The standard seven-state/six-trigger checks run afterward from a fresh
+machine. Simulation advances at 60 Hz but only requested frames are drawn.
+PNG decode waiting never advances the animation until its cached image repeats.
+Large binaries cross the Node/renderer boundary as base64, avoiding millions of
+serialized integer entries.
+
+The isolated verifier accepts `OUTPUT --pack PACK --zip ZIP` to test a chosen
+pack and its real ZIP installation. `RIVE_BENCH_CAPTURE=1` enables alpha and dock
+assertions plus the full theme/dark-light captures for any benchmark pack ID.
+Dock captures include all four edges in all six appearances. Benchmarks record
+logical CPU count and actual elapsed seconds; one logical core = 100%.

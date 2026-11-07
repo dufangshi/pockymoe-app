@@ -15,7 +15,7 @@ export async function verifyRivePack(bytes: Buffer, config: RivePack): Promise<v
         const dev = process.env.ELECTRON_RENDERER_URL;
         if (dev) await window.loadURL(`${dev.replace(/\/$/, '')}/pet/riveValidate.html`);
         else await window.loadFile(join(__dirname, '../renderer/pet/riveValidate.html'));
-        await window.webContents.executeJavaScript(`window.verifyRive(${JSON.stringify([...bytes])}, ${JSON.stringify(config)})`);
+        await window.webContents.executeJavaScript(`window.verifyRive(${JSON.stringify(bytes.toString('base64'))}, ${JSON.stringify(config)})`);
       })(),
       new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('Rive validation timed out')), 15000); }),
     ]);

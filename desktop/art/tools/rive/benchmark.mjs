@@ -35,7 +35,7 @@ try{
  const info=await app.evaluate(async({app})=>({features:app.getGPUFeatureStatus(),gpu:await app.getGPUInfo('basic')}));
  const result={id,seconds:Number(seconds),elapsed,logicalCPUs:cpus().length,rendererCPU:mean('pet'),gpuProcessCPU:mean('GPU'),note:'CPU seconds / measured wall seconds * 100 (one fully busy logical core = 100%). GPU process CPU is not GPU hardware utilization.',info,samples};
  await writeFile(resolve(out,'metrics.json'),JSON.stringify(result,null,2));
- if(id==='mint-courier'){
+ if(id==='mint-courier'||process.env.RIVE_BENCH_CAPTURE==='1'){
   const png=PNG.sync.read(await sprite.screenshot({omitBackground:true}));let sx=0,sy=0,n=0;
   for(let y=0;y<png.height;y++)for(let x=0;x<png.width;x++)if(png.data[(y*png.width+x)*4+3]>180){sx+=x;sy+=y;n++;}
   const size=await sprite.evaluate(()=>({w:innerWidth,h:innerHeight}));
@@ -44,7 +44,8 @@ try{
    const ignored=await app.evaluate(()=>globalThis.petHarness.ignored());if(ignored!==expected)throw new Error(`Alpha hit: ignored=${ignored} expected=${expected}`);
   }
   await app.evaluate(()=>{globalThis.petHarness.workArea(1440);globalThis.petHarness.settings({petEdgeHide:true});});
-  for(const [edge,x,y] of [['left',0,300],['right',1312,300],['top',600,38],['bottom',600,710]]){
+  const windowSize=await app.evaluate(()=>globalThis.petHarness.metrics().sprite);
+  for(const [edge,x,y] of [['left',0,300],['right',1440-windowSize.width,300],['top',600,38],['bottom',600,838-windowSize.height]]){
    const b=await app.evaluate(()=>globalThis.petHarness.metrics().sprite);
    await sprite.evaluate(async({b,x,y})=>{for(const a of [{type:'dragStart',x:b.x,y:b.y},{type:'dragMove',x,y},{type:'dragEnd',x,y}])await window.rcDesktop.pet.action(a);},{b,x,y});
    await sprite.waitForTimeout(1500);
@@ -52,11 +53,15 @@ try{
    await writeFile(resolve(out,`dock-${edge}.png`),after);
    const tucked=await sprite.locator('#character').evaluate(e=>e.classList.contains('docked-rest'));
    if(!tucked||!before.equals(after))throw new Error(`Tucked Rive did not hold: ${edge}`);
+   for(const theme of ['classic','plum-pocket','terminal'])for(const effective of ['light','dark']){
+    await app.evaluate((_,{theme,effective})=>globalThis.petHarness.appearance({pack:theme,effective,accent:'#ad782e'}),{theme,effective});
+    await sprite.waitForTimeout(120);await sprite.screenshot({path:resolve(out,`dock-${edge}-${theme}-${effective}.png`),omitBackground:true});
+   }
   }
   await app.evaluate(()=>globalThis.petHarness.settings({petEdgeHide:false}));
  }
  // Appearance/width inspection runs after the idle measurement.
- if(id==='mint-courier')for(const width of [1440,390])for(const theme of ['classic','plum-pocket','terminal'])for(const effective of ['light','dark']){
+ if(id==='mint-courier'||process.env.RIVE_BENCH_CAPTURE==='1')for(const width of [1440,390])for(const theme of ['classic','plum-pocket','terminal'])for(const effective of ['light','dark']){
   await app.evaluate((_,{width,theme,effective})=>{globalThis.petHarness.workArea(width);globalThis.petHarness.appearance({pack:theme,effective,accent:'#ad782e'});},{width,theme,effective});
   await sprite.waitForTimeout(120);await sprite.screenshot({path:resolve(out,`${theme}-${effective}-${width}.png`),omitBackground:true});
  }

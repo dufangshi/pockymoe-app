@@ -15,6 +15,14 @@ describe('Rive authoring', () => {
       expect((w.indices&255)).toBeGreaterThan(0);
     }
   });
+  it('authors opacity groups without allowing transformed mesh parents', () => {
+    const rig=JSON.parse(readFileSync('art/rive-sample/rig.json','utf8')) as Rig;
+    rig.groups=[{name:'pose',opacity:0}]; rig.images[0].parent='pose';
+    rig.animations[0].tracks.push({target:'pose',property:'opacity',keys:[{frame:0,value:1}]});
+    expect(buildRig(rig,resolve('art/rive-sample')).subarray(0,4).toString()).toBe('RIVE');
+    rig.images[0].parent=rig.bones[0].name;
+    expect(()=>buildRig(rig,resolve('art/rive-sample'))).toThrow('identity group');
+  });
   it('rejects broken mesh topology and unknown animation targets before writing', () => {
     const rig=JSON.parse(readFileSync('art/rive-sample/rig.json','utf8')) as Rig;
     rig.images[0].mesh!.triangles[0]=999;

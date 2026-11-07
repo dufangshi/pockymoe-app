@@ -50,6 +50,8 @@ export interface Track { target: string; property: string; keys: { frame: number
 export interface Rig {
   artboard: { name: string; width: number; height: number };
   bones: Bone[]; images: Part[];
+  /** Identity-transform opacity groups, useful for pose sets with independent mouth layers. */
+  groups?: { name: string; opacity?: number }[];
   animations: { name: string; fps?: number; duration: number; loop?: boolean; tracks: Track[] }[];
   stateMachine: { name: string; inputs: { name: string; type: 'number' | 'bool' | 'trigger'; value?: number | boolean }[];
     layers: { name: string; states: { name: string; animation?: string; kind?: 'entry' | 'any' | 'exit'; blend?: { input: string; animations: { animation: string; value: number }[] }; transitions?: { to: string; duration?: number; exitTime?: number; conditions?: { input: string; op?: number; value?: number | boolean }[] }[] }[] }[] };
@@ -82,6 +84,7 @@ export function buildRig(rig: Rig, base: string): Buffer {
     w.object('file_asset_contents', { bytes: readFileSync(resolve(base, part.path)) });
   });
   w.object('artboard', { name: rig.artboard.name, width: rig.artboard.width, height: rig.artboard.height });
+  for (const g of rig.groups ?? []) add('node', g.name, { name: g.name, opacity: g.opacity ?? 1, parentId: 0 });
   // Bind transforms use root bones or chains extending along their parent's +X axis.
   const binds = new Map<string, { x: number; y: number; angle: number; length: number }>();
   for (const bone of rig.bones) {
@@ -96,7 +99,7 @@ export function buildRig(rig: Rig, base: string): Buffer {
   rig.images.forEach((part, assetId) => {
     const image = add('image', part.name, { name: part.name, parentId: id(part.parent), assetId, x: part.x, y: part.y, scaleX: part.scaleX ?? 1, scaleY: part.scaleY ?? 1, opacity: part.opacity ?? 1 });
     if (!part.mesh) return;
-    if (part.parent || (part.scaleX ?? 1) !== 1 || (part.scaleY ?? 1) !== 1) throw new Error('Mesh image must be artboard-local with unit scale');
+    if (part.parent && !rig.groups?.some(g => g.name === part.parent) || (part.scaleX ?? 1) !== 1 || (part.scaleY ?? 1) !== 1) throw new Error('Mesh image must have an identity group parent and unit scale');
     const mesh = part.mesh;
     if (mesh.vertices.length < 3 || mesh.vertices.length > 65535 || mesh.vertices.some(v => v.length !== 4 || v.some(n => !Number.isFinite(n))) || mesh.triangles.length < 3 || mesh.triangles.length % 3 || mesh.triangles.some(i => !Number.isInteger(i) || i < 0 || i >= mesh.vertices.length)) throw new Error(`Invalid triangles ${part.name}`);
     const mid = add('mesh', `${part.name}.mesh`, { parentId: image, triangleIndexBytes: Buffer.concat(mesh.triangles.map(varuint)) });
@@ -123,7 +126,7 @@ export function buildRig(rig: Rig, base: string): Buffer {
       if (!prop || prop[1] !== 'CoreDoubleType') throw new Error(`Not an animatable float: ${t.target}.${t.property}`);
       if (!t.keys.length || t.keys.some((k, i) => !Number.isInteger(k.frame) || k.frame < 0 || k.frame > a.duration || i > 0 && k.frame <= t.keys[i - 1].frame)) throw new Error(`Unordered/out-of-range keys ${a.name}`);
       w.object('keyed_object', { objectId: id(t.target) }); w.object('keyed_property', { propertyKey: Number(prop[0]) });
-      for (const k of t.keys) w.object('keyframe_double', { frame: k.frame, value: k.value, interpolationType: k.cubic ? 2 : 1, ...(k.cubic ? { interpolatorId: curves.get(JSON.stringify(k.cubic))! } : {}) });
+      for (const k of t.keys) w.object('keyframe_double', { frame: k.frame, value: k.value, interpolationType: k.cubic ? 2 : 1, interpolatorId: k.cubic ? curves.get(JSON.stringify(k.cubic))! : 0xffffffff });
     }
   }
   const sm = rig.stateMachine;
