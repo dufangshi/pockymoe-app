@@ -309,7 +309,7 @@ reaction epochs replay triggers. Sustained controller mood semantics are unchang
 `resting` is available to authoring/preview. Automatic resting requires the
 optional Rive motion plan described below; packs without it retain direct state control.
 
-Only `pet.riv` is accepted, up to 16 MiB. ZIPs and Rive folders must contain exactly
+Only `pet.riv` is accepted, up to 64 MiB. Layered drawing variants can exceed a single raster clip; the expanded pack cap remains 256 MiB. ZIPs and Rive folders must contain exactly
 `pet.json`, its atlas, `pet.riv`, and any declared sleeping/peek/clip files. Existing
 path, symlink, image and ZIP limits still apply. Import requires a test-load in a
 fresh sandboxed renderer with no preload or host bridge. It checks selectors and
@@ -377,3 +377,11 @@ shift to 1/12, and springs to 1/1024; author small micro-motion ranges so these
 steps remain below a visible pixel at the intended size/DPR. Speech still uses
 the existing 60/120 ms envelope. The benchmark records actual WebGL readbacks
 per second as evidence of draws skipped; this is separate from animation FPS.
+
+A procedural pack may additionally set `eyeOpen:true` and provide a number
+input named `eyeOpen`. The pet sets this to 1 for a cursor gaze and 0 otherwise.
+For sleeping/resting poses it requires the cursor within a region three pet
+widths/heights centred on the character, so a distant cursor does not wake a
+closed-eye bed pose. Blink can close the same eye overlay above this channel.
+This lets one shared eye drawing respond to both gaze axes without submitting
+two overlapping eye images. Explicit preview gaze values open this channel.

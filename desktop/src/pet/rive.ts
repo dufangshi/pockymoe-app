@@ -36,7 +36,7 @@ export class RiveDrawer {
       const gl = canvas.getContext('webgl2'); if (!gl) throw new Error('WebGL2 unavailable');
       const drawer = new RiveDrawer(r, file, artboard, machine, renderer, canvas, gl);
       for (let i = 0; i < machine.inputCount(); i++) { const input = machine.input(i); if (drawer.inputs.has(input.name)) throw new Error(`Duplicate input ${input.name}`); drawer.inputs.set(input.name, input.type === r.SMIInput.number ? input.asNumber() : input.type === r.SMIInput.bool ? input.asBool() : input.asTrigger()); }
-      for (const [name, type] of Object.entries({ ...RIVE_INPUTS, ...(config.motions ? { motion: 'number', motionStart: 'trigger' } : {}), ...(config.procedural ? Object.fromEntries(RIVE_DYNAMIC_INPUTS.map(n => [n, 'number'])) : {}) })) {
+      for (const [name, type] of Object.entries({ ...RIVE_INPUTS, ...(config.motions ? { motion: 'number', motionStart: 'trigger' } : {}), ...(config.procedural ? Object.fromEntries(RIVE_DYNAMIC_INPUTS.map(n => [n, 'number'])) : {}), ...(config.procedural?.eyeOpen ? { eyeOpen: 'number' } : {}) })) {
         const input = drawer.inputs.get(name);
         if (!input || input.type !== r.SMIInput[type as 'number' | 'bool' | 'trigger']) throw new Error(`Missing or wrong-type pet contract input: ${name}`);
       }

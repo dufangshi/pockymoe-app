@@ -9,7 +9,9 @@ import { basename, join } from 'node:path';
 import { inflateRawSync } from 'node:zlib';
 import { randomUUID } from 'node:crypto';
 
-export const MAX_RIVE_BYTES = 16 * 1024 * 1024;
+// Drawing variants in a layered character can exceed a single raster clip.
+// Keep a finite per-file cap inside the unchanged 256 MiB expanded pack cap.
+export const MAX_RIVE_BYTES = 64 * 1024 * 1024;
 export const MAX_PACK_BYTES = 8 * 1024 * 1024;
 const MAX_MANIFEST_BYTES = 16 * 1024;
 export interface SleepingStrip { path: 'sleeping.webp' | 'sleeping.png'; frames: number; durationsMs: number[] }
@@ -47,6 +49,7 @@ export function parseManifest(data: Buffer): PetManifest {
       if (!r.motions || typeof r.motions !== 'object' || Array.isArray(r.motions) || Object.entries(r.motions).some(([state, beats]) => !['idle','running','waiting','waving','jumping','poked','failed','review','sleeping','dragging','landing','resting'].includes(state) || !Array.isArray(beats) || !beats.length || beats.length > 32 || beats.some(b => !b || !Number.isInteger(b.value) || b.value < 0 || b.value > 1023 || !Number.isFinite(b.durationMs) || b.durationMs < 16 || b.durationMs > 60000 || b.role !== undefined && !['intro','outro'].includes(b.role)))) fail('invalid Rive motions');
     }
     if (r.procedural !== undefined && (!r.procedural || typeof r.procedural.bodyBone !== 'string' || !r.procedural.bodyBone.length || r.procedural.bodyBone.length > 100 || ![15,24,30].includes(r.procedural.idleFps) || ![30,60].includes(r.procedural.activeFps))) fail('invalid Rive procedural settings');
+    if (r.procedural?.eyeOpen !== undefined && typeof r.procedural.eyeOpen !== 'boolean') fail('invalid Rive eyeOpen setting');
     remoteCodex.rive = { path: 'pet.riv', artboard: r.artboard, stateMachine: r.stateMachine, ...(r.motions ? { motions: r.motions } : {}), ...(r.procedural ? { procedural: r.procedural } : {}) };
   }
   const extension = extensions?.sleeping as SleepingStrip | undefined;
@@ -248,7 +251,7 @@ export function unpackPetZip(bytes: Buffer): Map<string, Buffer> {
   return entries;
 }
 function checkRive(bytes: Buffer): void {
-  if (bytes.length < 8 || bytes.length > MAX_RIVE_BYTES || bytes.toString('ascii', 0, 4) !== 'RIVE') fail('Rive file must have RIVE header and be at most 16 MiB');
+  if (bytes.length < 8 || bytes.length > MAX_RIVE_BYTES || bytes.toString('ascii', 0, 4) !== 'RIVE') fail('Rive file must have RIVE header and be at most 64 MiB');
 }
 export async function readRive(pack: PetPack): Promise<Buffer | null> {
   if (!pack.manifest.remoteCodex?.rive) return null;

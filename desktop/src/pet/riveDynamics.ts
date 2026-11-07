@@ -1,5 +1,5 @@
 export const RIVE_DYNAMIC_INPUTS = ['blink','breath','weightShift','swayHair','swayGown','swayWings','dragLean'] as const;
-export interface RiveProcedural { bodyBone: string; idleFps: 15 | 24 | 30; activeFps: 30 | 60 }
+export interface RiveProcedural { bodyBone: string; idleFps: 15 | 24 | 30; activeFps: 30 | 60; eyeOpen?: boolean }
 export interface BodySample { x: number; y: number; angle: number }
 const clamp = (v: number, limit = 1): number => Math.max(-limit, Math.min(limit, v));
 /** Inertial springs, integrated at <=1/120 s; no fixed looping secondary keys. */

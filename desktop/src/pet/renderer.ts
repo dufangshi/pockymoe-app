@@ -296,9 +296,13 @@ function stepRive(now: number): void {
   const mood = state.mood === 'waving' || state.mood === 'jumping' || state.mood === 'poked' || state.mood === 'landing' || state.mood === 'dragging' ? 'idle' : state.mood;
   dirty = d.set('state', tucked ? 0 : Math.max(0, (RIVE_STATES as readonly string[]).indexOf(mood.startsWith('running-') ? 'running' : mood))) || dirty;
   dirty = d.set('mouth', tucked ? 0 : speechLevel(now)) || dirty;
-  const cursor = state.cursor;
+  // A sleeping face wakes for a nearby gaze, rather than every distant cursor
+  // poll. Other packs keep their existing cursor behavior.
+  const dozingFace = procedural?.eyeOpen && ['sleeping','resting'].includes(state.mood);
+  const cursor = !dozingFace || state.cursor && Math.abs(state.cursor.x-state.pet.width/2)<state.pet.width && Math.abs(state.cursor.y-state.pet.height/2)<state.pet.height ? state.cursor : undefined;
   dirty = d.set('lookX', cursor && !tucked ? Math.max(-1, Math.min(1, (cursor.x / state.pet.width - .5) * 2)) : 0) || dirty;
   dirty = d.set('lookY', cursor && !tucked ? Math.max(-1, Math.min(1, (cursor.y / state.pet.height - .5) * 2)) : 0) || dirty;
+  if (procedural?.eyeOpen) dirty = d.set('eyeOpen', !!cursor && !tucked ? 1 : 0) || dirty;
   const dragging = !!state.dragging;
   if (dragging !== riveDragging) { d.fire(dragging ? 'dragStart' : 'land'); riveDragging = dragging; dirty = true; }
   dirty = d.set('dragging', dragging) || dirty;

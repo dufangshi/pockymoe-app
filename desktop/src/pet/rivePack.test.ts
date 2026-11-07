@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { parseManifest, importPetPack } from './packs';
-import { mkdtemp, mkdir, writeFile, readFile, rm, access } from 'node:fs/promises';
+import { parseManifest, importPetPack, MAX_RIVE_BYTES } from './packs';
+import { mkdtemp, mkdir, writeFile, readFile, rm, access, truncate } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 const manifest = { id: 'rive-fixture', displayName: 'Rive', description: '', spritesheetPath: 'spritesheet.png', remoteCodex: { rive: { path: 'pet.riv', artboard: 'Pet', stateMachine: 'Pet' } } };
@@ -19,14 +19,18 @@ describe('Rive pack import', () => {
       await expect(importPetPack(source,dest)).rejects.toThrow('isolated runtime');
       await expect(importPetPack(source,dest,undefined,[],async () => { throw new Error('Missing state machine: Pet'); })).rejects.toThrow('Missing state machine');
       await expect(access(join(dest,manifest.id))).rejects.toThrow();
+      await truncate(join(source, 'pet.riv'),MAX_RIVE_BYTES+1);
+      await expect(importPetPack(source,dest,undefined,[],async () => undefined)).rejects.toThrow('size limit');
+      await writeFile(join(source, 'pet.riv'),Buffer.from('RIVE\x07\x00\x00\x00'));
       await writeFile(join(source, 'extra.txt'),'unexpected');
       await expect(importPetPack(source,dest,undefined,[],async () => undefined)).rejects.toThrow('only pet.json');
     } finally { await rm(root,{recursive:true,force:true}); }
   });
   it('validates and preserves optional procedural settings', () => {
     const parse = (procedural: unknown) => parseManifest(Buffer.from(JSON.stringify({...manifest,remoteCodex:{rive:{...manifest.remoteCodex.rive,procedural}}})));
-    const valid = {bodyBone:'body',idleFps:24,activeFps:60};
+    const valid = {bodyBone:'body',idleFps:24,activeFps:60,eyeOpen:true};
     expect(parse(valid).remoteCodex?.rive?.procedural).toEqual(valid);
     for (const invalid of [null,{}, {...valid,bodyBone:''}, {...valid,idleFps:60}, {...valid,activeFps:24}]) expect(()=>parse(invalid)).toThrow('procedural');
+    expect(()=>parse({...valid,eyeOpen:'yes'})).toThrow('eyeOpen');
   });
 });
