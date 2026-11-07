@@ -62,4 +62,45 @@ final class RemoteCodexUITests: XCTestCase {
         screenshot.lifetime = .keepAlways
         add(screenshot)
     }
+
+    /// The composer rises once above the soft keyboard and the keyboard stays.
+    /// Runs against scripts/ios-keyboard-mock.py (the tour's sample thread).
+    func testComposerStaysAboveKeyboard() throws {
+        continueAfterFailure = true
+        let relay = try XCTUnwrap(ProcessInfo.processInfo.environment["E2E_RELAY_URL"], "Missing E2E_RELAY_URL")
+        let app = XCUIApplication()
+        app.launchArguments = ["--uitesting"]
+        app.launchEnvironment = ["E2E_RELAY_URL": relay, "E2E_TOKEN": "keyboard-check"]
+        app.launch()
+        let system = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let allow = system.alerts.buttons["Allow"].firstMatch
+        if allow.waitForExistence(timeout: 5) { allow.tap() }
+        let prompt = app.textViews["Prompt"]
+        XCTAssertTrue(prompt.waitForExistence(timeout: 40), app.debugDescription)
+        // A first-visit card can sit over the page; it is not part of this check.
+        let later = app.buttons["Later"].firstMatch
+        if later.waitForExistence(timeout: 3) { later.tap() }
+        func capture(_ name: String) {
+            let shot = XCTAttachment(screenshot: app.screenshot())
+            shot.name = name
+            shot.lifetime = .keepAlways
+            add(shot)
+        }
+        capture("before tapping the composer")
+        let before = prompt.frame
+        prompt.tap()
+        let keyboard = app.keyboards.firstMatch
+        let shown = keyboard.waitForExistence(timeout: 8)
+        Thread.sleep(forTimeInterval: 0.6)
+        capture("keyboard just opened")
+        Thread.sleep(forTimeInterval: 2.5)
+        capture("three seconds later")
+        let stays = keyboard.exists && keyboard.frame.height > 0
+        let gap = keyboard.frame.minY - prompt.frame.maxY
+        print("KEYBOARD-CHECK shown=\(shown) stays=\(stays) keyboardTop=\(keyboard.frame.minY) keyboardHeight=\(keyboard.frame.height) promptBefore=\(before) promptAfter=\(prompt.frame) gap=\(gap) window=\(app.windows.firstMatch.frame)")
+        XCTAssertTrue(shown, "The soft keyboard opens")
+        XCTAssertTrue(stays, "The soft keyboard stays open")
+        XCTAssertGreaterThanOrEqual(gap, 0, "The composer is not under the keyboard")
+        XCTAssertLessThan(gap, 90, "The composer sits just above the keyboard, not far above it")
+    }
 }

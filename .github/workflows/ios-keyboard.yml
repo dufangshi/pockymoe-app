@@ -1,0 +1,81 @@
+name: iOS keyboard check
+# Runs on ci/ios-keyboard* branches, or by hand: the composer must rise once above the soft keyboard,
+# and the keyboard must stay. The page is the current Web's tour sample thread.
+on:
+  push:
+    branches: ['ci/ios-keyboard**']
+  workflow_dispatch:
+    inputs:
+      web_ref:
+        description: Pockymoe (control plane) ref whose Web to load
+        default: main
+permissions:
+  contents: read
+concurrency:
+  group: ios-keyboard-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  simulator:
+    runs-on: macos-15
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: dufangshi/pockymoe
+          ref: ${{ inputs.web_ref || 'main' }}
+          path: control-plane
+      - name: Read the shared UI pin
+        id: ui
+        run: echo "sha=$(cat control-plane/thread-ui.sha)" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        with:
+          repository: dufangshi/pockymoe-thread-ui-rust
+          ref: ${{ steps.ui.outputs.sha }}
+          path: control-plane/pockymoe-thread-ui
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.11.1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Build the Web (local mode)
+        working-directory: control-plane
+        run: |
+          pnpm --dir pockymoe-thread-ui install --frozen-lockfile
+          pnpm --dir pockymoe-thread-ui --filter @pockymoe/thread-ui build
+          pnpm --filter @pockymoe/supervisor-web... install --frozen-lockfile
+          pnpm --filter @pockymoe/supervisor-web build
+      - name: Serve it and boot a simulator with the software keyboard
+        run: |
+          python3 scripts/ios-keyboard-mock.py control-plane/apps/supervisor-web/dist 8765 &
+          brew install xcodegen
+          defaults write com.apple.iphonesimulator ConnectHardwareKeyboard -bool false
+          SIMULATOR_ID=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; print(next(d["udid"] for ds in json.load(sys.stdin)["devices"].values() for d in ds if d["name"].startswith("iPhone")))')
+          xcrun simctl boot "$SIMULATOR_ID"
+          xcrun simctl bootstatus "$SIMULATOR_ID" -b
+          echo "IOS_DEST=platform=iOS Simulator,id=$SIMULATOR_ID" >> "$GITHUB_ENV"
+          curl -sf -o /dev/null http://127.0.0.1:8765/index.html
+      - name: Tap the composer and measure the keyboard
+        run: |
+          cd ios
+          xcodegen generate
+          set -o pipefail
+          TEST_RUNNER_E2E_RELAY_URL=http://127.0.0.1:8765 xcodebuild \
+            -project RemoteCodex.xcodeproj -scheme RemoteCodex -destination "$IOS_DEST" \
+            -only-testing:RemoteCodexUITests/RemoteCodexUITests/testComposerStaysAboveKeyboard \
+            -resultBundlePath "$GITHUB_WORKSPACE/keyboard.xcresult" CODE_SIGNING_ALLOWED=NO test 2>&1 | tee ../xcodebuild.log | grep -E "KEYBOARD-CHECK|error:|Test Case|passed|failed" || true
+          grep -q "Test Suite 'Selected tests' passed" ../xcodebuild.log
+      - name: Export screenshots
+        if: always()
+        run: |
+          mkdir -p shots
+          xcrun xcresulttool export attachments --path keyboard.xcresult --output-path shots 2>/dev/null || true
+          ls shots | head -20
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ios-keyboard-${{ github.run_id }}
+          path: |
+            shots
+            xcodebuild.log
