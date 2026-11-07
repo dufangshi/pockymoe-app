@@ -12,6 +12,7 @@ from pathlib import Path
 
 DIST = Path(sys.argv[1]).resolve()
 PORT = int(sys.argv[2]) if len(sys.argv) > 2 else 8765
+LAYOUT = sys.argv[3] if len(sys.argv) > 3 else 'dock'
 THREAD = '/devices/pockymoe-tour/threads/c27d9e41-5b8a-4f3c-8e61-2d4b7a9c1e01'
 PROBE = '''<div id="kb-probe" role="img" aria-label="KBPROBE" style="position:fixed;left:0;top:0;width:2px;height:2px;opacity:0.01;z-index:2147483647"></div>
 <script>setInterval(() => {
@@ -66,7 +67,11 @@ class Handler(SimpleHTTPRequestHandler):
         # Supervisor's SPA server adjusts its relative <base>).
         page = (DIST / 'index.html').read_text().replace('<base href="./"', '<base href="/"')
         # The test reads the page's own viewport readings from this element.
-        page = page.replace('</body>', PROBE + '</body>').encode()
+        page = page.replace('</body>', PROBE + '</body>')
+        # The phone's classic layout (no dock), when asked for.
+        if LAYOUT == 'classic':
+            page = page.replace('<head>', "<head><script>localStorage.setItem('pockymoe.phoneDock','off')</script>", 1)
+        page = page.encode()
         self.send_response(200)
         self.send_header('Content-Type', 'text/html; charset=utf-8')
         self.send_header('Content-Length', str(len(page)))
