@@ -228,3 +228,9 @@ All runs include the same trace categories. The controls and URL override are
 compiled only into the isolated harness, never the production renderer.
 Use a fresh output directory after changing either ZIP; saved runs may be
 resumed only for identical packs. Keep other CPU/GPU work stopped during a run.
+
+The quad control retains the same Rive source clock and procedural spring inputs
+to match its adaptive 24/60 Hz schedule, while replacing all character drawing
+with one textured quad. Its CPU includes scene advancement; its measured GPU
+work is the quad and presentation. The per-run draw-frame and call counters
+allow checking this control rather than assuming a fixed requested fps.
