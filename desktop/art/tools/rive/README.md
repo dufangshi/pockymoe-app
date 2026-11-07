@@ -99,7 +99,9 @@ accepts `--size 648x702 --scenarios /private/path/scenarios.json`. A scenario is
 one-shot trigger, and ascending sample times measured in 60 Hz frames. Each
 scenario starts from a fresh machine and writes individual frames plus a labelled
 sheet. The standard seven-state/six-trigger checks run afterward from a fresh
-machine. Simulation advances at 60 Hz but only requested frames are drawn.
+machine. With scenarios enabled their sheets use `state-` and `trigger-` prefixes
+so a scenario named idle or failed cannot be overwritten by the contract probe.
+Simulation advances at 60 Hz but only requested frames are drawn.
 PNG decode waiting never advances the animation until its cached image repeats.
 Large binaries cross the Node/renderer boundary as base64, avoiding millions of
 serialized integer entries.
@@ -109,3 +111,6 @@ pack and its real ZIP installation. `RIVE_BENCH_CAPTURE=1` enables alpha and doc
 assertions plus the full theme/dark-light captures for any benchmark pack ID.
 Dock captures include all four edges in all six appearances. Benchmarks record
 logical CPU count and actual elapsed seconds; one logical core = 100%.
+The benchmark reloads the pet renderer with a fixed random value of 0.5 before
+measuring either format, keeping the random resting entry disabled and idle
+choices repeatable. Production animation randomness is unchanged.

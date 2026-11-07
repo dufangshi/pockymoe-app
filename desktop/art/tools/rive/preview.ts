@@ -64,14 +64,14 @@ try {
       frames.push({ label: `t=${(i + 1) / 2}s mouth=${values.mouth} look=${values.lookX},${values.lookY} dock=${i} drag=${values.dragging}`, data });
     }
     const sheet = await page.evaluate(({ name, frames }) => window.preview.sheet(name, frames), { name, frames });
-    await writeFile(resolve(output, `${name}.png`), Buffer.from(sheet.split(',')[1], 'base64'));
+    await writeFile(resolve(output, `${scenarioArg >= 0 ? 'state-' : ''}${name}.png`), Buffer.from(sheet.split(',')[1], 'base64'));
   }
   for (const trigger of ['complete', 'fail', 'poke', 'dragStart', 'land', 'wave']) {
     const frames = [];
     await page.evaluate(() => window.preview.render(0, 120, { mouth: 0, dock: 0, dragging: false }));
     for (let i = 0; i < 4; i++) frames.push({ label: `+${i * .2}s`, data: await page.evaluate(({ trigger, i }) => window.preview.render(0, i ? 12 : 0, {}, i ? undefined : trigger), { trigger, i }) });
     const sheet = await page.evaluate(({ trigger, frames }) => window.preview.sheet(trigger, frames), { trigger, frames });
-    await writeFile(resolve(output, `${trigger}.png`), Buffer.from(sheet.split(',')[1], 'base64'));
+    await writeFile(resolve(output, `${scenarioArg >= 0 ? 'trigger-' : ''}${trigger}.png`), Buffer.from(sheet.split(',')[1], 'base64'));
   }
   if (process.argv.includes('--assert-motion') && hashes.size < 8) throw new Error(`Only ${hashes.size} distinct frames; animation/contract wiring may be broken`);
   await page.evaluate(() => window.preview.render(0, 120, { mouth: 0, lookX: 0, lookY: 0 }));

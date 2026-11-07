@@ -18,6 +18,10 @@ try{
  }
  if(!sprite)throw new Error('No pet window');
  sprite.on('pageerror',e=>console.error(e.message));
+ // Keep both idle measurements awake with the same random choices. Production
+ // still uses Math.random; reload installs this before either sequencer starts.
+ await sprite.addInitScript(()=>{Math.random=()=>0.5;});
+ await sprite.reload();
  await sprite.waitForFunction(()=>document.querySelector('#character.rive')||document.querySelector('#character.clips'));
  await sprite.waitForTimeout(3000);
  await sprite.screenshot({path:resolve(out,'pet-window.png'),omitBackground:true});
@@ -33,7 +37,7 @@ try{
  const mean=type=>100*(total(last,type)-total(first,type))/elapsed;
  if(first.petPid!==last.petPid)throw new Error('Pet renderer restarted during measurement');
  const info=await app.evaluate(async({app})=>({features:app.getGPUFeatureStatus(),gpu:await app.getGPUInfo('basic')}));
- const result={id,seconds:Number(seconds),elapsed,logicalCPUs:cpus().length,rendererCPU:mean('pet'),gpuProcessCPU:mean('GPU'),note:'CPU seconds / measured wall seconds * 100 (one fully busy logical core = 100%). GPU process CPU is not GPU hardware utilization.',info,samples};
+ const result={id,seconds:Number(seconds),elapsed,logicalCPUs:cpus().length,idleRandom:0.5,rendererCPU:mean('pet'),gpuProcessCPU:mean('GPU'),note:'CPU seconds / measured wall seconds * 100 (one fully busy logical core = 100%). GPU process CPU is not GPU hardware utilization.',info,samples};
  await writeFile(resolve(out,'metrics.json'),JSON.stringify(result,null,2));
  if(id==='mint-courier'||process.env.RIVE_BENCH_CAPTURE==='1'){
   const png=PNG.sync.read(await sprite.screenshot({omitBackground:true}));let sx=0,sy=0,n=0;
