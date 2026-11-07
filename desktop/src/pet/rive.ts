@@ -1,7 +1,7 @@
 import { RiveRestRouter, type RiveRouting } from './riveRouting';
 import type { LinearAnimationInstance } from '@rive-app/webgl2-advanced';
 import type { RiveMotions } from './riveMotion';
-import { RIVE_DYNAMIC_INPUTS, type RiveProcedural } from './riveDynamics';
+import { RIVE_DYNAMIC_INPUTS, riveSourceTime, type RiveProcedural } from './riveDynamics';
 import Rive, { type RiveCanvas, type File, type Artboard, type StateMachineInstance, type WrappedRenderer, type SMIInput } from '@rive-app/webgl2-advanced';
 import wasmUrl from '@rive-app/webgl2-advanced/rive.wasm?url';
 import fallbackUrl from '@rive-app/webgl2-advanced/rive_fallback.wasm?url';
@@ -18,13 +18,18 @@ export class RiveDrawer {
   private animations = new Map<string, LinearAnimationInstance>();
   private config?: RivePack;
   private motionSelected = false;
+  private applied?: { animation: string; time: number };
   route?: ReturnType<RiveRestRouter['step']>;
   seekMotion(value: number, seconds: number): void { if (!this.router) throw new Error('Pack has no rest routing'); this.router.seek(value,seconds); }
   advance(seconds: number): boolean {
     this.motionSelected = false;
     if (this.router) {
       this.route = this.router.step(seconds);
-      const animation = this.animations.get(this.route.animation)!; animation.time = this.route.time; animation.apply(1);
+      this.route.time = riveSourceTime(this.route.time,this.config?.procedural?.sourceFps);
+      if (this.applied?.animation !== this.route.animation || this.applied.time !== this.route.time) {
+        const animation = this.animations.get(this.route.animation)!; animation.time = this.route.time; animation.apply(1);
+        this.applied = { animation: this.route.animation, time: this.route.time };
+      }
     }
     const active = this.machine.advanceAndApply(seconds);
     if (this.router) this.artboard.advance(0);

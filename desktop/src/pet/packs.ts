@@ -50,6 +50,7 @@ export function parseManifest(data: Buffer): PetManifest {
     }
     if (r.procedural !== undefined && (!r.procedural || typeof r.procedural.bodyBone !== 'string' || !r.procedural.bodyBone.length || r.procedural.bodyBone.length > 100 || ![15,24,30].includes(r.procedural.idleFps) || ![30,60].includes(r.procedural.activeFps))) fail('invalid Rive procedural settings');
     if (r.procedural?.eyeOpen !== undefined && typeof r.procedural.eyeOpen !== 'boolean') fail('invalid Rive eyeOpen setting');
+    if (r.procedural?.sourceFps !== undefined && (!r.routing || ![24,30].includes(r.procedural.sourceFps))) fail('invalid Rive sourceFps (requires routed source drawings)');
     if (r.backing !== undefined && (!r.backing || ![r.backing.width,r.backing.height].every(n=>Number.isInteger(n)&&n>0&&n<=4096) || !Number.isFinite(r.backing.scale) || r.backing.scale<1 || r.backing.scale>1.25)) fail('invalid Rive backing');
     if (r.routing !== undefined) {
       const q=r.routing;

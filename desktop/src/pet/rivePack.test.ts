@@ -39,5 +39,13 @@ describe('Rive pack import', () => {
     expect(parse(valid).remoteCodex?.rive?.procedural).toEqual(valid);
     for (const invalid of [null,{}, {...valid,bodyBone:''}, {...valid,idleFps:60}, {...valid,activeFps:24}]) expect(()=>parse(invalid)).toThrow('procedural');
     expect(()=>parse({...valid,eyeOpen:'yes'})).toThrow('eyeOpen');
+    expect(()=>parse({...valid,sourceFps:24})).toThrow('sourceFps');
+  });
+  it('permits source cadence only for connected routed drawings', () => {
+    const rive={...manifest.remoteCodex.rive,procedural:{bodyBone:'body',idleFps:24,activeFps:60,sourceFps:24},motions:{idle:[{value:0,durationMs:1000}]},routing:{maxExitMs:350,bridges:[],clips:[{value:0,animation:'idle',durationMs:1000,start:'rest',end:'rest'}]}};
+    const parse=(sourceFps:unknown)=>parseManifest(Buffer.from(JSON.stringify({...manifest,remoteCodex:{rive:{...rive,procedural:{...rive.procedural,sourceFps}}}})));
+    expect(parse(24).remoteCodex?.rive?.procedural?.sourceFps).toBe(24);
+    expect(parse(30).remoteCodex?.rive?.procedural?.sourceFps).toBe(30);
+    for(const v of [0,60,'24',null])expect(()=>parse(v)).toThrow('sourceFps');
   });
 });

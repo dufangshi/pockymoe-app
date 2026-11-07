@@ -1,6 +1,9 @@
 export const RIVE_DYNAMIC_INPUTS = ['blink','breath','weightShift','swayHair','swayGown','swayWings','dragLean'] as const;
-export interface RiveProcedural { bodyBone: string; idleFps: 15 | 24 | 30; activeFps: 30 | 60; eyeOpen?: boolean }
+export interface RiveProcedural { bodyBone: string; idleFps: 15 | 24 | 30; activeFps: 30 | 60; eyeOpen?: boolean; sourceFps?: 24 | 30 }
 export interface BodySample { x: number; y: number; angle: number }
+export function riveSourceTime(seconds: number, fps?: number): number {
+  return Math.fround(fps ? Math.floor(seconds*fps+1e-5)/fps : seconds);
+}
 const clamp = (v: number, limit = 1): number => Math.max(-limit, Math.min(limit, v));
 /** Inertial springs, integrated at <=1/120 s; no fixed looping secondary keys. */
 export class RiveDynamics {
@@ -10,6 +13,8 @@ export class RiveDynamics {
   private previous?: BodySample;
   private velocity = { x: 0, y: 0, angle: 0 };
   private springs = [0,0,0].map(() => ({ x: 0, v: 0 }));
+  /** Ignore subpixel spring noise when deciding whether to wake a source drawing. */
+  get moving(): boolean { return this.springs.some(s => Math.abs(s.v) > .5 || Math.abs(s.x) > .1); }
   constructor(private readonly random: () => number = Math.random) { this.nextBlink = 2 + random() * 4; }
   step(seconds: number, body: BodySample, drag: { x: number; y: number } = { x: 0, y: 0 }): Record<typeof RIVE_DYNAMIC_INPUTS[number], number> {
     const dt = Math.max(0, Math.min(.1, seconds)); this.time += dt;
@@ -35,6 +40,16 @@ export class RiveDynamics {
       swayHair: Math.round(this.springs[0].x*1024)/1024, swayGown: Math.round(this.springs[1].x*1024)/1024, swayWings: Math.round(this.springs[2].x*1024)/1024,
       dragLean: clamp(-drag.x/1400),
     };
+  }
+}
+/** Source drawings keep their own cadence; only live motion needs the higher rate. */
+export class RiveSourceCadence {
+  private gaze?: { x: number; y: number };
+  private gazeUntil = 0;
+  fps(now: number, source: number, gaze: { x: number; y: number }, live: boolean): number {
+    if (this.gaze && (Math.abs(gaze.x-this.gaze.x) > 1/1024 || Math.abs(gaze.y-this.gaze.y) > 1/1024)) this.gazeUntil = now+150;
+    this.gaze = { ...gaze };
+    return live || now < this.gazeUntil ? 60 : source;
   }
 }
 /** Retains elapsed animation time while limiting expensive draws, without RAF rounding drift. */

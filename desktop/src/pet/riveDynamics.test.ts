@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { RiveDynamics, RiveFrameGate } from './riveDynamics';
+import { RiveDynamics, RiveFrameGate, RiveSourceCadence, riveSourceTime } from './riveDynamics';
 describe('Rive procedural motion', () => {
   it('reacts to movement and drag, then damps to rest at different frame cadences', () => {
     for (const hz of [30,60,120]) {
@@ -27,5 +27,25 @@ describe('Rive procedural motion', () => {
     expect(steps).toHaveLength(31);expect(steps.reduce((a,b)=>a+b,0)).toBeCloseTo(1,8);
     expect(gate.take(1001,30,true)).not.toBeNull();
     expect(gate.take(1002,30)).toBeNull();
+  });
+  it('keeps source work at 24fps and wakes for live motion only', () => {
+    const cadence=new RiveSourceCadence(), gaze={x:0,y:0};
+    expect(cadence.fps(0,24,gaze,false)).toBe(24);
+    expect(cadence.fps(10,24,{x:10,y:0},false)).toBe(60);
+    expect(cadence.fps(159,24,{x:10,y:0},false)).toBe(60);
+    expect(cadence.fps(160,24,{x:10,y:0},false)).toBe(24);
+    expect(cadence.fps(200,24,{x:10,y:0},true)).toBe(60);
+    expect(cadence.fps(210,30,{x:10,y:0},false)).toBe(30);
+    const gate=new RiveFrameGate(), steps=[];
+    for(let i=0;i<=600;i++){const dt=gate.take(i*1000/60,24);if(dt!==null)steps.push(dt);}
+    expect(steps).toHaveLength(241);
+    expect(steps.reduce((a,b)=>a+b,0)).toBeCloseTo(10,8);
+  });
+  it('holds a source drawing between samples while preserving exact float32 endpoints', () => {
+    expect(riveSourceTime(.02,24)).toBe(0);
+    expect(riveSourceTime(1/24,24)).toBe(Math.fround(1/24));
+    expect(riveSourceTime(1/24+.01,24)).toBe(Math.fround(1/24));
+    expect(riveSourceTime(8.749999999999922,24)).toBe(8.75);
+    expect(riveSourceTime(.02)).toBe(Math.fround(.02));
   });
 });

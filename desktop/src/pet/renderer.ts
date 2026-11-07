@@ -1,6 +1,6 @@
 import { riveBackingSize } from './riveRouting';
 import { RiveMotionClock } from './riveMotion';
-import { RiveDynamics, RiveFrameGate } from './riveDynamics';
+import { RiveDynamics, RiveFrameGate, RiveSourceCadence } from './riveDynamics';
 import { RiveDrawer, RIVE_STATES } from './rive';
 import { VideoClipPlayer } from './videoPlayer';
 document.documentElement.dataset.platform = navigator.userAgent.includes('Windows') ? 'win32' : '';
@@ -262,6 +262,7 @@ function renderSprite(): void {
 
 let riveClock: RiveMotionClock | null = null;
 let riveDynamics: RiveDynamics | null = null, riveGate = new RiveFrameGate();
+let riveCadence = new RiveSourceCadence();
 let riveDrawer: RiveDrawer | null = null, riveToken = 0, riveKey = '', riveActive = true, riveAt = 0, riveEpoch = -1, riveDragging = false;
 function syncRive(): void {
   const config = state?.rive;
@@ -276,7 +277,7 @@ function syncRive(): void {
     const drawer = await RiveDrawer.load(c, bytes, config);
     if (token !== riveToken) { drawer.dispose(); return; }
     riveClock = config.motions ? new RiveMotionClock(config.motions, Math.random, !!config.procedural) : null;
-    riveDynamics = config.procedural ? new RiveDynamics() : null; riveGate = new RiveFrameGate();
+    riveDynamics = config.procedural ? new RiveDynamics() : null; riveGate = new RiveFrameGate(); riveCadence = new RiveSourceCadence();
     riveDrawer = drawer; riveActive = true; riveAt = 0; riveEpoch = -1; riveDragging = false;
     root.querySelector('#character')?.classList.add('rive');
   }).catch(error => { console.error('Rive pet failed; using atlas', error); });
@@ -287,7 +288,8 @@ function stepRive(now: number): void {
   const { width: w, height: h } = riveBackingSize(state.pet.width,state.pet.height,devicePixelRatio,state.rive?.backing);
   const procedural = state.rive?.procedural;
   const slow = ['idle','sleeping','resting'].includes(state.mood) && !state.dragging && !speechPlaying();
-  const scheduled = procedural ? riveGate.take(now, slow ? procedural.idleFps : procedural.activeFps, riveEpoch !== state.moodEpoch || d.canvas.width !== w || d.canvas.height !== h) : null;
+  const fps = procedural?.sourceFps ? riveCadence.fps(now, procedural.sourceFps, {x: state.cursor?.x ?? 0,y: state.cursor?.y ?? 0}, !!state.dragging || state.mood === 'landing' || !!riveDynamics?.moving) : procedural && (slow ? procedural.idleFps : procedural.activeFps);
+  const scheduled = procedural ? riveGate.take(now, Number(fps), riveEpoch !== state.moodEpoch || d.canvas.width !== w || d.canvas.height !== h) : null;
   if (procedural && scheduled === null) return;
   let dirty = false;
   if (d.canvas.width !== w || d.canvas.height !== h) { d.canvas.width = w; d.canvas.height = h; dirty = true; }

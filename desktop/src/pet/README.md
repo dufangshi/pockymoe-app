@@ -314,7 +314,7 @@ Only `pet.riv` is accepted, up to 96 MiB. Layered drawing variants can exceed a 
 path, symlink, image and ZIP limits still apply. Import requires a test-load in a
 fresh sandboxed renderer with no preload or host bridge. It checks selectors and
 all typed inputs, advances each state, disables asset CDN loading, bounds the
-operation to 15 seconds, then destroys the renderer before atomic installation.
+operation to 30 seconds, then destroys the renderer before atomic installation.
 Rive Scripting is **not filtered out**; imported scripts execute in the runtime's
 sandbox. Script authoring is outside the writer's subset.
 
@@ -406,3 +406,15 @@ use the pinned runtime's inkbleed renderer option to avoid native MSAA; ordinary
 packs retain the existing renderer and full DPR. The native-size cap has no effect
 when the pet's CSS size × DPR is already below it. The prototype binary limit is
 96 MiB for lossless source drawing atlases; expanded ZIPs remain capped at 256 MiB.
+
+Routed source drawings may set `procedural.sourceFps` to 24 or 30. This opt-in
+keeps work, reactions and speech at the source cadence rather than using
+`activeFps` just because the mood is active. Source animation time is sampled at
+that cadence (including float32 endpoint handling). Dragging, landing, 150 ms
+after an actual cursor change, or a spring displacement >.1 / velocity >.5 use
+60 Hz for live inputs; the source drawing itself still holds between source
+samples. These spring thresholds avoid spending a draw on imperceptible noise.
+Repeated zero-time passes do not reapply an unchanged body sample. The existing
+input/dirt check skips unchanged renders, and tucked/reduced-motion poses hold.
+Packs without this field retain their previous cadence and continuous source
+animation sampling.
