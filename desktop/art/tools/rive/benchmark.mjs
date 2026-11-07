@@ -38,12 +38,13 @@ try{
  const first=samples[0],last=samples.at(-1),elapsed=(last.time-first.time)/1000;
  const total=(sample,type)=>sample.metrics.filter(m=>type==='pet'?m.pid===sample.petPid:m.type===type).reduce((s,m)=>s+m.cumulativeCPU,0);
  const mean=type=>100*(total(last,type)-total(first,type))/elapsed;
+ const allCPU=sample=>sample.metrics.reduce((s,m)=>s+m.cumulativeCPU,0);
  if(first.petPid!==last.petPid)throw new Error('Pet renderer restarted during measurement');
  const info=await app.evaluate(async({app})=>({features:app.getGPUFeatureStatus(),gpu:await app.getGPUInfo('basic')}));
  const readbacks=await sprite.evaluate(()=>globalThis.riveReadbacks);
  const display=await sprite.evaluate(()=>({dpr:devicePixelRatio,width:innerWidth,height:innerHeight,canvases:[...document.querySelectorAll('canvas')].map(c=>({width:c.width,height:c.height,cssWidth:c.clientWidth,cssHeight:c.clientHeight}))}));
  if(display.dpr!==dpr)throw new Error(`Unexpected display DPR ${display.dpr}`);
- const result={id,seconds:Number(seconds),elapsed,logicalCPUs:cpus().length,idleRandom:0.5,display,webglReadbacks:readbacks,readbacksPerSecond:readbacks/elapsed,rendererCPU:mean('pet'),gpuProcessCPU:mean('GPU'),note:'CPU seconds / measured wall seconds * 100 (one fully busy logical core = 100%). GPU process CPU is not GPU hardware utilization.',info,samples};
+ const result={id,seconds:Number(seconds),elapsed,logicalCPUs:cpus().length,idleRandom:0.5,display,webglReadbacks:readbacks,readbacksPerSecond:readbacks/elapsed,rendererCPU:mean('pet'),gpuProcessCPU:mean('GPU'),allProcessCPU:100*(allCPU(last)-allCPU(first))/elapsed,note:'CPU seconds / measured wall seconds * 100 (one fully busy logical core = 100%). GPU process CPU is not GPU hardware utilization. allProcessCPU additionally includes browser, utility and control-window processes.',info,samples};
  await writeFile(resolve(out,'metrics.json'),JSON.stringify(result,null,2));
  if(id==='mint-courier'||process.env.RIVE_BENCH_CAPTURE==='1'){
   const png=PNG.sync.read(await sprite.screenshot({omitBackground:true}));let sx=0,sy=0,n=0;

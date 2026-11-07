@@ -120,6 +120,8 @@ logical CPU count and actual elapsed seconds; one logical core = 100%.
 `RIVE_BENCH_DPR=1|2` explicitly chooses the display scale (default 1); metrics
 include actual DPR and CSS/backing canvas dimensions. Compare both formats at
 the same DPR. WebGL readbacks count actual Rive draws, including hit testing.
+`allProcessCPU` includes the isolated app's browser, utility and control-window
+processes as well; report this separately from pet-renderer plus GPU-process CPU.
 The benchmark reloads the pet renderer with a fixed random value of 0.5 before
 measuring either format, keeping the random resting entry disabled and idle
 choices repeatable. Production animation randomness is unchanged.
