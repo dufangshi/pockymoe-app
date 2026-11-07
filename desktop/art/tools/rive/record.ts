@@ -3,6 +3,7 @@ import { _electron as electron } from '@playwright/test';
 import { build } from 'vite';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
+import { createHash } from 'node:crypto';
 import type { RivePack } from '../../../src/pet/rive';
 import type { preview } from './preview/preview';
 declare global { interface Window { preview: typeof preview } }
@@ -19,7 +20,8 @@ const bones=rigFile?(JSON.parse(await readFile(rigFile,'utf8')) as {bones:{name:
 await build({configFile:false,root:resolve('art/tools/rive/preview'),base:'./',build:{outDir:resolve(output,'app'),emptyOutDir:true,assetsInlineLimit:0}});
 const main=resolve(output,'main.cjs');await writeFile(main,"const {app,BrowserWindow}=require('electron');const {join}=require('node:path');require('node:fs').mkdirSync(join(__dirname,'profile'),{recursive:true});app.setPath('userData',join(__dirname,'profile'));app.commandLine.appendSwitch('enable-unsafe-swiftshader');app.whenReady().then(()=>{const w=new BrowserWindow({width:648,height:702,transparent:true,frame:false,webPreferences:{contextIsolation:true,sandbox:true,backgroundThrottling:false}});w.loadFile(process.argv.at(-1));});");
 const app=await electron.launch({executablePath:resolve('node_modules/electron/dist/electron'),args:['--no-sandbox','--ozone-platform=x11',main,resolve(output,'app/index.html')]});
-const binary=await serveRiveBytes(await readFile(resolve(pack,config.path)));
+const bytes=await readFile(resolve(pack,config.path)), riveSha256=createHash('sha256').update(bytes).digest('hex');
+const binary=await serveRiveBytes(bytes);
 try {
  const page=await app.firstWindow();page.on('pageerror',e=>console.error(e));page.on('console',m=>{if(m.type()==='error')console.error(m.text());});await page.waitForFunction(()=>'preview' in window);
 
@@ -33,10 +35,10 @@ try {
    const event=s.events?.find(e=>Math.round(e.at*fps)===i),values={...s.frameValues?.[i],...(event?{motion:event.motion}:{})};
    const frame=await page.evaluate(({seconds,values,trigger,bones})=>window.preview.capture(seconds,values,trigger,bones),{seconds:i?1/fps:0,values,trigger:event?'motionStart':undefined,bones});
    await writeFile(resolve(directory,`${String(i).padStart(5,'0')}.png`),Buffer.from(frame.data.split(',')[1],'base64'));
-   samples.push({time:i/fps,transforms:frame.transforms,route:frame.route,values});
+   samples.push({time:i/fps,transforms:frame.transforms,route:frame.route,inputs:frame.inputs,values});
    if(i%120===119)console.log(`${s.name}: ${i+1}/${count}`);
   }
-  await writeFile(resolve(output,`${s.name}.json`),JSON.stringify({name:s.name,fps,config,scenario:s,samples}));
+  await writeFile(resolve(output,`${s.name}.json`),JSON.stringify({name:s.name,fps,riveSha256,config,scenario:s,samples}));
   console.log(`PASS ${s.name}: ${count} frames at ${fps}fps`);
  }
  await page.evaluate(()=>window.preview.dispose());

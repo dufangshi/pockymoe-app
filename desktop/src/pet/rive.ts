@@ -1,3 +1,4 @@
+import { RiveHitReadback } from './riveHit';
 import { RiveRestRouter, type RiveRouting } from './riveRouting';
 import type { LinearAnimationInstance } from '@rive-app/webgl2-advanced';
 import type { RiveMotions } from './riveMotion';
@@ -18,32 +19,39 @@ export class RiveDrawer {
   private animations = new Map<string, LinearAnimationInstance>();
   private config?: RivePack;
   private motionSelected = false;
-  private applied?: { animation: string; time: number };
+  private applied?: { animation: string; time: number; exitMix: number };
   route?: ReturnType<RiveRestRouter['step']>;
   seekMotion(value: number, seconds: number): void { if (!this.router) throw new Error('Pack has no rest routing'); this.router.seek(value,seconds); }
   advance(seconds: number): boolean {
     this.motionSelected = false;
     if (this.router) {
       this.route = this.router.step(seconds);
-      this.route.time = riveSourceTime(this.route.time,this.config?.procedural?.sourceFps);
-      if (this.applied?.animation !== this.route.animation || this.applied.time !== this.route.time) {
+      this.route.time = riveSourceTime(this.route.time,this.config?.procedural?.sourceFps,this.route.leaving);
+      if (this.applied?.animation !== this.route.animation || this.applied.time !== this.route.time || this.applied.exitMix !== this.route.exitMix) {
         const animation = this.animations.get(this.route.animation)!; animation.time = this.route.time; animation.apply(1);
-        this.applied = { animation: this.route.animation, time: this.route.time };
+        const correction = this.config?.routing?.clips.find(c => c.value === this.route!.value)?.exitAnimation;
+        if (this.route.leaving && correction) { const exit = this.animations.get(correction)!; exit.time = this.route.time; exit.apply(this.route.exitMix); }
+        this.applied = { animation: this.route.animation, time: this.route.time, exitMix: this.route.exitMix };
       }
+    }
+    // An accelerated exit deliberately departs from its source face chart.
+    // Transient overlays yield to source paint until the destination is safe.
+    if (this.route?.leaving && this.config?.procedural?.transientFace) {
+      for (const name of ['blink','mouth','eyeOpen','lookX','lookY']) this.inputs.get(name)!.value = 0;
     }
     const active = this.machine.advanceAndApply(seconds);
     if (this.router) this.artboard.advance(0);
     return active || !!this.router;
   }
   private disposed = false;
-  private samplePoint?: { x: number; y: number };
-  private sampled = { width: 0, height: 0, alpha: 0 };
-  alphaAt(pointer: { x: number; y: number }): number {
-    const same = this.samplePoint && Math.floor(pointer.x) === Math.floor(this.samplePoint.x) && Math.floor(pointer.y) === Math.floor(this.samplePoint.y);
-    if (same && this.sampled.width === this.canvas.width && this.sampled.height === this.canvas.height) return this.sampled.alpha;
-    return this.draw(0, pointer).alpha;
+  private hitReadback: RiveHitReadback;
+  alphaAt(pointer: { x: number; y: number }, suspended = false): number {
+    return this.hitReadback.alphaAt(pointer.x, pointer.y, this.canvas.width, this.canvas.height, suspended);
   }
-  private constructor(readonly runtime: RiveCanvas, readonly file: File, readonly artboard: Artboard, readonly machine: StateMachineInstance, readonly renderer: WrappedRenderer, readonly canvas: HTMLCanvasElement, readonly gl: WebGL2RenderingContext) {}
+  get needsHitDraw(): boolean { return this.hitReadback.needsDraw; }
+  pollHit(): boolean { return this.hitReadback.poll(this.canvas.width, this.canvas.height); }
+  suspendHit(): void { this.hitReadback.suspend(); }
+  private constructor(readonly runtime: RiveCanvas, readonly file: File, readonly artboard: Artboard, readonly machine: StateMachineInstance, readonly renderer: WrappedRenderer, readonly canvas: HTMLCanvasElement, readonly gl: WebGL2RenderingContext) { this.hitReadback = new RiveHitReadback(gl); }
   static async load(canvas: HTMLCanvasElement, bytes: Uint8Array, config: RivePack, initial: Record<string, number | boolean> = {}): Promise<RiveDrawer> {
     const r = await riveRuntime(), file = await r.load(bytes, undefined, false);
     if (!file) throw new Error('Rive runtime rejected file');
@@ -66,10 +74,10 @@ export class RiveDrawer {
       if (config.procedural && !artboard.rootBone(config.procedural.bodyBone)) throw new Error(`Missing procedural body bone: ${config.procedural.bodyBone}`);
       drawer.config = config;
       if (config.routing) {
-        for (const clip of config.routing.clips) {
-          const animation = artboard.animationByName(clip.animation);
-          if (!animation) throw new Error(`Missing routed animation: ${clip.animation}`);
-          if (!drawer.animations.has(clip.animation)) drawer.animations.set(clip.animation,new r.LinearAnimationInstance(animation,artboard));
+        for (const name of new Set(config.routing.clips.flatMap(clip => [clip.animation,...(clip.exitAnimation ? [clip.exitAnimation] : [])]))) {
+          const animation = artboard.animationByName(name);
+          if (!animation) throw new Error(`Missing routed animation: ${name}`);
+          if (!drawer.animations.has(name)) drawer.animations.set(name,new r.LinearAnimationInstance(animation,artboard));
         }
         drawer.router = new RiveRestRouter(config.routing,Number(initial.motion ?? config.motions?.idle?.[0]?.value ?? config.routing.clips[0].value));
       }
@@ -82,31 +90,28 @@ export class RiveDrawer {
     const input = this.inputs.get(name); if (!input) throw new Error(`Missing input ${name}`);
     if (typeof value === 'number') value = Math.fround(value);
     if (input.value === value) return false; input.value = value;
-    if (this.router && name === 'motion') this.router.request(Number(value));
-    if (this.router && name === 'state') { const motion = this.config?.motions?.[RIVE_STATES[Number(value)]]?.[0]; if (motion) this.router.request(motion.value); }
+    if (this.router && name === 'motion') this.router.request(Number(value),false,this.route?.time);
+    if (this.router && name === 'state') { const motion = this.config?.motions?.[RIVE_STATES[Number(value)]]?.[0]; if (motion) this.router.request(motion.value,false,this.route?.time); }
     return true;
   }
   fire(name: string): void { const input = this.inputs.get(name); if (!input) throw new Error(`Missing trigger ${name}`); input.fire();
-    if (this.router && name === 'motionStart') this.router.request(Number(this.inputs.get('motion')?.value),true);
+    if (this.router && name === 'motionStart') this.router.request(Number(this.inputs.get('motion')?.value),true,this.route?.time);
     const mood = ({complete:'jumping',fail:'failed',poke:'poked',dragStart:'dragging',land:'landing',wave:'waving'} as Record<string,string>)[name];
     if (this.router && mood && !this.motionSelected) {
       const beats=this.config?.motions?.[mood], current=Number(this.inputs.get('motion')?.value);
-      if (beats?.length && !beats.some(b=>b.value===current)) { this.inputs.get('motion')!.value=beats[0].value; this.router.request(beats[0].value); }
+      if (beats?.length && !beats.some(b=>b.value===current)) { this.inputs.get('motion')!.value=beats[0].value; this.router.request(beats[0].value,false,this.route?.time); }
     }
   }
-  draw(seconds: number, pointer: { x: number; y: number } | undefined = this.samplePoint): { active: boolean; alpha: number } {
+  draw(seconds: number, pointer?: { x: number; y: number }): { active: boolean; alpha: number } {
     if (this.disposed) throw new Error('Rive drawer disposed');
     const active = this.advance(seconds);
     const r = this.renderer; r.clear(); r.save();
     r.align(this.runtime.Fit.contain, this.runtime.Alignment.center, { minX: 0, minY: 0, maxX: this.canvas.width, maxY: this.canvas.height }, this.artboard.bounds);
     this.artboard.draw(r); r.restore(); r.flush(); this.runtime.resolveAnimationFrame();
-    const inside = !!pointer && pointer.x >= 0 && pointer.y >= 0 && pointer.x < this.canvas.width && pointer.y < this.canvas.height;
-    const pixel = new Uint8Array(4);
-    // Always sample immediately after drawing; the default framebuffer may be discarded after this task.
-    this.gl.readPixels(inside ? Math.floor(pointer!.x) : 0, inside ? this.canvas.height - 1 - Math.floor(pointer!.y) : 0, 1, 1, this.gl.RGBA, this.gl.UNSIGNED_BYTE, pixel);
-    const alpha = inside ? pixel[3] : 0;
-    this.samplePoint = pointer; this.sampled = { width: this.canvas.width, height: this.canvas.height, alpha };
-    return { active, alpha };
+    if (pointer) this.alphaAt(pointer);
+    this.hitReadback.issue();
+    return { active, alpha: pointer ? this.alphaAt(pointer) : 0 };
   }
-  dispose(): void { if (this.disposed) return; this.disposed = true; for (const a of this.animations.values()) a.delete(); this.animations.clear(); this.machine.delete(); this.artboard.delete(); this.file.unref(); this.renderer.delete(); this.inputs.clear(); }
+
+  dispose(): void { if (this.disposed) return; this.disposed = true; this.hitReadback.dispose(); for (const a of this.animations.values()) a.delete(); this.animations.clear(); this.machine.delete(); this.artboard.delete(); this.file.unref(); this.renderer.delete(); this.inputs.clear(); }
 }

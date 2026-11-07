@@ -14,7 +14,7 @@ if(manifest.id!==id)throw new Error(`Benchmark ID ${id} does not match pack ${ma
 const riveBytes=manifest.remoteCodex?.rive?await readFile(resolve(pack,manifest.remoteCodex.rive.path)):null;
 const packEvidence={id:manifest.id,...(riveBytes?{riveBytes:riveBytes.length,riveSha256:createHash('sha256').update(riveBytes).digest('hex')}:{})};
 await mkdir(out,{recursive:true});
-const app=await electron.launch({executablePath:resolve('node_modules/electron/dist/electron'),args:['--no-sandbox','--ozone-platform=x11','--enable-unsafe-swiftshader',`--force-device-scale-factor=${dpr}`,resolve('.local/desktop-evidence/pet/qa1/harness/main/index.js')],env:{...process.env,ELECTRON_RENDERER_URL:'',POCKYMOE_CLIP_PACK:resolve(pack)}});
+const app=await electron.launch({executablePath:resolve('node_modules/electron/dist/electron'),args:['--no-sandbox','--ozone-platform=x11','--enable-unsafe-swiftshader',`--force-device-scale-factor=${dpr}`,resolve('.local/desktop-evidence/pet/qa1/harness/main/index.js')],env:{...process.env,TMPDIR:resolve(out),ELECTRON_RENDERER_URL:'',POCKYMOE_CLIP_PACK:resolve(pack)}});
 try{
  await app.firstWindow();
  await app.evaluate(async()=>{while(!globalThis.petHarness)await new Promise(r=>setTimeout(r,20));});
@@ -40,7 +40,8 @@ try{
     stats.frame.submitMs+=performance.now()-t;return result;
    };
   }
-  const read=proto.readPixels;proto.readPixels=function(...args){const t=performance.now(),result=read.apply(this,args);stats.frame.readbackMs+=performance.now()-t;stats.frames.push(stats.frame);stats.frame={calls:0,triangles:0,submitMs:0,readbackMs:0,uploadBytes:0};return result;};
+  const read=proto.readPixels;proto.readPixels=function(...args){const t=performance.now(),result=read.apply(this,args);stats.frame.readbackMs+=performance.now()-t;return result;};
+  const raf=window.requestAnimationFrame;window.requestAnimationFrame=callback=>raf.call(window,time=>{callback(time);if(stats.frame.calls){stats.frames.push(stats.frame);stats.frame={calls:0,triangles:0,submitMs:0,readbackMs:0,uploadBytes:0};}});
   for(const name of ['bufferData','bufferSubData']){const native=proto[name];proto[name]=function(...args){const data=args[name==='bufferData'?1:2],bytes=typeof data==='number'?data:args.length>=5?(args[4]||(data?.length??0)-(args[3]??0))*(data?.BYTES_PER_ELEMENT??1):data?.byteLength??0;stats.buffers+=bytes;stats.frame.uploadBytes+=bytes;return native.apply(this,args);};}
   const storage=proto.texStorage2D;proto.texStorage2D=function(...args){stats.textures.push({kind:'storage',levels:args[1],format:args[2],width:args[3],height:args[4]});return storage.apply(this,args);};
   const texture=proto.texImage2D;proto.texImage2D=function(...args){const image=args[5];stats.textures.push({kind:'image',level:args[1],format:args[2],width:args.length>=9?args[3]:image?.width,height:args.length>=9?args[4]:image?.height});return texture.apply(this,args);};
@@ -75,7 +76,7 @@ try{
  await writeFile(resolve(out,'metrics.json'),JSON.stringify(result,null,2));
  if(profile){
   const gl=await sprite.evaluate(()=>globalThis.riveGLProfile);
-  await writeFile(resolve(out,'webgl-profile.json'),JSON.stringify({...gl,note:'Instrumented run: draw counts include runtime rendering passes; triangle count is submitted triangles, not visible coverage. submitMs is JS API time; readbackMs includes synchronous GPU waiting. Texture records include render targets and startup reallocations. Not a hardware GPU utilization measurement.'},null,2));
+  await writeFile(resolve(out,'webgl-profile.json'),JSON.stringify({...gl,note:'Instrumented run: draw counts include runtime rendering passes; triangle count is submitted triangles, not visible coverage. submitMs is JS API time; readbackMs measures the readPixels call; PBO probes do not block for completion. Frames are captured at rAF boundaries independent of alpha probes. Texture records include render targets and startup reallocations. Not a hardware GPU utilization measurement.'},null,2));
   await app.evaluate(async({contentTracing},path)=>contentTracing.stopRecording(path),resolve(out,'trace.pftrace'));
  }
  if(id==='mint-courier'||process.env.RIVE_BENCH_CAPTURE==='1'){
@@ -83,10 +84,12 @@ try{
   for(let y=0;y<png.height;y++)for(let x=0;x<png.width;x++)if(png.data[(y*png.width+x)*4+3]>180){sx+=x;sy+=y;n++;}
   const size=await sprite.evaluate(()=>({w:innerWidth,h:innerHeight}));
   for(const [point,expected] of [[{x:sx/n/png.width*size.w,y:sy/n/png.height*size.h},false],[{x:0,y:0},true]]){
+   await app.evaluate((_,p)=>{const b=globalThis.petHarness.metrics().sprite;globalThis.petHarness.cursor({x:b.x+p.x,y:b.y+p.y});},point);
    await sprite.evaluate(p=>window.dispatchEvent(new PointerEvent('pointermove',{clientX:p.x,clientY:p.y})),point);
+   await sprite.waitForTimeout(250);
    const ignored=await app.evaluate(()=>globalThis.petHarness.ignored());if(ignored!==expected)throw new Error(`Alpha hit: ignored=${ignored} expected=${expected}`);
   }
-  await app.evaluate(()=>{globalThis.petHarness.workArea(1440);globalThis.petHarness.settings({petEdgeHide:true});});
+  await app.evaluate(()=>{globalThis.petHarness.cursor({x:-10000,y:-10000});globalThis.petHarness.workArea(1440);globalThis.petHarness.settings({petEdgeHide:true});});
   const windowSize=await app.evaluate(()=>globalThis.petHarness.metrics().sprite);
   for(const [edge,x,y] of [['left',0,300],['right',1440-windowSize.width,300],['top',600,38],['bottom',600,838-windowSize.height]]){
    const b=await app.evaluate(()=>globalThis.petHarness.metrics().sprite);

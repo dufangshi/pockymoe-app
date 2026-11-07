@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { RiveDynamics, RiveFrameGate, RiveSourceCadence, riveSourceTime } from './riveDynamics';
+import { RiveDynamics, RiveFrameGate, RiveSourceCadence, RiveGazePulse, riveSourceTime } from './riveDynamics';
 describe('Rive procedural motion', () => {
   it('reacts to movement and drag, then damps to rest at different frame cadences', () => {
     for (const hz of [30,60,120]) {
@@ -41,11 +41,21 @@ describe('Rive procedural motion', () => {
     expect(steps).toHaveLength(241);
     expect(steps.reduce((a,b)=>a+b,0)).toBeCloseTo(10,8);
   });
+  it('shows gaze only during a nearby movement and fades back to source eyes',()=>{
+    const gaze=new RiveGazePulse();expect(gaze.sample(0)).toEqual({x:0,y:0,opacity:0});
+    expect(gaze.sample(1,{x:.5,y:-.4})).toEqual({x:.5,y:-.4,opacity:1});
+    expect(gaze.sample(271,{x:.5,y:-.4})).toEqual({x:.25,y:-.2,opacity:.5});
+    expect(gaze.sample(361,{x:.5,y:-.4})).toEqual({x:0,y:-0,opacity:0});
+    expect(gaze.sample(362,{x:.6,y:-.4}).opacity).toBe(1);
+    expect(gaze.sample(363)).toEqual({x:0,y:0,opacity:0});
+  });
   it('holds a source drawing between samples while preserving exact float32 endpoints', () => {
     expect(riveSourceTime(.02,24)).toBe(0);
     expect(riveSourceTime(1/24,24)).toBe(Math.fround(1/24));
     expect(riveSourceTime(1/24+.01,24)).toBe(Math.fround(1/24));
     expect(riveSourceTime(8.749999999999922,24)).toBe(8.75);
     expect(riveSourceTime(.02)).toBe(Math.fround(.02));
+    expect(riveSourceTime(.02,24,true)).toBe(Math.fround(.02));
+    expect(riveSourceTime(1/24+.01,24,true)).toBe(Math.fround(1/24+.01));
   });
 });

@@ -1,6 +1,6 @@
 import { riveBackingSize } from './riveRouting';
 import { RiveMotionClock } from './riveMotion';
-import { RiveDynamics, RiveFrameGate, RiveSourceCadence } from './riveDynamics';
+import { RiveDynamics, RiveFrameGate, RiveSourceCadence, RiveGazePulse } from './riveDynamics';
 import { RiveDrawer, RIVE_STATES } from './rive';
 import { VideoClipPlayer } from './videoPlayer';
 document.documentElement.dataset.platform = navigator.userAgent.includes('Windows') ? 'win32' : '';
@@ -262,7 +262,7 @@ function renderSprite(): void {
 
 let riveClock: RiveMotionClock | null = null;
 let riveDynamics: RiveDynamics | null = null, riveGate = new RiveFrameGate();
-let riveCadence = new RiveSourceCadence();
+let riveCadence = new RiveSourceCadence(), riveGaze = new RiveGazePulse();
 let riveDrawer: RiveDrawer | null = null, riveToken = 0, riveKey = '', riveActive = true, riveAt = 0, riveEpoch = -1, riveDragging = false;
 function syncRive(): void {
   const config = state?.rive;
@@ -277,7 +277,7 @@ function syncRive(): void {
     const drawer = await RiveDrawer.load(c, bytes, config);
     if (token !== riveToken) { drawer.dispose(); return; }
     riveClock = config.motions ? new RiveMotionClock(config.motions, Math.random, !!config.procedural) : null;
-    riveDynamics = config.procedural ? new RiveDynamics() : null; riveGate = new RiveFrameGate(); riveCadence = new RiveSourceCadence();
+    riveDynamics = config.procedural ? new RiveDynamics() : null; riveGate = new RiveFrameGate(); riveCadence = new RiveSourceCadence(); riveGaze = new RiveGazePulse();
     riveDrawer = drawer; riveActive = true; riveAt = 0; riveEpoch = -1; riveDragging = false;
     root.querySelector('#character')?.classList.add('rive');
   }).catch(error => { console.error('Rive pet failed; using atlas', error); });
@@ -285,13 +285,17 @@ function syncRive(): void {
 function stepRive(now: number): void {
   const d = riveDrawer; if (!d || !state) return;
   const tucked = !!state.edge && state.dockAmount > 0;
+  if (tucked) d.suspendHit();
+  if (!tucked && d.pollHit()) updateHit();
   const { width: w, height: h } = riveBackingSize(state.pet.width,state.pet.height,devicePixelRatio,state.rive?.backing);
   const procedural = state.rive?.procedural;
+  const gazePoint = state.cursor && !tucked && state.cursor.x > -state.pet.width/2 && state.cursor.x < state.pet.width*1.5 && state.cursor.y > -state.pet.height/2 && state.cursor.y < state.pet.height*1.5 ? { x: Math.max(-1,Math.min(1,(state.cursor.x/state.pet.width-.5)*2)), y: Math.max(-1,Math.min(1,(state.cursor.y/state.pet.height-.5)*2)) } : undefined;
+  const gaze = procedural?.transientFace ? riveGaze.sample(now,gazePoint) : undefined;
   const slow = ['idle','sleeping','resting'].includes(state.mood) && !state.dragging && !speechPlaying();
-  const fps = procedural?.sourceFps ? riveCadence.fps(now, procedural.sourceFps, {x: state.cursor?.x ?? 0,y: state.cursor?.y ?? 0}, !!state.dragging || state.mood === 'landing' || !!riveDynamics?.moving) : procedural && (slow ? procedural.idleFps : procedural.activeFps);
-  const scheduled = procedural ? riveGate.take(now, Number(fps), riveEpoch !== state.moodEpoch || d.canvas.width !== w || d.canvas.height !== h) : null;
+  const fps = procedural?.sourceFps ? riveCadence.fps(now, procedural.sourceFps, gaze ? {x:gaze.x,y:gaze.y} : {x: state.cursor?.x ?? 0,y: state.cursor?.y ?? 0}, !!d.route?.leaving || !!gaze?.opacity || !!state.dragging || state.mood === 'landing' || !!riveDynamics?.moving) : procedural && (slow ? procedural.idleFps : procedural.activeFps);
+  const scheduled = procedural ? riveGate.take(now, Number(fps), riveEpoch !== state.moodEpoch || d.canvas.width !== w || d.canvas.height !== h || !tucked && d.needsHitDraw) : null;
   if (procedural && scheduled === null) return;
-  let dirty = false;
+  let dirty = !tucked && d.needsHitDraw;
   if (d.canvas.width !== w || d.canvas.height !== h) { d.canvas.width = w; d.canvas.height = h; dirty = true; }
   const dt = procedural ? scheduled! : Math.min(.1, riveAt ? (now - riveAt) / 1000 : 0);
   const beat = !tucked && !motion.matches ? riveClock?.step(state.dragging ? 'dragging' : state.mood.startsWith('running-') ? 'running' : state.mood, d.route?.leaving ? 0 : dt, now, riveEpoch !== state.moodEpoch) : null;
@@ -303,9 +307,9 @@ function stepRive(now: number): void {
   // poll. Other packs keep their existing cursor behavior.
   const dozingFace = procedural?.eyeOpen && ['sleeping','resting'].includes(state.mood);
   const cursor = !dozingFace || state.cursor && Math.abs(state.cursor.x-state.pet.width/2)<state.pet.width && Math.abs(state.cursor.y-state.pet.height/2)<state.pet.height ? state.cursor : undefined;
-  dirty = d.set('lookX', cursor && !tucked ? Math.max(-1, Math.min(1, (cursor.x / state.pet.width - .5) * 2)) : 0) || dirty;
-  dirty = d.set('lookY', cursor && !tucked ? Math.max(-1, Math.min(1, (cursor.y / state.pet.height - .5) * 2)) : 0) || dirty;
-  if (procedural?.eyeOpen) dirty = d.set('eyeOpen', !!cursor && !tucked ? 1 : 0) || dirty;
+  dirty = d.set('lookX', gaze ? gaze.x : cursor && !tucked ? Math.max(-1, Math.min(1, (cursor.x / state.pet.width - .5) * 2)) : 0) || dirty;
+  dirty = d.set('lookY', gaze ? gaze.y : cursor && !tucked ? Math.max(-1, Math.min(1, (cursor.y / state.pet.height - .5) * 2)) : 0) || dirty;
+  if (procedural?.eyeOpen) dirty = d.set('eyeOpen', gaze ? gaze.opacity : !!cursor && !tucked ? 1 : 0) || dirty;
   const dragging = !!state.dragging;
   if (dragging !== riveDragging) { d.fire(dragging ? 'dragStart' : 'land'); riveDragging = dragging; dirty = true; }
   dirty = d.set('dragging', dragging) || dirty;
@@ -510,7 +514,7 @@ function opaqueAt(point: { clientX: number; clientY: number }): boolean {
   const threshold = 24 / feather;
   if (riveDrawer) {
     const pointer = { x: x / 192 * riveDrawer.canvas.width, y: y / 208 * riveDrawer.canvas.height };
-    return riveDrawer.alphaAt(pointer) > threshold;
+    return riveDrawer.alphaAt(pointer, !!state.edge && state.dockAmount > 0) > threshold;
   }
   const talk = root.querySelector<HTMLCanvasElement>('#talk');
   if (character.classList.contains('talking') && talk) return talk.getContext('2d')!.getImageData(Math.floor(x / 192 * talk.width), Math.floor(y / 208 * talk.height), 1, 1).data[3]! > threshold;
@@ -576,6 +580,7 @@ bridge.onState(next => {
     // Another pack's sheets share nothing with this one's.
     const packKey = `${next.packName}#${next.rive?.epoch ?? next.clips?.epoch ?? 0}`;
     if (packKey !== clipPack) { riveToken++; riveKey = ''; riveDrawer?.dispose(); riveDrawer = null; root.querySelector('#character')?.classList.remove('rive'); videoPlayer?.dispose(); videoPlayer = null; clipContext = null; peekSource = null; talkBaseKey = ''; talkBitmap?.close(); talkLoading = ''; talkBitmap = null; talkFrame = -1; clipPack = packKey; for (const entry of clipCache.values()) void entry.then(bitmap => bitmap?.close()); clipCache.clear(); dockClipHeld = false; clipSequence = null; clipPlayer = null; clipToken++; lastEpoch = -1; }
+    if (next.rive && next.cursor) lastPointer = next.cursor.x >= 0 && next.cursor.y >= 0 && next.cursor.x < next.pet.width && next.cursor.y < next.pet.height ? { clientX: next.cursor.x, clientY: next.cursor.y } : null;
     renderSprite(); updateHit(); return;
   }
   if (old?.detailOpen && !next.detailOpen) root.querySelector<HTMLButtonElement>('.error-mark[aria-expanded="true"]')?.click();

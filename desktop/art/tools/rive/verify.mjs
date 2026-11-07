@@ -10,7 +10,7 @@ const rig=JSON.parse(await readFile('art/rive-sample/rig.json','utf8'));
 rig.stateMachine.inputs.find(i=>i.name==='mouth').name='badMouth';
 rig.stateMachine.layers.find(l=>l.name==='mouth').states.find(s=>s.blend).blend.input='badMouth';
 const bad=[...buildRig(rig,resolve('art/rive-sample'))];
-const app=await electron.launch({executablePath:resolve('node_modules/electron/dist/electron'),args:['--no-sandbox','--ozone-platform=x11','--enable-unsafe-swiftshader',resolve('.local/desktop-evidence/pet/qa1/harness/main/index.js')],env:{...process.env,ELECTRON_RENDERER_URL:''}});
+const app=await electron.launch({executablePath:resolve('node_modules/electron/dist/electron'),args:['--no-sandbox','--ozone-platform=x11','--enable-unsafe-swiftshader',resolve('.local/desktop-evidence/pet/qa1/harness/main/index.js')],env:{...process.env,TMPDIR:resolve(out),ELECTRON_RENDERER_URL:''}});
 try{
  await app.firstWindow();await app.evaluate(async()=>{while(!globalThis.petHarness)await new Promise(r=>setTimeout(r,20));});
  const results=[];

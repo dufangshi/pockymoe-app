@@ -9,7 +9,8 @@ function advance(seconds: number, values: Record<string, number | boolean> = {})
   // worldTransform is a borrowed runtime matrix; copy its numbers, never delete it.
   const m = drawer.artboard.rootBone(bodyBone).worldTransform();
   const inputs = dynamics.step(seconds,{x:m.tx,y:m.ty,angle:Math.atan2(m.xy,m.xx)},{x:Number(values.dragVX ?? 0),y:Number(values.dragVY ?? 0)});
-  for(const [name,value] of Object.entries(inputs)) drawer.set(name,value);
+  for(const [name,value] of Object.entries(inputs)) drawer.set(name,values[name] ?? value);
+  if (values.eyeOpen !== undefined && eyeOpen) drawer.set('eyeOpen', values.eyeOpen);
   drawer.advance(0);
 }
 export const preview = {
@@ -40,7 +41,7 @@ export const preview = {
     for(let i=0;i<steps;i++) advance(seconds/steps,values);
     drawer.draw(0);
     const transforms = Object.fromEntries(bones.map(name=>{const m=drawer.artboard.transformComponent(name).worldTransform();return [name,[m.xx,m.xy,m.yx,m.yy,m.tx,m.ty]];}));
-    return { data: drawer.canvas.toDataURL('image/png'), transforms, route: drawer.route };
+    return { data: drawer.canvas.toDataURL('image/png'), transforms, inputs: Object.fromEntries([...drawer.inputs].filter(([,v])=>v.type===drawer.runtime.SMIInput.number).map(([k,v])=>[k,Number(v.value)])), route: drawer.route };
   },
   resize(width: number, height: number) { drawer.canvas.width = width; drawer.canvas.height = height; },
   ready() {

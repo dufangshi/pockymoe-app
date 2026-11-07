@@ -1,8 +1,8 @@
 export const RIVE_DYNAMIC_INPUTS = ['blink','breath','weightShift','swayHair','swayGown','swayWings','dragLean'] as const;
-export interface RiveProcedural { bodyBone: string; idleFps: 15 | 24 | 30; activeFps: 30 | 60; eyeOpen?: boolean; sourceFps?: 24 | 30 }
+export interface RiveProcedural { bodyBone: string; idleFps: 15 | 24 | 30; activeFps: 30 | 60; eyeOpen?: boolean; sourceFps?: 24 | 30; transientFace?: boolean }
 export interface BodySample { x: number; y: number; angle: number }
-export function riveSourceTime(seconds: number, fps?: number): number {
-  return Math.fround(fps ? Math.floor(seconds*fps+1e-5)/fps : seconds);
+export function riveSourceTime(seconds: number, fps?: number, leaving = false): number {
+  return Math.fround(fps && !leaving ? Math.floor(seconds*fps+1e-5)/fps : seconds);
 }
 const clamp = (v: number, limit = 1): number => Math.max(-limit, Math.min(limit, v));
 /** Inertial springs, integrated at <=1/120 s; no fixed looping secondary keys. */
@@ -50,6 +50,18 @@ export class RiveSourceCadence {
     if (this.gaze && (Math.abs(gaze.x-this.gaze.x) > 1/1024 || Math.abs(gaze.y-this.gaze.y) > 1/1024)) this.gazeUntil = now+150;
     this.gaze = { ...gaze };
     return live || now < this.gazeUntil ? 60 : source;
+  }
+}
+/** Transient gaze exposes source eye paint again after movement ends. */
+export class RiveGazePulse {
+  private point?: { x: number; y: number };
+  private movedAt = -Infinity;
+  sample(now: number, point?: { x: number; y: number }): { x: number; y: number; opacity: number } {
+    if (!point) { this.point = undefined; this.movedAt = -Infinity; return { x: 0, y: 0, opacity: 0 }; }
+    if (!this.point || Math.hypot(point.x-this.point.x,point.y-this.point.y) > .005) this.movedAt = now;
+    this.point = point;
+    const opacity = Math.max(0,Math.min(1,(360-(now-this.movedAt))/180));
+    return { x: point.x*opacity, y: point.y*opacity, opacity };
   }
 }
 /** Retains elapsed animation time while limiting expensive draws, without RAF rounding drift. */

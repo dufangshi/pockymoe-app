@@ -192,3 +192,19 @@ same drawing's bind geometry; stretch is measured against these vertices, not
 against a different drawing's silhouette. Nonfinite transforms and unlisted
 bones are rejected. Use this for discrete source drawing swaps, never as an
 animation track or as permission to blend incompatible charts between clips.
+
+
+Alpha hit probes use asynchronous WebGL2 PBO/fence readback only on cursor demand,
+at most 10 Hz, with no synchronous per-draw probe. Benchmark `readbacksPerSecond`
+therefore measures hit-test demand, not draw FPS. Instrumented GL frames are
+captured at rAF boundaries independently of readbacks. The native capture checks
+both a solid hit and a transparent miss after allowing the asynchronous probe to
+complete, then verifies that all four tucked edges hold their image.
+
+Deterministic capture `frameValues` may override procedural `blink`, `breath`,
+`weightShift`, spring and `eyeOpen` values. These controls affect verification
+only; production still samples its normal dynamics and cursor envelope.
+
+Native benchmark and isolated import verification put their temporary harness
+profiles under the requested output directory. Choose a private output directory
+for private artwork; copied pack files stay there with the rest of the evidence.

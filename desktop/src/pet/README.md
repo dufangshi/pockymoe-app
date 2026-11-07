@@ -320,8 +320,11 @@ sandbox. Script authoring is outside the writer's subset.
 
 `@rive-app/webgl2-advanced` is pinned to **2.49.4**, with bundled local primary and
 fallback WASM. The drawer owns advancement, clearing, transparent WebGL2 rendering
-and a one-pixel `readPixels` immediately after drawing. Canvas backing size follows
-full devicePixelRatio. The existing docked geometry/masks still apply. Tucked
+and sparse one-pixel alpha probes after drawing. A moved cursor inside the
+canvas queues a probe at most every 100 ms. WebGL2 pixel-pack buffers and fences
+return it on a later frame without waiting for GPU completion; a new or resized
+pixel stays click-through until its result arrives. A remote or tucked cursor
+queues no probes. Canvas backing size follows full devicePixelRatio. The existing docked geometry/masks still apply. Tucked
 pets stop time advancement; settled machines stop drawing until inputs or size
 change. Runtime failure keeps the atlas visible.
 
@@ -376,7 +379,7 @@ size or `artboard.didChange()` require it. Breathing is quantized to 0.1, weight
 shift to 1/12, and springs to 1/1024; author small micro-motion ranges so these
 steps remain below a visible pixel at the intended size/DPR. Speech still uses
 the existing 60/120 ms envelope. The benchmark records actual WebGL readbacks
-per second as evidence of draws skipped; this is separate from animation FPS.
+per second as hit-test demand; draw counts come from the separate GL profile.
 
 A procedural pack may additionally set `eyeOpen:true` and provide a number
 input named `eyeOpen`. The pet sets this to 1 for a cursor gaze and 0 otherwise.
@@ -418,3 +421,27 @@ Repeated zero-time passes do not reapply an unchanged body sample. The existing
 input/dirt check skips unchanged renders, and tucked/reduced-motion poses hold.
 Packs without this field retain their previous cadence and continuous source
 animation sampling.
+
+
+Routed source packs may author an `exitAnimation` on each clip. This is an
+optional additive correction applied with an 80 ms ramp during accelerated exits;
+it must reset its affected bones in the normal clip and be identity at shared
+boundaries. It never blends one drawing chart into another. Optional
+`exitRestMs: {start, end}` declares source-verified corridors (0–500 ms, less than
+half the clip) in which an accelerated exit may sample the exact shared rest
+paint. Neutral playback keeps every source sample. Requests rebase to the last
+displayed source time. Accelerated exits use continuous time and 60 Hz drawing;
+neutral source playback remains quantized. Zero-time procedural/draw passes cannot consume a
+boundary hold.
+
+`procedural.transientFace:true` requires `eyeOpen:true`. Gaze activates only for
+nearby cursor movement, holds for 180 ms, then fades to source paint over 180 ms.
+The authored eyeOpen layer must expose the original source pupils through an eye
+mask, and zero input must show source paint. Blink layers should use the current
+expression's lids and return to opacity zero; mouth layers should preserve its
+lip corners and mood. Closed source eyes stay closed unless the pack explicitly
+authors a wake expression. During an accelerated rest exit, transient face
+inputs yield to source paint because global exit stabilization leaves the
+source face chart. This setting preserves existing behavior for other
+packs. Preview capture accepts explicit procedural input overrides for repeatable
+blink, gaze and speech comparisons.

@@ -6,16 +6,17 @@ describe('material-safe routing',()=>{
     const r=new RiveRestRouter(config,1);r.step(.4);r.request(0);
     const mid=r.step(.175);expect(mid.value).toBe(1);expect(mid.time).toBeCloseTo(.2);
     const boundary=r.step(.175);expect(boundary.time).toBe(0);expect(boundary.boundary).toBe(true);
-    expect(r.step(0)).toMatchObject({value:0,time:0,leaving:false});
+    expect(r.step(0)).toMatchObject({value:1,time:0,boundary:true});
+    expect(r.step(.001)).toMatchObject({value:0,time:0,leaving:false});
   });
   it('finishes forward at the nearer end',()=>{
     const r=new RiveRestRouter(config,1);r.step(1.8);r.request(0);expect(r.step(.2)).toMatchObject({value:1,time:2,boundary:true});
-    expect(r.step(0).value).toBe(0);
+    expect(r.step(.001).value).toBe(0);
   });
   it('exits a bed family through the authored bed-out within the total budget',()=>{
     const r=new RiveRestRouter(config,4);r.step(.4);r.request(1);
     const seen=new Set<number>();for(let i=0;i<35;i++)seen.add(r.step(.01).value);
-    expect(seen.has(3)).toBe(true);expect(r.step(0)).toMatchObject({value:1,time:0});
+    expect(seen.has(3)).toBe(true);expect(r.step(.001)).toMatchObject({value:1,time:0});
   });
   it('replans a second interrupt without changing the current material or position',()=>{
     const r=new RiveRestRouter(config,1);r.step(.5);r.request(0);const before=r.step(.1);r.request(2);
@@ -25,8 +26,20 @@ describe('material-safe routing',()=>{
     for(const from of config.clips)for(const target of config.clips)for(const phase of [.25,.75]) {
       const r=new RiveRestRouter(config,from.value);r.step(from.durationMs/1000*phase);r.request(target.value,true);
       for(let i=0;i<35;i++)r.step(.01);
-      const landed=r.step(0);expect(landed).toMatchObject({value:target.value,leaving:false});expect(landed.time).toBeLessThanOrEqual(.35);
+      const landed=r.step(.001);expect(landed).toMatchObject({value:target.value,leaving:false});expect(landed.time).toBeLessThanOrEqual(.35);
     }
+  });
+  it('keeps zero-time procedural passes inert and replans from the displayed source sample',()=>{
+    const r=new RiveRestRouter(config,1);r.step(.419);r.request(0,false,.375);
+    expect(r.step(0).time).toBe(.375);for(let i=0;i<7;i++)r.step(.05);
+    const end=r.step(0);expect(end).toMatchObject({value:1,time:0,boundary:true});
+    expect(r.step(0)).toEqual(end);expect(r.step(.01)).toMatchObject({value:0,time:0,leaving:false});
+  });
+  it('uses verified rest corridors only during an exit, retaining neutral source motion',()=>{
+    const fixture=structuredClone(config);fixture.clips[1].exitRestMs={start:250,end:250};
+    const r=new RiveRestRouter(fixture,1);expect(r.step(.2).time).toBe(.2);r.request(0);
+    expect(r.step(.01).time).toBe(0);expect(r.step(0).value).toBe(1);
+    r.seek(1,1.8);expect(r.step(0).time).toBe(1.8);r.request(0);expect(r.step(.01).time).toBe(2);
   });
   it('caps source backing resolution and preserves the aspect ratio and legacy DPR',()=>{
     expect(riveBackingSize(1037,1123,2,{width:648,height:702,scale:1})).toEqual({width:648,height:702});

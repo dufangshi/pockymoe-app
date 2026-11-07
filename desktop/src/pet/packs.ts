@@ -50,11 +50,14 @@ export function parseManifest(data: Buffer): PetManifest {
     }
     if (r.procedural !== undefined && (!r.procedural || typeof r.procedural.bodyBone !== 'string' || !r.procedural.bodyBone.length || r.procedural.bodyBone.length > 100 || ![15,24,30].includes(r.procedural.idleFps) || ![30,60].includes(r.procedural.activeFps))) fail('invalid Rive procedural settings');
     if (r.procedural?.eyeOpen !== undefined && typeof r.procedural.eyeOpen !== 'boolean') fail('invalid Rive eyeOpen setting');
+    if (r.procedural?.transientFace !== undefined && (typeof r.procedural.transientFace !== 'boolean' || r.procedural.transientFace && !r.procedural.eyeOpen)) fail('invalid Rive transientFace (requires eyeOpen)');
     if (r.procedural?.sourceFps !== undefined && (!r.routing || ![24,30].includes(r.procedural.sourceFps))) fail('invalid Rive sourceFps (requires routed source drawings)');
     if (r.backing !== undefined && (!r.backing || ![r.backing.width,r.backing.height].every(n=>Number.isInteger(n)&&n>0&&n<=4096) || !Number.isFinite(r.backing.scale) || r.backing.scale<1 || r.backing.scale>1.25)) fail('invalid Rive backing');
     if (r.routing !== undefined) {
       const q=r.routing;
       if (!q || !r.motions || !Number.isFinite(q.maxExitMs) || q.maxExitMs<100 || q.maxExitMs>400 || !Array.isArray(q.clips) || !q.clips.length || q.clips.length>128 || q.clips.some(c=>!c || !Number.isInteger(c.value) || c.value<0 || c.value>1023 || typeof c.animation!=='string' || !c.animation.length || c.animation.length>100 || !Number.isFinite(c.durationMs) || c.durationMs<16 || c.durationMs>60000 || ![c.start,c.end].every(n=>typeof n==='string'&&n.length>0&&n.length<=100) || c.loop!==undefined&&typeof c.loop!=='boolean') || new Set(q.clips.map(c=>c.value)).size!==q.clips.length || !Array.isArray(q.bridges) || q.bridges.length>128 || q.bridges.some(v=>!q.clips.some(c=>c.value===v))) fail('invalid Rive routing');
+      if (q.clips.some(c=>c.exitAnimation!==undefined && (typeof c.exitAnimation!=='string' || !c.exitAnimation.length || c.exitAnimation.length>100))) fail('invalid Rive exit animation');
+      if (q.clips.some(c=>c.exitRestMs!==undefined && (!c.exitRestMs || !['start','end'].every(k=>{ const v=c.exitRestMs![k as 'start'|'end']; return Number.isFinite(v)&&v>=0&&v<=500&&v<c.durationMs/2; })))) fail('invalid Rive exit rest corridor');
       if (Object.values(r.motions ?? {}).flat().some(c=>!q.clips.some(v=>v.value===c?.value))) fail('Rive routing misses a motion');
       const families=[...new Set(q.clips.flatMap(c=>[c.start,c.end]))];
       for (const start of families) {

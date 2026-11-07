@@ -32,14 +32,19 @@ describe('Rive pack import', () => {
     expect(parse(route).remoteCodex?.rive?.routing).toEqual(route);
     for(const q of [{...route,maxExitMs:800},{...route,bridges:[99]},{...route,bridges:[1]},{...route,clips:[...route.clips,route.clips[0]]}])expect(()=>parse(q)).toThrow('routing');
     expect(()=>parse(route,{width:648,height:702,scale:2})).toThrow('backing');
+    for(const exitRestMs of [{start:501,end:0},{start:-1,end:0},{start:0,end:null}])expect(()=>parse({...route,clips:route.clips.map(c=>({...c,exitRestMs}))})).toThrow('exit rest');
+    expect(()=>parse({...route,clips:route.clips.map(c=>({...c,exitAnimation:''}))})).toThrow('exit animation');
   });
   it('validates and preserves optional procedural settings', () => {
     const parse = (procedural: unknown) => parseManifest(Buffer.from(JSON.stringify({...manifest,remoteCodex:{rive:{...manifest.remoteCodex.rive,procedural}}})));
-    const valid = {bodyBone:'body',idleFps:24,activeFps:60,eyeOpen:true};
+    const valid = {bodyBone:'body',idleFps:24,activeFps:60,eyeOpen:true,transientFace:true};
     expect(parse(valid).remoteCodex?.rive?.procedural).toEqual(valid);
     for (const invalid of [null,{}, {...valid,bodyBone:''}, {...valid,idleFps:60}, {...valid,activeFps:24}]) expect(()=>parse(invalid)).toThrow('procedural');
     expect(()=>parse({...valid,eyeOpen:'yes'})).toThrow('eyeOpen');
     expect(()=>parse({...valid,sourceFps:24})).toThrow('sourceFps');
+    expect(()=>parse({...valid,transientFace:'yes'})).toThrow('transientFace');
+    expect(()=>parse({...valid,eyeOpen:false})).toThrow('transientFace');
+    expect(parse({...valid,eyeOpen:false,transientFace:false}).remoteCodex?.rive?.procedural?.transientFace).toBe(false);
   });
   it('permits source cadence only for connected routed drawings', () => {
     const rive={...manifest.remoteCodex.rive,procedural:{bodyBone:'body',idleFps:24,activeFps:60,sourceFps:24},motions:{idle:[{value:0,durationMs:1000}]},routing:{maxExitMs:350,bridges:[],clips:[{value:0,animation:'idle',durationMs:1000,start:'rest',end:'rest'}]}};
