@@ -47,6 +47,8 @@ export function createPetController(deps: PetControllerDeps): PetController {
   let moodEpoch = 0;
   // How long a reaction holds: a pack's own clip decides, since its art can run for seconds.
   const reactionMs = (mood: Exclude<ClipState, 'resting'>): number => {
+    const beats = pack?.manifest.remoteCodex?.rive?.motions?.[mood];
+    if (beats?.length) return Math.max(...beats.map(b => b.durationMs));
     const clips = pack?.manifest.remoteCodex?.clips?.[mood], format = pack?.manifest.remoteCodex?.clipFormat;
     if (clips?.length && format) return Math.max(...clips.map(clip => clip.frames)) / format.fps * 1000;
     return ANIMATIONS[mood].durations.reduce((a: number, b: number) => a + b, 0) * (pack?.manifest.remoteCodex?.frameScale ?? 1);
@@ -315,7 +317,7 @@ export function createPetController(deps: PetControllerDeps): PetController {
             position = { ...drag.origin, x: drag.origin.x + action.x - drag.x, y: drag.origin.y + action.y - drag.y, displayId: next.id, edge: null }; dockAmount = 0;
             if (action.type === 'dragEnd') {
               position = dockPosition(position, next.workArea, petHeight(settings)); peek = false; savePosition();
-              if (pack?.manifest.remoteCodex?.clips?.landing) { moods.react('landing', Date.now(), reactionMs('landing')); moodEpoch++; }
+              if (pack?.manifest.remoteCodex?.clips?.landing || pack?.manifest.remoteCodex?.rive?.motions?.landing) { moods.react('landing', Date.now(), reactionMs('landing')); moodEpoch++; }
             }
             placeSprite();
           }

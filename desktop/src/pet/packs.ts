@@ -43,7 +43,10 @@ export function parseManifest(data: Buffer): PetManifest {
   if (extensions?.rive !== undefined) {
     const r = extensions.rive as RivePack;
     if (!r || r.path !== 'pet.riv' || ![r.artboard, r.stateMachine].every(n => typeof n === 'string' && n.length > 0 && n.length <= 100) || r.viewModel !== undefined) fail('invalid remoteCodex.rive (prototype requires state-machine inputs)');
-    remoteCodex.rive = { path: 'pet.riv', artboard: r.artboard, stateMachine: r.stateMachine };
+    if (r.motions !== undefined) {
+      if (!r.motions || typeof r.motions !== 'object' || Array.isArray(r.motions) || Object.entries(r.motions).some(([state, beats]) => !['idle','running','waiting','waving','jumping','poked','failed','review','sleeping','dragging','landing','resting'].includes(state) || !Array.isArray(beats) || !beats.length || beats.length > 32 || beats.some(b => !b || !Number.isInteger(b.value) || b.value < 0 || b.value > 1023 || !Number.isFinite(b.durationMs) || b.durationMs < 16 || b.durationMs > 60000 || b.role !== undefined && !['intro','outro'].includes(b.role)))) fail('invalid Rive motions');
+    }
+    remoteCodex.rive = { path: 'pet.riv', artboard: r.artboard, stateMachine: r.stateMachine, ...(r.motions ? { motions: r.motions } : {}) };
   }
   const extension = extensions?.sleeping as SleepingStrip | undefined;
   if (extension) {

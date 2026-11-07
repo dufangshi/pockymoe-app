@@ -1,3 +1,4 @@
+import { RiveMotionClock } from './riveMotion';
 import { RiveDrawer, RIVE_STATES } from './rive';
 import { VideoClipPlayer } from './videoPlayer';
 document.documentElement.dataset.platform = navigator.userAgent.includes('Windows') ? 'win32' : '';
@@ -257,6 +258,7 @@ function renderSprite(): void {
   syncRive();
 }
 
+let riveClock: RiveMotionClock | null = null;
 let riveDrawer: RiveDrawer | null = null, riveToken = 0, riveKey = '', riveActive = true, riveAt = 0, riveEpoch = -1, riveDragging = false;
 function syncRive(): void {
   const config = state?.rive;
@@ -270,6 +272,7 @@ function syncRive(): void {
     if (!bytes || token !== riveToken) return;
     const drawer = await RiveDrawer.load(c, bytes, config);
     if (token !== riveToken) { drawer.dispose(); return; }
+    riveClock = config.motions ? new RiveMotionClock(config.motions) : null;
     riveDrawer = drawer; riveActive = true; riveAt = 0; riveEpoch = -1; riveDragging = false;
     root.querySelector('#character')?.classList.add('rive');
   }).catch(error => { console.error('Rive pet failed; using atlas', error); });
@@ -280,6 +283,9 @@ function stepRive(now: number): void {
   const w = Math.round(state.pet.width * devicePixelRatio), h = Math.round(state.pet.height * devicePixelRatio);
   let dirty = false;
   if (d.canvas.width !== w || d.canvas.height !== h) { d.canvas.width = w; d.canvas.height = h; dirty = true; }
+  const dt = Math.min(.1, riveAt ? (now - riveAt) / 1000 : 0);
+  const beat = !tucked && !motion.matches ? riveClock?.step(state.dragging ? 'dragging' : state.mood.startsWith('running-') ? 'running' : state.mood, dt, now, riveEpoch !== state.moodEpoch) : null;
+  if (beat) { dirty = d.set('motion', beat.value) || dirty; if (beat.restart) { d.fire('motionStart'); dirty = true; } }
   const mood = state.mood === 'waving' || state.mood === 'jumping' || state.mood === 'poked' || state.mood === 'landing' || state.mood === 'dragging' ? 'idle' : state.mood;
   dirty = d.set('state', tucked ? 0 : Math.max(0, (RIVE_STATES as readonly string[]).indexOf(mood.startsWith('running-') ? 'running' : mood))) || dirty;
   dirty = d.set('mouth', tucked ? 0 : speechLevel(now)) || dirty;
@@ -482,7 +488,7 @@ function opaqueAt(point: { clientX: number; clientY: number }): boolean {
   const threshold = 24 / feather;
   if (riveDrawer) {
     const pointer = { x: x / 192 * riveDrawer.canvas.width, y: y / 208 * riveDrawer.canvas.height };
-    return riveDrawer.draw(0, pointer).alpha > threshold;
+    return riveDrawer.alphaAt(pointer) > threshold;
   }
   const talk = root.querySelector<HTMLCanvasElement>('#talk');
   if (character.classList.contains('talking') && talk) return talk.getContext('2d')!.getImageData(Math.floor(x / 192 * talk.width), Math.floor(y / 208 * talk.height), 1, 1).data[3]! > threshold;

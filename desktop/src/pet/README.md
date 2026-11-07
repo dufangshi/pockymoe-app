@@ -306,8 +306,8 @@ Completion (`waving` or `jumping`) fires `complete`, failure fires `fail`, click
 fire `poke`, and drag boundaries fire `dragStart`/`land`. `wave` is available to
 authored packs and preview; there is no separate wave command in the current UI. Repeated
 reaction epochs replay triggers. Sustained controller mood semantics are unchanged.
-`resting` is available to authoring/preview; automatic random resting selection is
-currently the existing clip sequencer's behavior, not added to the Rive controller.
+`resting` is available to authoring/preview. Automatic resting requires the
+optional Rive motion plan described below; packs without it retain direct state control.
 
 Only `pet.riv` is accepted, up to 16 MiB. ZIPs and Rive folders must contain exactly
 `pet.json`, its atlas, `pet.riv`, and any declared sleeping/peek/clip files. Existing
@@ -328,3 +328,21 @@ change. Runtime failure keeps the atlas visible.
 Writer/schema provenance, rig shape, sample build and preview commands are in
 [`art/tools/rive/README.md`](../../art/tools/rive/README.md). This is a prototype,
 not a published pack-format compatibility promise.
+
+Rive packs may opt into full motion choreography with `rive.motions`. Each state
+maps to an ordered list of `{value, durationMs, role?}` beats; `value` is an integer
+0–1023, duration is 16–60000 ms, and `role` is `intro` or `outro` when needed.
+Supported keys match raster clip states (including dragging, landing and resting).
+Such packs must also expose `motion:number` and `motionStart:trigger`. The pet
+sets the selected value and fires motionStart once at a beat boundary; author an
+Any-state transition conditioned on both. The original state/trigger contract
+remains available for standalone playback. The pack's state machine should give
+motionStart priority and avoid repeatedly transitioning to the current state.
+
+The pet uses the shared ClipSequencer for intro/loop/outro ordering, the 8% idle
+rest chance, 1–4 minute resting duration and wake-up outro. Idle variants are
+shuffled (first neutral beat retained); work and reaction variants cycle. One-shot
+reactions hold their final frame until the controller's reaction expires. Reaction
+durations come from the motion plan; Rive landing beats run after drag release.
+Time advancement pauses while tucked. This behavior applies only to opt-in Rive
+motion plans; raster packs retain their previous sequencing.
