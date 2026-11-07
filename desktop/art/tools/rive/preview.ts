@@ -1,3 +1,4 @@
+import { serveRiveBytes } from './binaryServer.ts';
 import { _electron as electron } from '@playwright/test';
 import { build } from 'vite';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
@@ -17,18 +18,19 @@ await build({ configFile: false, root: resolve('art/tools/rive/preview'), base: 
 const main = resolve(output, 'main.cjs');
 await writeFile(main, "const { app, BrowserWindow } = require('electron'); const { join } = require('node:path'); const profile = join(__dirname, 'profile'); require('node:fs').mkdirSync(profile, { recursive: true }); app.setPath('userData', profile); app.commandLine.appendSwitch('enable-unsafe-swiftshader'); app.whenReady().then(() => { const w = new BrowserWindow({width:384,height:416,transparent:true,frame:false,webPreferences:{contextIsolation:true,sandbox:true,backgroundThrottling:false}}); w.loadFile(process.argv.at(-1)); });");
 const app = await electron.launch({ executablePath: resolve('node_modules/electron/dist/electron'), timeout: 30000, args: ['--no-sandbox', '--ozone-platform=x11', main, resolve(output, 'app/index.html')] });
+const binary = await serveRiveBytes(await readFile(file));
 try {
   const page = await app.firstWindow(); page.on('pageerror', e => console.error(e));
   page.on('console', m => { if (m.type() === 'error') console.error(m.text()); });
   await page.waitForFunction(() => 'preview' in window);
-  const bytes = (await readFile(file)).toString('base64');
+
   // Bound hangs in native import or script initialization as well as malformed files.
   let timer: ReturnType<typeof setTimeout> | undefined;
   try { await Promise.race([
     // Large layered rigs can spend over 20 s compiling their first software-GL
     // draw. Keep a finite tool deadline without rejecting that valid workload.
     new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('Rive load timed out')), 60000); }),
-    page.evaluate(async ({ bytes, config }) => window.preview.load(bytes, config), { bytes, config }),
+    page.evaluate(async ({ url, config }) => { const response=await fetch(url); if(!response.ok)throw new Error('Cannot read preview binary');return window.preview.load(new Uint8Array(await response.arrayBuffer()),config); }, { url:binary.url, config }),
   ]); } finally { clearTimeout(timer); }
   // Image decoding finishes asynchronously after import. Verify visible pixels, not just successful parsing.
   const sizeArg = process.argv.indexOf('--size');
@@ -36,12 +38,26 @@ try {
   if (size.length !== 2 || size.some(n => !Number.isInteger(n) || n < 64 || n > 2048)) throw new Error('Invalid --size WIDTHxHEIGHT');
   await page.evaluate(([w, h]) => window.preview.resize(w, h), size);
   await page.waitForFunction(() => window.preview.ready(), {}, { timeout: 15000 });
+  if (process.argv.includes('--boundaries')) {
+    if (!config.routing) throw new Error('No rest routing to verify');
+    const reference=new Map<string,string>(), results=[];
+    for(const clip of config.routing.clips) for(const [edge,time,family] of [['start',0,clip.start],['end',clip.durationMs/1000,clip.end]] as const) {
+      const data=await page.evaluate(({value,time})=>window.preview.boundary(value,time),{value:clip.value,time});
+      const png=PNG.sync.read(Buffer.from(data.split(',')[1],'base64')),hash=createHash('sha256').update(png.data).digest('hex');
+      if(!reference.has(family))reference.set(family,hash);
+      const pass=reference.get(family)===hash;results.push({animation:clip.animation,edge,family,hash,pass});
+      await writeFile(resolve(output,`boundary-${clip.value}-${edge}.png`),Buffer.from(data.split(',')[1],'base64'));
+    }
+    await writeFile(resolve(output,'boundaries.json'),JSON.stringify({results,pass:results.every(r=>r.pass)},null,2));
+    if(results.some(r=>!r.pass))throw new Error('Rest boundaries are not pixel-identical');
+    console.log(`PASS ${results.length} pixel-identical rest endpoints`);
+  }
   const scenarioArg = process.argv.indexOf('--scenarios');
   if (scenarioArg >= 0) {
     const scenarios = JSON.parse(await readFile(process.argv[scenarioArg + 1], 'utf8')) as { name: string; values: Record<string, number | boolean>; trigger?: string; frames: number[] }[];
     for (const scenario of scenarios) {
       if (!/^[a-zA-Z0-9_-]+$/.test(scenario.name)) throw new Error('Unsafe scenario name');
-      await page.evaluate(async ({ bytes, config }) => window.preview.load(bytes, config), { bytes, config });
+      await page.evaluate(async ({ url, config }) => { const response=await fetch(url); if(!response.ok)throw new Error('Cannot read preview binary');return window.preview.load(new Uint8Array(await response.arrayBuffer()),config); }, { url:binary.url, config });
       await page.evaluate(([w, h]) => window.preview.resize(w, h), size);
       await page.waitForFunction(() => window.preview.ready(), {}, { timeout: 15000 });
       const captures: { label: string; data: string }[] = []; let previous = 0;
@@ -54,7 +70,7 @@ try {
       await writeFile(resolve(output, `${scenario.name}.png`), Buffer.from(sheet.split(',')[1], 'base64'));
     }
     console.log(`PASS ${scenarios.length} preview scenarios`);
-    await page.evaluate(async ({ bytes, config }) => window.preview.load(bytes, config), { bytes, config });
+    await page.evaluate(async ({ url, config }) => { const response=await fetch(url); if(!response.ok)throw new Error('Cannot read preview binary');return window.preview.load(new Uint8Array(await response.arrayBuffer()),config); }, { url:binary.url, config });
     await page.evaluate(([w, h]) => window.preview.resize(w, h), size);
     await page.waitForFunction(() => window.preview.ready(), {}, { timeout: 15000 });
   }
@@ -84,4 +100,4 @@ try {
   await page.screenshot({ path: resolve(output, 'electron-preview.png'), omitBackground: true });
   await page.evaluate(() => window.preview.dispose());
   console.log(`PASS: typed contract, 7 states, 6 triggers, ${hashes.size} distinct frames; ${output}`);
-} finally { await app.close(); }
+} finally { await app.close(); await binary.close(); }

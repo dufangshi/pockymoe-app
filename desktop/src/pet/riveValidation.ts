@@ -15,9 +15,16 @@ export async function verifyRivePack(bytes: Buffer, config: RivePack): Promise<v
         const dev = process.env.ELECTRON_RENDERER_URL;
         if (dev) await window.loadURL(`${dev.replace(/\/$/, '')}/pet/riveValidate.html`);
         else await window.loadFile(join(__dirname, '../renderer/pet/riveValidate.html'));
-        await window.webContents.executeJavaScript(`window.verifyRive(${JSON.stringify(bytes.toString('base64'))}, ${JSON.stringify(config)})`);
+        // Keep each script below DevTools/V8's large-string parsing cliff. There
+        // is no network exception or host bridge in the validation sandbox.
+        await window.webContents.executeJavaScript(`globalThis.riveValidationBytes = new Uint8Array(${bytes.length})`);
+        for (let offset=0;offset<bytes.length;offset+=1024*1024) {
+          const chunk=bytes.subarray(offset,offset+1024*1024).toString('base64');
+          await window.webContents.executeJavaScript(`globalThis.riveValidationBytes.set(Uint8Array.from(atob(${JSON.stringify(chunk)}), c => c.charCodeAt(0)), ${offset})`);
+        }
+        await window.webContents.executeJavaScript(`(() => { const bytes=globalThis.riveValidationBytes; delete globalThis.riveValidationBytes; return window.verifyRive(bytes, ${JSON.stringify(config)}); })()`);
       })(),
-      new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('Rive validation timed out')), 15000); }),
+      new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('Rive validation timed out')), 30000); }),
     ]);
   } finally { clearTimeout(timer); if (!window.isDestroyed()) window.destroy(); }
 }

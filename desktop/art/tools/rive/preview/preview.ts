@@ -3,17 +3,17 @@ import { RiveDynamics } from '../../../../src/pet/riveDynamics';
 let drawer: RiveDrawer;
 let dynamics: RiveDynamics | undefined, bodyBone = '', eyeOpen = false;
 function advance(seconds: number, values: Record<string, number | boolean> = {}): void {
-  drawer.machine.advanceAndApply(seconds);
+  drawer.advance(seconds);
   if (!dynamics) return;
   if (eyeOpen) drawer.set('eyeOpen', Number(drawer.inputs.get('lookX')?.value) !== 0 || Number(drawer.inputs.get('lookY')?.value) !== 0 ? 1 : 0);
   // worldTransform is a borrowed runtime matrix; copy its numbers, never delete it.
   const m = drawer.artboard.rootBone(bodyBone).worldTransform();
   const inputs = dynamics.step(seconds,{x:m.tx,y:m.ty,angle:Math.atan2(m.xy,m.xx)},{x:Number(values.dragVX ?? 0),y:Number(values.dragVY ?? 0)});
   for(const [name,value] of Object.entries(inputs)) drawer.set(name,value);
-  drawer.machine.advanceAndApply(0);
+  drawer.advance(0);
 }
 export const preview = {
-  async load(bytes: number[] | string, config: Parameters<typeof RiveDrawer.load>[2], initial: Record<string, number | boolean> = {}) {
+  async load(bytes: number[] | string | Uint8Array, config: Parameters<typeof RiveDrawer.load>[2], initial: Record<string, number | boolean> = {}) {
     drawer?.dispose(); drawer = await RiveDrawer.load(document.querySelector('canvas')!, typeof bytes === 'string' ? Uint8Array.from(atob(bytes), c => c.charCodeAt(0)) : new Uint8Array(bytes), config, initial);
     let seed = 0x1234abcd;
     dynamics = config.procedural ? new RiveDynamics(()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/0x100000000;}) : undefined;
@@ -28,6 +28,11 @@ export const preview = {
     drawer.draw(0);
     return drawer.canvas.toDataURL('image/png');
   },
+  boundary(value: number, seconds: number) {
+    drawer.seekMotion(value,seconds);
+    for (const [name, v] of Object.entries({blink:0,breath:0,weightShift:0,swayHair:0,swayGown:0,swayWings:0,dragLean:0,mouth:0,lookX:0,lookY:0,eyeOpen:0})) if(drawer.inputs.has(name))drawer.set(name,v);
+    drawer.draw(0);return drawer.canvas.toDataURL('image/png');
+  },
   capture(seconds: number, values: Record<string,number|boolean>, trigger: string | undefined, bones: string[]) {
     for (const [name,value] of Object.entries(values)) if (!['dragVX','dragVY'].includes(name)) drawer.set(name,value);
     if (trigger) drawer.fire(trigger);
@@ -35,7 +40,7 @@ export const preview = {
     for(let i=0;i<steps;i++) advance(seconds/steps,values);
     drawer.draw(0);
     const transforms = Object.fromEntries(bones.map(name=>{const m=drawer.artboard.transformComponent(name).worldTransform();return [name,[m.xx,m.xy,m.yx,m.yy,m.tx,m.ty]];}));
-    return { data: drawer.canvas.toDataURL('image/png'), transforms };
+    return { data: drawer.canvas.toDataURL('image/png'), transforms, route: drawer.route };
   },
   resize(width: number, height: number) { drawer.canvas.width = width; drawer.canvas.height = height; },
   ready() {

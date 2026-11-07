@@ -309,7 +309,7 @@ reaction epochs replay triggers. Sustained controller mood semantics are unchang
 `resting` is available to authoring/preview. Automatic resting requires the
 optional Rive motion plan described below; packs without it retain direct state control.
 
-Only `pet.riv` is accepted, up to 64 MiB. Layered drawing variants can exceed a single raster clip; the expanded pack cap remains 256 MiB. ZIPs and Rive folders must contain exactly
+Only `pet.riv` is accepted, up to 96 MiB. Layered drawing variants can exceed a single raster clip; the expanded pack cap remains 256 MiB. ZIPs and Rive folders must contain exactly
 `pet.json`, its atlas, `pet.riv`, and any declared sleeping/peek/clip files. Existing
 path, symlink, image and ZIP limits still apply. Import requires a test-load in a
 fresh sandboxed renderer with no preload or host bridge. It checks selectors and
@@ -385,3 +385,24 @@ widths/heights centred on the character, so a distant cursor does not wake a
 closed-eye bed pose. Blink can close the same eye overlay above this channel.
 This lets one shared eye drawing respond to both gaze axes without submitting
 two overlapping eye images. Explicit preview gaze values open this channel.
+
+Source drawing packs may additionally opt into `rive.routing` with `maxExitMs`
+(100–400), `clips` (`value`, `animation`, `durationMs`, `start`, `end`, optional
+`loop`) and `bridges` (motion values). Boundary names describe **identical shared
+paint, selectors and bone coordinates**, not just a similar pose. The loader
+checks animation references; import validation requires a connected bridge graph.
+On interruption, the pet-side router scrubs the active clip to its nearer end,
+then traverses any required bridge clips within the combined exit budget, using
+smoothstep time warping. It never blends incompatible material charts. A later
+interrupt replans from the currently displayed position. Normal choreography and
+random resting still use `RiveMotionClock`; its beat clock pauses during exit.
+The body is applied with `LinearAnimationInstance`; the state machine owns the
+procedural layers. Such files must not also animate the body from their machine.
+
+`rive.backing: {width, height, scale}` caps the backing store to native source
+resolution × scale (1–1.25), preserving aspect ratio. CSS controls visual size;
+alpha hit coordinates use the actual backing store. Opted-in bitmap drawing packs
+use the pinned runtime's inkbleed renderer option to avoid native MSAA; ordinary
+packs retain the existing renderer and full DPR. The native-size cap has no effect
+when the pet's CSS size × DPR is already below it. The prototype binary limit is
+96 MiB for lossless source drawing atlases; expanded ZIPs remain capped at 256 MiB.

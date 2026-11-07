@@ -1,3 +1,4 @@
+import { riveBackingSize } from './riveRouting';
 import { RiveMotionClock } from './riveMotion';
 import { RiveDynamics, RiveFrameGate } from './riveDynamics';
 import { RiveDrawer, RIVE_STATES } from './rive';
@@ -269,7 +270,7 @@ function syncRive(): void {
   if (key === riveKey) return;
   riveKey = key; const token = ++riveToken;
   const c = root.querySelector<HTMLCanvasElement>('#rive')!;
-  c.width = Math.round(state.pet.width * devicePixelRatio); c.height = Math.round(state.pet.height * devicePixelRatio);
+  Object.assign(c,riveBackingSize(state.pet.width,state.pet.height,devicePixelRatio,config.backing));
   void bridge.clip('pet.riv').then(async bytes => {
     if (!bytes || token !== riveToken) return;
     const drawer = await RiveDrawer.load(c, bytes, config);
@@ -283,7 +284,7 @@ function syncRive(): void {
 function stepRive(now: number): void {
   const d = riveDrawer; if (!d || !state) return;
   const tucked = !!state.edge && state.dockAmount > 0;
-  const w = Math.round(state.pet.width * devicePixelRatio), h = Math.round(state.pet.height * devicePixelRatio);
+  const { width: w, height: h } = riveBackingSize(state.pet.width,state.pet.height,devicePixelRatio,state.rive?.backing);
   const procedural = state.rive?.procedural;
   const slow = ['idle','sleeping','resting'].includes(state.mood) && !state.dragging && !speechPlaying();
   const scheduled = procedural ? riveGate.take(now, slow ? procedural.idleFps : procedural.activeFps, riveEpoch !== state.moodEpoch || d.canvas.width !== w || d.canvas.height !== h) : null;
@@ -291,7 +292,7 @@ function stepRive(now: number): void {
   let dirty = false;
   if (d.canvas.width !== w || d.canvas.height !== h) { d.canvas.width = w; d.canvas.height = h; dirty = true; }
   const dt = procedural ? scheduled! : Math.min(.1, riveAt ? (now - riveAt) / 1000 : 0);
-  const beat = !tucked && !motion.matches ? riveClock?.step(state.dragging ? 'dragging' : state.mood.startsWith('running-') ? 'running' : state.mood, dt, now, riveEpoch !== state.moodEpoch) : null;
+  const beat = !tucked && !motion.matches ? riveClock?.step(state.dragging ? 'dragging' : state.mood.startsWith('running-') ? 'running' : state.mood, d.route?.leaving ? 0 : dt, now, riveEpoch !== state.moodEpoch) : null;
   if (beat) { dirty = d.set('motion', beat.value) || dirty; if (beat.restart) { d.fire('motionStart'); dirty = true; } }
   const mood = state.mood === 'waving' || state.mood === 'jumping' || state.mood === 'poked' || state.mood === 'landing' || state.mood === 'dragging' ? 'idle' : state.mood;
   dirty = d.set('state', tucked ? 0 : Math.max(0, (RIVE_STATES as readonly string[]).indexOf(mood.startsWith('running-') ? 'running' : mood))) || dirty;
@@ -314,10 +315,10 @@ function stepRive(now: number): void {
   if (riveDynamics && procedural && !tucked && !motion.matches) {
     // Evaluate body motion first; springs respond to the actual animated root,
     // plus the controller's window drag velocity. Apply their blend inputs at t=0.
-    riveActive = d.machine.advanceAndApply(dt);
+    riveActive = d.advance(dt);
     const m = d.artboard.rootBone(procedural.bodyBone).worldTransform();
     for (const [name,value] of Object.entries(riveDynamics.step(dt,{x:m.tx,y:m.ty,angle:Math.atan2(m.xy,m.xx)},state.dragVelocity))) dirty = d.set(name,value) || dirty;
-    d.machine.advanceAndApply(0);
+    d.advance(0);
   }
   if (dirty || (procedural ? d.artboard.didChange() : riveActive) && !tucked && !motion.matches) {
     riveActive = d.draw(tucked || motion.matches || riveDynamics ? 0 : dt).active;

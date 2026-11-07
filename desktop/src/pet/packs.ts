@@ -11,7 +11,7 @@ import { randomUUID } from 'node:crypto';
 
 // Drawing variants in a layered character can exceed a single raster clip.
 // Keep a finite per-file cap inside the unchanged 256 MiB expanded pack cap.
-export const MAX_RIVE_BYTES = 64 * 1024 * 1024;
+export const MAX_RIVE_BYTES = 96 * 1024 * 1024;
 export const MAX_PACK_BYTES = 8 * 1024 * 1024;
 const MAX_MANIFEST_BYTES = 16 * 1024;
 export interface SleepingStrip { path: 'sleeping.webp' | 'sleeping.png'; frames: number; durationsMs: number[] }
@@ -50,7 +50,19 @@ export function parseManifest(data: Buffer): PetManifest {
     }
     if (r.procedural !== undefined && (!r.procedural || typeof r.procedural.bodyBone !== 'string' || !r.procedural.bodyBone.length || r.procedural.bodyBone.length > 100 || ![15,24,30].includes(r.procedural.idleFps) || ![30,60].includes(r.procedural.activeFps))) fail('invalid Rive procedural settings');
     if (r.procedural?.eyeOpen !== undefined && typeof r.procedural.eyeOpen !== 'boolean') fail('invalid Rive eyeOpen setting');
-    remoteCodex.rive = { path: 'pet.riv', artboard: r.artboard, stateMachine: r.stateMachine, ...(r.motions ? { motions: r.motions } : {}), ...(r.procedural ? { procedural: r.procedural } : {}) };
+    if (r.backing !== undefined && (!r.backing || ![r.backing.width,r.backing.height].every(n=>Number.isInteger(n)&&n>0&&n<=4096) || !Number.isFinite(r.backing.scale) || r.backing.scale<1 || r.backing.scale>1.25)) fail('invalid Rive backing');
+    if (r.routing !== undefined) {
+      const q=r.routing;
+      if (!q || !r.motions || !Number.isFinite(q.maxExitMs) || q.maxExitMs<100 || q.maxExitMs>400 || !Array.isArray(q.clips) || !q.clips.length || q.clips.length>128 || q.clips.some(c=>!c || !Number.isInteger(c.value) || c.value<0 || c.value>1023 || typeof c.animation!=='string' || !c.animation.length || c.animation.length>100 || !Number.isFinite(c.durationMs) || c.durationMs<16 || c.durationMs>60000 || ![c.start,c.end].every(n=>typeof n==='string'&&n.length>0&&n.length<=100) || c.loop!==undefined&&typeof c.loop!=='boolean') || new Set(q.clips.map(c=>c.value)).size!==q.clips.length || !Array.isArray(q.bridges) || q.bridges.length>128 || q.bridges.some(v=>!q.clips.some(c=>c.value===v))) fail('invalid Rive routing');
+      if (Object.values(r.motions ?? {}).flat().some(c=>!q.clips.some(v=>v.value===c?.value))) fail('Rive routing misses a motion');
+      const families=[...new Set(q.clips.flatMap(c=>[c.start,c.end]))];
+      for (const start of families) {
+        const seen=new Set([start]); let size=0;
+        while (size!==seen.size) { size=seen.size; for (const c of q.clips) if(q.bridges.includes(c.value)&&seen.has(c.start))seen.add(c.end); }
+        if(families.some(n=>!seen.has(n)))fail('Rive routing has disconnected boundaries');
+      }
+    }
+    remoteCodex.rive = { path: 'pet.riv', artboard: r.artboard, stateMachine: r.stateMachine, ...(r.motions ? { motions: r.motions } : {}), ...(r.procedural ? { procedural: r.procedural } : {}), ...(r.routing ? { routing: r.routing } : {}), ...(r.backing ? { backing: r.backing } : {}) };
   }
   const extension = extensions?.sleeping as SleepingStrip | undefined;
   if (extension) {
@@ -251,7 +263,7 @@ export function unpackPetZip(bytes: Buffer): Map<string, Buffer> {
   return entries;
 }
 function checkRive(bytes: Buffer): void {
-  if (bytes.length < 8 || bytes.length > MAX_RIVE_BYTES || bytes.toString('ascii', 0, 4) !== 'RIVE') fail('Rive file must have RIVE header and be at most 64 MiB');
+  if (bytes.length < 8 || bytes.length > MAX_RIVE_BYTES || bytes.toString('ascii', 0, 4) !== 'RIVE') fail('Rive file must have RIVE header and be at most 96 MiB');
 }
 export async function readRive(pack: PetPack): Promise<Buffer | null> {
   if (!pack.manifest.remoteCodex?.rive) return null;
