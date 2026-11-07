@@ -457,10 +457,12 @@ reactions on the current material chart, useful for an event in a lying or
 suspended pose. `drawings` is an optional, strictly time-ordered list of
 `{atMs, animation}` entries fitted to successive source drawings. The player
 selects the latest entry at the displayed body time, including while that clock
-decelerates, and advances its animation at the independent reaction time. Before
-the first entry it uses `animation`. All variant names are test-loaded during
-isolated import validation. The displayed body
-clock decelerates over `settleMs` (50–400 ms), then holds while the separate
+decelerates, and advances its animation at the independent reaction time. Material
+selection happens after the source frame clock is quantized, so a 60 Hz input
+update cannot select a drawing ahead of the held 24 fps body sample. Before the
+first entry it uses `animation`. All variant names are test-loaded during isolated
+import validation. The displayed body clock decelerates over `settleMs`
+(50–400 ms), then holds while the separate
 reaction animation plays; it never selects the requested upright clip's body
 drawing. The logical target is reported in `route.value`, while
 `route.animation` and `route.time` identify the actual body sample. A subsequent

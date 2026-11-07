@@ -115,6 +115,33 @@ describe('material-safe routing', () => {
     for (let i = 0; i < 27; i++) r.step(0.01);
     expect(r.step(0).reaction).toBeUndefined();
   });
+  it('uses the displayed body clock when the input clock has entered the next material', () => {
+    const r = new RiveRestRouter(
+      {
+        ...config,
+        reactions: [
+          {
+            clips: [4],
+            targets: [0],
+            animation: 'early',
+            durationMs: 1000,
+            settleMs: 100,
+            drawings: [
+              { atMs: 0, animation: 'early' },
+              { atMs: 999, animation: 'late' },
+            ],
+          },
+        ],
+      },
+      4,
+    );
+    r.seek(4, 0.98);
+    r.request(0);
+    expect(r.step(0.05).reaction?.animation).toBe('late');
+    expect(r.reactionAnimationAt(23 / 24)).toBe('early');
+    expect(r.reactionAnimationAt(1)).toBe('late');
+    expect(r.reactionAnimationAt(23 / 24)).toBe('early');
+  });
   it('selects reaction material from the held source time, including float32 key boundaries', () => {
     const fixture = structuredClone(config);
     fixture.reactions = [

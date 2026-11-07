@@ -63,6 +63,10 @@ export class RiveDrawer {
         this.config?.procedural?.sourceFps,
         this.route.leaving && this.route.exitMix > 0,
       );
+      if (this.route.reaction) {
+        // The material must follow the same held clock as the body animation.
+        this.route.reaction.animation = this.router.reactionAnimationAt(this.route.time)!;
+      }
       if (
         this.applied?.animation !== this.route.animation ||
         this.applied.time !== this.route.time ||

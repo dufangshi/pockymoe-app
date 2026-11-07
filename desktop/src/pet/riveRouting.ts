@@ -115,6 +115,10 @@ export class RiveRestRouter {
     throw new Error(`No rest route from ${start} to ${end}`);
   }
 
+  reactionAnimationAt(sourceSeconds: number): string | undefined {
+    return this.reaction ? reactionAnimation(this.reaction.definition, sourceSeconds * 1000) : undefined;
+  }
+
   seek(value: number, seconds: number): void {
     this.clip = this.find(value);
     this.time = Math.max(0, Math.min(this.clip.durationMs, seconds * 1000));
