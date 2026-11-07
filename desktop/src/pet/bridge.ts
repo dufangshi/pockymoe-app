@@ -8,6 +8,7 @@ export interface PetViewState {
   rive?: import('./rive').RivePack & { epoch: number };
   cursor?: { x: number; y: number };
   dragging?: boolean;
+  dragVelocity?: { x: number; y: number };
   appearance: Appearance;
   glassFallback?: boolean;
   surface: 'sprite' | 'glass';

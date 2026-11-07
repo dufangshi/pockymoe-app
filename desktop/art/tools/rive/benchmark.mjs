@@ -5,8 +5,10 @@ import { resolve } from 'node:path';
 import { cpus } from 'node:os';
 const [,,pack,out,id='mint-courier',seconds='60']=process.argv;
 if(!pack||!out)throw new Error('Usage: node art/tools/rive/benchmark.mjs PACK OUT ID [seconds=60]');
+const dpr=Number(process.env.RIVE_BENCH_DPR??'1');
+if(![1,2].includes(dpr))throw new Error('RIVE_BENCH_DPR must be 1 or 2');
 await mkdir(out,{recursive:true});
-const app=await electron.launch({executablePath:resolve('node_modules/electron/dist/electron'),args:['--no-sandbox','--ozone-platform=x11','--enable-unsafe-swiftshader',resolve('.local/desktop-evidence/pet/qa1/harness/main/index.js')],env:{...process.env,ELECTRON_RENDERER_URL:'',POCKYMOE_CLIP_PACK:resolve(pack)}});
+const app=await electron.launch({executablePath:resolve('node_modules/electron/dist/electron'),args:['--no-sandbox','--ozone-platform=x11','--enable-unsafe-swiftshader',`--force-device-scale-factor=${dpr}`,resolve('.local/desktop-evidence/pet/qa1/harness/main/index.js')],env:{...process.env,ELECTRON_RENDERER_URL:'',POCKYMOE_CLIP_PACK:resolve(pack)}});
 try{
  await app.firstWindow();
  await app.evaluate(async()=>{while(!globalThis.petHarness)await new Promise(r=>setTimeout(r,20));});
@@ -25,6 +27,7 @@ try{
  await sprite.waitForFunction(()=>document.querySelector('#character.rive')||document.querySelector('#character.clips'));
  await sprite.waitForTimeout(3000);
  await sprite.screenshot({path:resolve(out,'pet-window.png'),omitBackground:true});
+ await sprite.evaluate(()=>{globalThis.riveReadbacks=0;const native=WebGL2RenderingContext.prototype.readPixels;WebGL2RenderingContext.prototype.readPixels=function(...args){globalThis.riveReadbacks++;return native.apply(this,args);};});
  const read=()=>app.evaluate(({app,BrowserWindow})=>({time:performance.now(),metrics:app.getAppMetrics().map(m=>({pid:m.pid,type:m.type,cpu:m.cpu.percentCPUUsage,cumulativeCPU:m.cpu.cumulativeCPUUsage,memory:m.memory})),petPid:BrowserWindow.getAllWindows().find(w=>!w.getParentWindow()).webContents.getOSProcessId()}));
  const samples=[await read()];
  for(let i=0;i<Number(seconds);i++){
@@ -37,7 +40,10 @@ try{
  const mean=type=>100*(total(last,type)-total(first,type))/elapsed;
  if(first.petPid!==last.petPid)throw new Error('Pet renderer restarted during measurement');
  const info=await app.evaluate(async({app})=>({features:app.getGPUFeatureStatus(),gpu:await app.getGPUInfo('basic')}));
- const result={id,seconds:Number(seconds),elapsed,logicalCPUs:cpus().length,idleRandom:0.5,rendererCPU:mean('pet'),gpuProcessCPU:mean('GPU'),note:'CPU seconds / measured wall seconds * 100 (one fully busy logical core = 100%). GPU process CPU is not GPU hardware utilization.',info,samples};
+ const readbacks=await sprite.evaluate(()=>globalThis.riveReadbacks);
+ const display=await sprite.evaluate(()=>({dpr:devicePixelRatio,width:innerWidth,height:innerHeight,canvases:[...document.querySelectorAll('canvas')].map(c=>({width:c.width,height:c.height,cssWidth:c.clientWidth,cssHeight:c.clientHeight}))}));
+ if(display.dpr!==dpr)throw new Error(`Unexpected display DPR ${display.dpr}`);
+ const result={id,seconds:Number(seconds),elapsed,logicalCPUs:cpus().length,idleRandom:0.5,display,webglReadbacks:readbacks,readbacksPerSecond:readbacks/elapsed,rendererCPU:mean('pet'),gpuProcessCPU:mean('GPU'),note:'CPU seconds / measured wall seconds * 100 (one fully busy logical core = 100%). GPU process CPU is not GPU hardware utilization.',info,samples};
  await writeFile(resolve(out,'metrics.json'),JSON.stringify(result,null,2));
  if(id==='mint-courier'||process.env.RIVE_BENCH_CAPTURE==='1'){
   const png=PNG.sync.read(await sprite.screenshot({omitBackground:true}));let sx=0,sy=0,n=0;

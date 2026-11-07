@@ -35,4 +35,10 @@ describe('Rive motion choreography', () => {
     base.remoteCodex.rive.motions.idle[0].durationMs=0;
     expect(()=>parseManifest(Buffer.from(JSON.stringify(base)))).toThrow('motions');
   });
+  it('interrupts a procedural rig immediately while retaining reaction variant cursors', () => {
+    const c = new RiveMotionClock({idle:[{value:0,durationMs:100}],resting:[{value:1,durationMs:100,role:'intro'},{value:2,durationMs:100},{value:3,durationMs:9000,role:'outro'}],poked:[{value:4,durationMs:100},{value:5,durationMs:100}]},()=>0,true);
+    c.step('idle',0,0);expect(c.step('idle',.11,110)?.value).toBe(1);
+    expect(c.step('poked',0,111)?.value).toBe(4);
+    expect(c.step('poked',0,112,true)?.value).toBe(5);
+  });
 });

@@ -23,4 +23,10 @@ describe('Rive pack import', () => {
       await expect(importPetPack(source,dest,undefined,[],async () => undefined)).rejects.toThrow('only pet.json');
     } finally { await rm(root,{recursive:true,force:true}); }
   });
+  it('validates and preserves optional procedural settings', () => {
+    const parse = (procedural: unknown) => parseManifest(Buffer.from(JSON.stringify({...manifest,remoteCodex:{rive:{...manifest.remoteCodex.rive,procedural}}})));
+    const valid = {bodyBone:'body',idleFps:24,activeFps:60};
+    expect(parse(valid).remoteCodex?.rive?.procedural).toEqual(valid);
+    for (const invalid of [null,{}, {...valid,bodyBone:''}, {...valid,idleFps:60}, {...valid,activeFps:24}]) expect(()=>parse(invalid)).toThrow('procedural');
+  });
 });

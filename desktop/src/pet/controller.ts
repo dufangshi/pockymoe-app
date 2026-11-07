@@ -56,6 +56,7 @@ export function createPetController(deps: PetControllerDeps): PetController {
   let hoverSince = 0, awaySince = 0, lastOpacity = 1, lastCue = 0, lastSpeech = 0, controlsPinned = false;
   let blurTimer: ReturnType<typeof setTimeout> | undefined;
   let drag: { x: number; y: number; origin: PetPosition; moved: boolean } | null = null;
+  let dragSample = { x: 0, y: 0, at: 0 }, dragVelocity = { x: 0, y: 0 };
   const completedConversations = new Map<string, number>();
   const primary = screen.getPrimaryDisplay();
   const petHeight = (value: Pick<DesktopSettings, 'petMini' | 'petSize'>): number => Math.round((value.petMini ? MINI_HEIGHT : PET_HEIGHT[value.petSize]) * (pack?.manifest.remoteCodex?.sizeScale ?? 1));
@@ -189,6 +190,7 @@ export function createPetController(deps: PetControllerDeps): PetController {
       rive: pack?.manifest.remoteCodex?.rive ? { ...pack.manifest.remoteCodex.rive, epoch: packEpoch } : undefined,
       cursor: pack?.manifest.remoteCodex?.rive ? { x: screen.getCursorScreenPoint().x - window.getBounds().x - layout.pet.x, y: screen.getCursorScreenPoint().y - window.getBounds().y - layout.pet.y } : undefined,
       dragging: !!drag?.moved,
+      ...(pack?.manifest.remoteCodex?.rive?.procedural ? { dragVelocity: drag?.moved && now-dragSample.at < 120 ? dragVelocity : { x: 0, y: 0 } } : {}),
       faceBox: pack?.manifest.remoteCodex?.faceBox, talk: pack?.manifest.remoteCodex?.talk,
       clips: pack?.manifest.remoteCodex?.clips && pack.manifest.remoteCodex.clipFormat ? { format: pack.manifest.remoteCodex.clipFormat, states: pack.manifest.remoteCodex.clips, epoch: packEpoch, urls: media?.urls } : null,
       // Timing stays here: while the pointer holds a bubble, its restart must not reach the renderer as a change.
@@ -309,8 +311,11 @@ export function createPetController(deps: PetControllerDeps): PetController {
       }
       case 'dragStart': case 'dragMove': case 'dragEnd': {
         if (!Number.isFinite(action.x) || !Number.isFinite(action.y) || Math.abs(action.x) > 100000 || Math.abs(action.y) > 100000) break;
-        if (action.type === 'dragStart') { drag = { x: action.x, y: action.y, origin: { ...position }, moved: false }; closeSurface(); }
+        if (action.type === 'dragStart') { drag = { x: action.x, y: action.y, origin: { ...position }, moved: false }; dragSample = { x: action.x, y: action.y, at: Date.now() }; dragVelocity = { x: 0, y: 0 }; closeSurface(); }
         else if (drag) {
+          const at = Date.now(), seconds = Math.max(.008, (at-dragSample.at)/1000);
+          dragVelocity = { x: Math.max(-4000,Math.min(4000,(action.x-dragSample.x)/seconds)), y: Math.max(-4000,Math.min(4000,(action.y-dragSample.y)/seconds)) };
+          dragSample = { x: action.x, y: action.y, at };
           if (Math.hypot(action.x - drag.x, action.y - drag.y) >= 4) drag.moved = true;
           if (drag.moved) {
             const next = screen.getDisplayNearestPoint({ x: Math.round(action.x), y: Math.round(action.y) });

@@ -1,4 +1,5 @@
 import { RiveMotionClock } from './riveMotion';
+import { RiveDynamics, RiveFrameGate } from './riveDynamics';
 import { RiveDrawer, RIVE_STATES } from './rive';
 import { VideoClipPlayer } from './videoPlayer';
 document.documentElement.dataset.platform = navigator.userAgent.includes('Windows') ? 'win32' : '';
@@ -259,6 +260,7 @@ function renderSprite(): void {
 }
 
 let riveClock: RiveMotionClock | null = null;
+let riveDynamics: RiveDynamics | null = null, riveGate = new RiveFrameGate();
 let riveDrawer: RiveDrawer | null = null, riveToken = 0, riveKey = '', riveActive = true, riveAt = 0, riveEpoch = -1, riveDragging = false;
 function syncRive(): void {
   const config = state?.rive;
@@ -272,7 +274,8 @@ function syncRive(): void {
     if (!bytes || token !== riveToken) return;
     const drawer = await RiveDrawer.load(c, bytes, config);
     if (token !== riveToken) { drawer.dispose(); return; }
-    riveClock = config.motions ? new RiveMotionClock(config.motions) : null;
+    riveClock = config.motions ? new RiveMotionClock(config.motions, Math.random, !!config.procedural) : null;
+    riveDynamics = config.procedural ? new RiveDynamics() : null; riveGate = new RiveFrameGate();
     riveDrawer = drawer; riveActive = true; riveAt = 0; riveEpoch = -1; riveDragging = false;
     root.querySelector('#character')?.classList.add('rive');
   }).catch(error => { console.error('Rive pet failed; using atlas', error); });
@@ -281,17 +284,21 @@ function stepRive(now: number): void {
   const d = riveDrawer; if (!d || !state) return;
   const tucked = !!state.edge && state.dockAmount > 0;
   const w = Math.round(state.pet.width * devicePixelRatio), h = Math.round(state.pet.height * devicePixelRatio);
+  const procedural = state.rive?.procedural;
+  const slow = ['idle','sleeping','resting'].includes(state.mood) && !state.dragging && !speechPlaying();
+  const scheduled = procedural ? riveGate.take(now, slow ? procedural.idleFps : procedural.activeFps, riveEpoch !== state.moodEpoch || d.canvas.width !== w || d.canvas.height !== h) : null;
+  if (procedural && scheduled === null) return;
   let dirty = false;
   if (d.canvas.width !== w || d.canvas.height !== h) { d.canvas.width = w; d.canvas.height = h; dirty = true; }
-  const dt = Math.min(.1, riveAt ? (now - riveAt) / 1000 : 0);
+  const dt = procedural ? scheduled! : Math.min(.1, riveAt ? (now - riveAt) / 1000 : 0);
   const beat = !tucked && !motion.matches ? riveClock?.step(state.dragging ? 'dragging' : state.mood.startsWith('running-') ? 'running' : state.mood, dt, now, riveEpoch !== state.moodEpoch) : null;
   if (beat) { dirty = d.set('motion', beat.value) || dirty; if (beat.restart) { d.fire('motionStart'); dirty = true; } }
   const mood = state.mood === 'waving' || state.mood === 'jumping' || state.mood === 'poked' || state.mood === 'landing' || state.mood === 'dragging' ? 'idle' : state.mood;
   dirty = d.set('state', tucked ? 0 : Math.max(0, (RIVE_STATES as readonly string[]).indexOf(mood.startsWith('running-') ? 'running' : mood))) || dirty;
   dirty = d.set('mouth', tucked ? 0 : speechLevel(now)) || dirty;
   const cursor = state.cursor;
-  dirty = d.set('lookX', cursor ? Math.max(-1, Math.min(1, (cursor.x / state.pet.width - .5) * 2)) : 0) || dirty;
-  dirty = d.set('lookY', cursor ? Math.max(-1, Math.min(1, (cursor.y / state.pet.height - .5) * 2)) : 0) || dirty;
+  dirty = d.set('lookX', cursor && !tucked ? Math.max(-1, Math.min(1, (cursor.x / state.pet.width - .5) * 2)) : 0) || dirty;
+  dirty = d.set('lookY', cursor && !tucked ? Math.max(-1, Math.min(1, (cursor.y / state.pet.height - .5) * 2)) : 0) || dirty;
   const dragging = !!state.dragging;
   if (dragging !== riveDragging) { d.fire(dragging ? 'dragStart' : 'land'); riveDragging = dragging; dirty = true; }
   dirty = d.set('dragging', dragging) || dirty;
@@ -300,8 +307,16 @@ function stepRive(now: number): void {
     const trigger = ({ waving: 'complete', jumping: 'complete', poked: 'poke', failed: 'fail' } as Record<string,string>)[state.mood];
     if (trigger && !tucked) { d.fire(trigger); dirty = true; } riveEpoch = state.moodEpoch;
   }
-  if (dirty || riveActive && !tucked && !motion.matches) {
-    riveActive = d.draw(tucked || motion.matches ? 0 : Math.min(.1, riveAt ? (now - riveAt) / 1000 : 0)).active;
+  if (riveDynamics && procedural && !tucked && !motion.matches) {
+    // Evaluate body motion first; springs respond to the actual animated root,
+    // plus the controller's window drag velocity. Apply their blend inputs at t=0.
+    riveActive = d.machine.advanceAndApply(dt);
+    const m = d.artboard.rootBone(procedural.bodyBone).worldTransform();
+    for (const [name,value] of Object.entries(riveDynamics.step(dt,{x:m.tx,y:m.ty,angle:Math.atan2(m.xy,m.xx)},state.dragVelocity))) dirty = d.set(name,value) || dirty;
+    d.machine.advanceAndApply(0);
+  }
+  if (dirty || (procedural ? d.artboard.didChange() : riveActive) && !tucked && !motion.matches) {
+    riveActive = d.draw(tucked || motion.matches || riveDynamics ? 0 : dt).active;
     updateHit();
   }
   riveAt = now;

@@ -346,3 +346,34 @@ One-shot reactions hold their final frame until the controller's reaction expire
 durations come from the motion plan; Rive landing beats run after drag release.
 Time advancement pauses while tucked. This behavior applies only to opt-in Rive
 motion plans; raster packs retain their previous sequencing.
+
+Rive packs with a shared skeleton may opt into pet-side dynamics:
+
+```json
+{"procedural":{"bodyBone":"body","idleFps":24,"activeFps":60}}
+```
+
+This lives inside `remoteCodex.rive`. `bodyBone` must name a root bone. Idle FPS
+accepts 15/24/30, active FPS 30/60. Installation additionally requires number
+inputs `blink`, `breath`, `weightShift`, `swayHair`, `swayGown`, `swayWings`, and
+`dragLean`. Author their blend layers on separate child bones so they combine
+with the pose rather than replacing it. Hair/gown/wing values are −1…1; blink
+and breath are 0…1. The drawer reads the animated body's world translation and
+rotation. Damped springs respond to its acceleration and to window drag velocity,
+integrated in steps of at most 1/120 s; stale drag samples expire after 120 ms.
+Random blink intervals and incommensurate breathing/shift phases continue on
+all authored poses. Closed-eye sleeping art may mask the blink layer.
+
+Only these opt-in rigs interrupt intros/outros immediately on a new mood or
+reaction; their state machine must blend the same bones to the destination
+within 300 ms. Their frame gate limits slow idle/sleep/rest draws to idleFps,
+uses activeFps for work, reactions and speech, and freezes procedural time while
+tucked or under reduced motion. Packs without procedural settings keep the
+previous choreography and drawing policy.
+
+Procedural rigs evaluate at the configured cadence and draw only when inputs,
+size or `artboard.didChange()` require it. Breathing is quantized to 0.1, weight
+shift to 1/12, and springs to 1/1024; author small micro-motion ranges so these
+steps remain below a visible pixel at the intended size/DPR. Speech still uses
+the existing 60/120 ms envelope. The benchmark records actual WebGL readbacks
+per second as evidence of draws skipped; this is separate from animation FPS.

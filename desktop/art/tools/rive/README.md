@@ -31,6 +31,11 @@ parents precede children. A normal child bone starts at the parent's +X tip;
 Skin/tendon bind transforms are calculated from the rest pose. Distance to bone
 segments gives inverse-square weights, retaining the nearest four influences;
 byte quantization sums to 255. At most 255 tendons per mesh are supported.
+For batching disconnected islands, `mesh.influences` may supply one array of
+`{bone,weight}` entries per vertex, with one to four positive finite weights and
+no duplicate bones. Bone names must belong to that mesh's `bones` list. These
+weights use the same byte quantization; omitted influences retain distance-based
+weighting. This preserves a part's original skin when combining mesh islands.
 
 Animations have integer frame times, fps, duration, loop and tracks. Tracks name
 an object and an animatable float property (`x`, `y`, `rotation`, `scaleX`,
@@ -112,6 +117,28 @@ pack and its real ZIP installation. `RIVE_BENCH_CAPTURE=1` enables alpha and doc
 assertions plus the full theme/dark-light captures for any benchmark pack ID.
 Dock captures include all four edges in all six appearances. Benchmarks record
 logical CPU count and actual elapsed seconds; one logical core = 100%.
+`RIVE_BENCH_DPR=1|2` explicitly chooses the display scale (default 1); metrics
+include actual DPR and CSS/backing canvas dimensions. Compare both formats at
+the same DPR. WebGL readbacks count actual Rive draws, including hit testing.
 The benchmark reloads the pet renderer with a fixed random value of 0.5 before
 measuring either format, keeping the random resting entry disabled and idle
 choices repeatable. Production animation randomness is unchanged.
+
+Shared-rig authoring can point multiple mesh parts at the same texture path and
+set `assetSize:[width,height]`. The writer embeds each resolved path once and
+requires consistent dimensions. Mesh positions remain part-local; normalized
+UVs address the shared atlas. Identity opacity groups may have an earlier
+identity-group parent, useful for eyelids that mask independently aimed eyes.
+
+`record.ts PACK OUTPUT SCENARIOS [24|30]` records full-resolution 648×702 PNG
+sequences. A scenario is `{name,duration,initial,events?,frameValues?}`; initial
+is a motion input, events are `{at,motion}` in seconds, and frameValues optionally
+supplies typed inputs per output frame. Synthetic dragVX/dragVY fields feed the
+same spring integrator without becoming Rive contract inputs. The authored entry
+state can condition on the initial motion to begin directly at its first frame.
+With `RIVE_RECORD_RIG=/local/rig.json`, per-frame JSON also records every bone's
+world matrix for deformation analysis. Procedural recordings use the production
+spring/blink code and a deterministic RNG seed; production remains random. The
+recording profile and all images remain under OUTPUT. Recordings advance at
+fixed time steps independently of wall-clock throughput; use benchmark.mjs for
+real-time CPU measurements.

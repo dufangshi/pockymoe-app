@@ -46,7 +46,8 @@ export function parseManifest(data: Buffer): PetManifest {
     if (r.motions !== undefined) {
       if (!r.motions || typeof r.motions !== 'object' || Array.isArray(r.motions) || Object.entries(r.motions).some(([state, beats]) => !['idle','running','waiting','waving','jumping','poked','failed','review','sleeping','dragging','landing','resting'].includes(state) || !Array.isArray(beats) || !beats.length || beats.length > 32 || beats.some(b => !b || !Number.isInteger(b.value) || b.value < 0 || b.value > 1023 || !Number.isFinite(b.durationMs) || b.durationMs < 16 || b.durationMs > 60000 || b.role !== undefined && !['intro','outro'].includes(b.role)))) fail('invalid Rive motions');
     }
-    remoteCodex.rive = { path: 'pet.riv', artboard: r.artboard, stateMachine: r.stateMachine, ...(r.motions ? { motions: r.motions } : {}) };
+    if (r.procedural !== undefined && (!r.procedural || typeof r.procedural.bodyBone !== 'string' || !r.procedural.bodyBone.length || r.procedural.bodyBone.length > 100 || ![15,24,30].includes(r.procedural.idleFps) || ![30,60].includes(r.procedural.activeFps))) fail('invalid Rive procedural settings');
+    remoteCodex.rive = { path: 'pet.riv', artboard: r.artboard, stateMachine: r.stateMachine, ...(r.motions ? { motions: r.motions } : {}), ...(r.procedural ? { procedural: r.procedural } : {}) };
   }
   const extension = extensions?.sleeping as SleepingStrip | undefined;
   if (extension) {

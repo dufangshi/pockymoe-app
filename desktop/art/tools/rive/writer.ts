@@ -44,14 +44,16 @@ export interface Bone { name: string; parent?: string; x?: number; y?: number; l
 export interface Part {
   name: string; path: string; width: number; height: number; x: number; y: number;
   parent?: string; scaleX?: number; scaleY?: number; opacity?: number;
-  mesh?: { vertices: [number, number, number, number][]; triangles: number[]; bones?: string[] };
+  /** Shared texture dimensions; mesh UVs address this atlas, not the part rectangle. */
+  assetSize?: [number, number];
+  mesh?: { vertices: [number, number, number, number][]; triangles: number[]; bones?: string[]; influences?: { bone: string; weight: number }[][] };
 }
 export interface Track { target: string; property: string; keys: { frame: number; value: number; cubic?: [number, number, number, number] }[] }
 export interface Rig {
   artboard: { name: string; width: number; height: number };
   bones: Bone[]; images: Part[];
   /** Identity-transform opacity groups, useful for pose sets with independent mouth layers. */
-  groups?: { name: string; opacity?: number }[];
+  groups?: { name: string; opacity?: number; parent?: string }[];
   animations: { name: string; fps?: number; duration: number; loop?: boolean; tracks: Track[] }[];
   stateMachine: { name: string; inputs: { name: string; type: 'number' | 'bool' | 'trigger'; value?: number | boolean }[];
     layers: { name: string; states: { name: string; animation?: string; kind?: 'entry' | 'any' | 'exit'; blend?: { input: string; animations: { animation: string; value: number }[] }; transitions?: { to: string; duration?: number; exitTime?: number; conditions?: { input: string; op?: number; value?: number | boolean }[] }[] }[] }[] };
@@ -64,6 +66,10 @@ export function weights(x: number, y: number, bones: { x: number; y: number; end
     const t = Math.max(0, Math.min(1, ((x - b.x) * dx + (y - b.y) * dy) / (dx * dx + dy * dy || 1)));
     return { i: i + 1, w: 1 / Math.max(1e-6, (x - b.x - t * dx) ** 2 + (y - b.y - t * dy) ** 2) };
   }).sort((a, b) => b.w - a.w).slice(0, 4);
+  return packWeights(nearest);
+}
+function packWeights(nearest: { i: number; w: number }[]): { indices: number; values: number } {
+  if (!nearest.length || nearest.length > 4 || nearest.some(b => !Number.isInteger(b.i) || b.i < 1 || b.i > 255 || !Number.isFinite(b.w) || b.w <= 0) || new Set(nearest.map(b=>b.i)).size !== nearest.length) throw new Error('Invalid vertex influences');
   const sum = nearest.reduce((s, b) => s + b.w, 0), ws = nearest.map(b => Math.floor(b.w / sum * 255));
   const order = nearest.map((b, i) => ({ i, fraction: b.w / sum * 255 - ws[i] })).sort((a, b) => b.fraction - a.fraction);
   for (let n = 255 - ws.reduce((s, v) => s + v, 0), i = 0; i < n; i++) ws[order[i].i]++;
@@ -79,12 +85,24 @@ export function buildRig(rig: Rig, base: string): Buffer {
   const id = (name?: string): number => { if (!name) return 0; const n = ids.get(name); if (n === undefined) throw new Error(`Unknown object ${name}`); return n; };
   const index = (names: string[], name: string): number => { const i = names.indexOf(name); if (i < 0) throw new Error(`Unknown reference ${name}`); return i; };
   w.object('backboard');
-  rig.images.forEach((part, i) => {
-    w.object('image_asset', { name: part.name, assetId: i, width: part.width, height: part.height });
-    w.object('file_asset_contents', { bytes: readFileSync(resolve(base, part.path)) });
+  const assets = new Map<string, { id: number; width: number; height: number }>();
+  rig.images.forEach(part => {
+    const path = resolve(base, part.path), [width, height] = part.assetSize ?? [part.width, part.height];
+    if (![width, height].every(n => Number.isInteger(n) && n > 0 && n <= 8192) || part.assetSize && !part.mesh) throw new Error(`Invalid atlas dimensions ${part.name}`);
+    const existing = assets.get(path);
+    if (existing) {
+      if (existing.width !== width || existing.height !== height) throw new Error(`Conflicting texture dimensions ${part.path}`);
+      return;
+    }
+    const asset = { id: assets.size, width, height }; assets.set(path, asset);
+    w.object('image_asset', { name: part.name, assetId: asset.id, width, height });
+    w.object('file_asset_contents', { bytes: readFileSync(path) });
   });
   w.object('artboard', { name: rig.artboard.name, width: rig.artboard.width, height: rig.artboard.height });
-  for (const g of rig.groups ?? []) add('node', g.name, { name: g.name, opacity: g.opacity ?? 1, parentId: 0 });
+  for (const g of rig.groups ?? []) {
+    if (g.parent && !rig.groups?.some(p => p.name === g.parent)) throw new Error('Group parent must be an identity group');
+    add('node', g.name, { name: g.name, opacity: g.opacity ?? 1, parentId: id(g.parent) });
+  }
   // Bind transforms use root bones or chains extending along their parent's +X axis.
   const binds = new Map<string, { x: number; y: number; angle: number; length: number }>();
   for (const bone of rig.bones) {
@@ -96,7 +114,8 @@ export function buildRig(rig: Rig, base: string): Buffer {
     add(bone.parent && !bone.offset ? 'bone' : 'root_bone', bone.name, { name: bone.name, parentId: id(bone.parent), length: bone.length, rotation: bone.rotation ?? 0, ...(!bone.parent || bone.offset ? { x: bone.x ?? 0, y: bone.y ?? 0 } : {}) });
     binds.set(bone.name, { x, y, angle, length: bone.length });
   }
-  rig.images.forEach((part, assetId) => {
+  rig.images.forEach(part => {
+    const assetId = assets.get(resolve(base, part.path))!.id;
     const image = add('image', part.name, { name: part.name, parentId: id(part.parent), assetId, x: part.x, y: part.y, scaleX: part.scaleX ?? 1, scaleY: part.scaleY ?? 1, opacity: part.opacity ?? 1 });
     if (!part.mesh) return;
     if (part.parent && !rig.groups?.some(g => g.name === part.parent) || (part.scaleX ?? 1) !== 1 || (part.scaleY ?? 1) !== 1) throw new Error('Mesh image must have an identity group parent and unit scale');
@@ -104,9 +123,11 @@ export function buildRig(rig: Rig, base: string): Buffer {
     if (mesh.vertices.length < 3 || mesh.vertices.length > 65535 || mesh.vertices.some(v => v.length !== 4 || v.some(n => !Number.isFinite(n))) || mesh.triangles.length < 3 || mesh.triangles.length % 3 || mesh.triangles.some(i => !Number.isInteger(i) || i < 0 || i >= mesh.vertices.length)) throw new Error(`Invalid triangles ${part.name}`);
     const mid = add('mesh', `${part.name}.mesh`, { parentId: image, triangleIndexBytes: Buffer.concat(mesh.triangles.map(varuint)) });
     const bs = (mesh.bones ?? []).map(name => { const b = binds.get(name); if (!b) throw new Error(`Unknown bone ${name}`); return b; });
+    if (bs.length > 255 || mesh.influences && (mesh.influences.length !== mesh.vertices.length || !bs.length)) throw new Error('Invalid vertex influence count');
     mesh.vertices.forEach(([x, y, u, v], i) => {
       const vid = add('mesh_vertex', `${part.name}.v${i}`, { parentId: mid, x, y, u, v });
-      if (bs.length) add('weight', `${part.name}.w${i}`, { parentId: vid, ...weights(x + part.x, y + part.y, bs.map(b => ({ ...b, endX: b.x + Math.cos(b.angle) * b.length, endY: b.y + Math.sin(b.angle) * b.length }))) });
+      const explicit = mesh.influences?.[i];
+      if (bs.length) add('weight', `${part.name}.w${i}`, { parentId: vid, ...(explicit ? packWeights(explicit.map(v=>({i:index(mesh.bones!,v.bone)+1,w:v.weight}))) : weights(x + part.x, y + part.y, bs.map(b => ({ ...b, endX: b.x + Math.cos(b.angle) * b.length, endY: b.y + Math.sin(b.angle) * b.length })))) });
     });
     if (bs.length) {
       const skin = add('skin', `${part.name}.skin`, { parentId: mid, tx: part.x, ty: part.y });

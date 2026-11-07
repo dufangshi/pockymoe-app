@@ -10,7 +10,7 @@ export class RiveMotionClock {
   private mood = '';
   private idle?: PetClip[];
   private idleBeats = 0;
-  constructor(motions: RiveMotions, private readonly random: () => number = Math.random) {
+  constructor(motions: RiveMotions, private readonly random: () => number = Math.random, private readonly interruptible = false) {
     const states = Object.fromEntries(Object.entries(motions).map(([name, beats]) => [name, beats!.map(b => ({ path: String(b.value), frames: b.durationMs, role: b.role }))]));
     this.idle = states.idle;
     this.sequence = new ClipSequencer(states, random);
@@ -19,7 +19,8 @@ export class RiveMotionClock {
     this.elapsed += seconds * 1000;
     if (mood === this.mood && !restart && this.current && this.elapsed >= this.current.frames && ['waving','jumping','poked','failed','landing'].includes(mood)) return { value: Number(this.current.path), restart: false };
     if (mood !== this.mood || restart || !this.current || this.elapsed >= this.current.frames) {
-      this.mood = mood; this.elapsed = 0; this.current = this.sequence.next(mood, now);
+      const interrupt = this.interruptible && (mood !== this.mood || restart);
+      this.mood = mood; this.elapsed = 0; this.current = this.sequence.next(mood, now, interrupt);
       if (mood === 'idle' && this.current && this.idle?.includes(this.current) && this.idleBeats++ % this.idle.length === 0) {
         // Keep neutral intervals in place; choose a new variant order for each cycle.
         const slots = this.idle.map((b, i) => b.path !== this.idle![0].path && !b.role ? i : -1).filter(i => i >= 0);

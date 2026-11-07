@@ -1,11 +1,12 @@
 import type { RiveMotions } from './riveMotion';
+import { RIVE_DYNAMIC_INPUTS, type RiveProcedural } from './riveDynamics';
 import Rive, { type RiveCanvas, type File, type Artboard, type StateMachineInstance, type WrappedRenderer, type SMIInput } from '@rive-app/webgl2-advanced';
 import wasmUrl from '@rive-app/webgl2-advanced/rive.wasm?url';
 import fallbackUrl from '@rive-app/webgl2-advanced/rive_fallback.wasm?url';
 export const RIVE_STATES = ['idle', 'running', 'waiting', 'failed', 'review', 'sleeping', 'resting'] as const;
 export const RIVE_TRIGGERS = ['complete', 'fail', 'poke', 'dragStart', 'land', 'wave'] as const;
 export const RIVE_INPUTS = { state: 'number', mouth: 'number', lookX: 'number', lookY: 'number', dragging: 'bool', dock: 'number', ...Object.fromEntries(RIVE_TRIGGERS.map(n => [n, 'trigger'])) };
-export interface RivePack { path: 'pet.riv'; artboard: string; stateMachine: string; viewModel?: string; motions?: RiveMotions }
+export interface RivePack { path: 'pet.riv'; artboard: string; stateMachine: string; viewModel?: string; motions?: RiveMotions; procedural?: RiveProcedural }
 let runtime: Promise<RiveCanvas> | undefined;
 export function riveRuntime(): Promise<RiveCanvas> { return runtime ??= Rive({ locateFile: file => file.includes('fallback') ? fallbackUrl : wasmUrl }); }
 /** Owns WASM handles and drawing, without a high-level player or implicit rAF. */
@@ -20,7 +21,7 @@ export class RiveDrawer {
     return this.draw(0, pointer).alpha;
   }
   private constructor(readonly runtime: RiveCanvas, readonly file: File, readonly artboard: Artboard, readonly machine: StateMachineInstance, readonly renderer: WrappedRenderer, readonly canvas: HTMLCanvasElement, readonly gl: WebGL2RenderingContext) {}
-  static async load(canvas: HTMLCanvasElement, bytes: Uint8Array, config: RivePack): Promise<RiveDrawer> {
+  static async load(canvas: HTMLCanvasElement, bytes: Uint8Array, config: RivePack, initial: Record<string, number | boolean> = {}): Promise<RiveDrawer> {
     const r = await riveRuntime(), file = await r.load(bytes, undefined, false);
     if (!file) throw new Error('Rive runtime rejected file');
     let artboard: Artboard | undefined, machine: StateMachineInstance | undefined, renderer: WrappedRenderer | undefined;
@@ -35,10 +36,12 @@ export class RiveDrawer {
       const gl = canvas.getContext('webgl2'); if (!gl) throw new Error('WebGL2 unavailable');
       const drawer = new RiveDrawer(r, file, artboard, machine, renderer, canvas, gl);
       for (let i = 0; i < machine.inputCount(); i++) { const input = machine.input(i); if (drawer.inputs.has(input.name)) throw new Error(`Duplicate input ${input.name}`); drawer.inputs.set(input.name, input.type === r.SMIInput.number ? input.asNumber() : input.type === r.SMIInput.bool ? input.asBool() : input.asTrigger()); }
-      for (const [name, type] of Object.entries({ ...RIVE_INPUTS, ...(config.motions ? { motion: 'number', motionStart: 'trigger' } : {}) })) {
+      for (const [name, type] of Object.entries({ ...RIVE_INPUTS, ...(config.motions ? { motion: 'number', motionStart: 'trigger' } : {}), ...(config.procedural ? Object.fromEntries(RIVE_DYNAMIC_INPUTS.map(n => [n, 'number'])) : {}) })) {
         const input = drawer.inputs.get(name);
         if (!input || input.type !== r.SMIInput[type as 'number' | 'bool' | 'trigger']) throw new Error(`Missing or wrong-type pet contract input: ${name}`);
       }
+      if (config.procedural && !artboard.rootBone(config.procedural.bodyBone)) throw new Error(`Missing procedural body bone: ${config.procedural.bodyBone}`);
+      for (const [name,value] of Object.entries(initial)) drawer.set(name,value);
       drawer.draw(0); return drawer;
     } catch (error) { renderer?.delete(); machine?.delete(); artboard?.delete(); file.unref(); throw error; }
   }

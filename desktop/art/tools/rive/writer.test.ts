@@ -30,4 +30,27 @@ describe('Rive authoring', () => {
     rig.images[0].mesh!.triangles[0]=0;rig.animations[0].tracks[0].target='absent';
     expect(()=>buildRig(rig,resolve('art/rive-sample'))).toThrow('Unknown track target');
   });
+  it('embeds a shared texture once and rejects inconsistent asset dimensions', () => {
+    const rig=JSON.parse(readFileSync('art/rive-sample/rig.json','utf8')) as Rig;
+    const first=rig.images[0];
+    rig.images=[first,{...structuredClone(first),name:'second'}];
+    for(const p of rig.images)p.assetSize=[1024,1024];
+    rig.animations=[];rig.stateMachine.layers=[];
+    const data=buildRig(rig,resolve('art/rive-sample'));
+    const texture=readFileSync(resolve('art/rive-sample',first.path));
+    expect(data.indexOf(texture)).toBeGreaterThan(0);
+    expect(data.indexOf(texture,data.indexOf(texture)+1)).toBe(-1);
+    rig.images[1].assetSize=[512,512];
+    expect(()=>buildRig(rig,resolve('art/rive-sample'))).toThrow('Conflicting texture dimensions');
+  });
+  it('validates per-vertex skin assignments used to batch disconnected mesh islands', () => {
+    const rig=JSON.parse(readFileSync('art/rive-sample/rig.json','utf8')) as Rig;
+    const mesh=rig.images[0].mesh!;
+    mesh.influences=mesh.vertices.map(()=>[{bone:mesh.bones![0],weight:1}]);
+    expect(buildRig(rig,resolve('art/rive-sample')).length).toBeGreaterThan(8);
+    mesh.influences[0][0].weight=-1;
+    expect(()=>buildRig(rig,resolve('art/rive-sample'))).toThrow('Invalid vertex influences');
+    mesh.influences[0][0]={bone:'missing',weight:1};
+    expect(()=>buildRig(rig,resolve('art/rive-sample'))).toThrow('Unknown reference');
+  });
 });
