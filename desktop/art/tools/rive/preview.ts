@@ -11,7 +11,7 @@ if (!file || !out) throw new Error('Usage: node art/tools/rive/preview.ts pet.ri
 const output = resolve(out); await mkdir(output, { recursive: true });
 await build({ configFile: false, root: resolve('art/tools/rive/preview'), base: './', build: { outDir: resolve(output, 'app'), emptyOutDir: true, assetsInlineLimit: 0 } });
 const main = resolve(output, 'main.cjs');
-await writeFile(main, "const { app, BrowserWindow } = require('electron'); app.commandLine.appendSwitch('enable-unsafe-swiftshader'); app.whenReady().then(() => { const w = new BrowserWindow({width:384,height:416,transparent:true,frame:false,webPreferences:{contextIsolation:true,sandbox:true,backgroundThrottling:false}}); w.loadFile(process.argv.at(-1)); });");
+await writeFile(main, "const { app, BrowserWindow } = require('electron'); const { join } = require('node:path'); const profile = join(__dirname, 'profile'); require('node:fs').mkdirSync(profile, { recursive: true }); app.setPath('userData', profile); app.commandLine.appendSwitch('enable-unsafe-swiftshader'); app.whenReady().then(() => { const w = new BrowserWindow({width:384,height:416,transparent:true,frame:false,webPreferences:{contextIsolation:true,sandbox:true,backgroundThrottling:false}}); w.loadFile(process.argv.at(-1)); });");
 const app = await electron.launch({ executablePath: resolve('node_modules/electron/dist/electron'), timeout: 30000, args: ['--no-sandbox', '--ozone-platform=x11', main, resolve(output, 'app/index.html')] });
 try {
   const page = await app.firstWindow(); page.on('pageerror', e => console.error(e));

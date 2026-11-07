@@ -103,6 +103,7 @@ machine. With scenarios enabled their sheets use `state-` and `trigger-` prefixe
 so a scenario named idle or failed cannot be overwritten by the contract probe.
 Simulation advances at 60 Hz but only requested frames are drawn.
 PNG decode waiting never advances the animation until its cached image repeats.
+The preview's Electron profile stays under its output directory.
 Large binaries cross the Node/renderer boundary as base64, avoiding millions of
 serialized integer entries.
 
