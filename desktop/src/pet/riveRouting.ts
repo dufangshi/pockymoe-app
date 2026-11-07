@@ -19,6 +19,8 @@ export interface RivePoseReaction {
   /** Non-waking requests return to this pose after the reaction. */
   resumeValue?: number;
   resumeTargets?: number[];
+  /** Reaction materials fitted to successive drawings of the held source clip. */
+  drawings?: { atMs: number; animation: string }[];
 }
 export interface RiveRouting {
   maxExitMs: number;
@@ -39,7 +41,15 @@ interface Reaction {
   elapsed: number;
   from: number;
   time: number;
-  exit?: { from: number; to: number; elapsed: number; duration: number; done: boolean };
+  exit?: {
+    from: number;
+    brakeTo: number;
+    brakeMs: number;
+    to: number;
+    elapsed: number;
+    duration: number;
+    done: boolean;
+  };
 }
 export interface RoutedSample {
   value: number;
@@ -51,6 +61,17 @@ export interface RoutedSample {
   reaction?: { animation: string; time: number };
 }
 const ease = (value: number) => value * value * (3 - 2 * value);
+const gentleReturn = (value: number) => value ** 3 * (10 - 15 * value + 6 * value * value);
+
+function reactionAnimation(definition: RivePoseReaction, sourceMs: number): string {
+  const drawings = definition.drawings ?? [];
+  for (let i = drawings.length - 1; i >= 0; i--) {
+    if (Math.fround(drawings[i].atMs / 1000) <= Math.fround(sourceMs / 1000)) {
+      return drawings[i].animation;
+    }
+  }
+  return definition.animation;
+}
 
 /** Incompatible material charts meet only at an exact shared drawing. */
 export class RiveRestRouter {
@@ -121,11 +142,17 @@ export class RiveRestRouter {
         const from = this.reaction.time;
         const duration = this.reaction.definition.durationMs;
         const to = from <= duration / 2 ? 0 : duration;
+        // Keep the incoming velocity while braking before a backward exit.
+        // Reversing immediately creates a one-frame extremum on large gestures.
+        const brakeMs = to === 0 && from > 0 ? Math.min(100, 2 * (duration - from)) : 0;
+        const brakeTo = from + brakeMs / 2;
         this.reaction.exit = {
           from,
+          brakeTo,
+          brakeMs,
           to,
           elapsed: 0,
-          duration: Math.min(250, Math.abs(to - from)),
+          duration: Math.min(250, Math.abs(to - brakeTo)),
           done: false,
         };
       }
@@ -188,9 +215,15 @@ export class RiveRestRouter {
     if (reaction.exit) {
       const exit = reaction.exit;
       exit.elapsed += dt;
-      const progress = exit.duration ? Math.min(1, exit.elapsed / exit.duration) : 1;
-      reaction.time = exit.from + (exit.to - exit.from) * ease(progress);
-      exit.done = progress === 1;
+      if (exit.elapsed < exit.brakeMs) {
+        const progress = exit.elapsed / exit.brakeMs;
+        reaction.time = exit.from + exit.brakeMs * (progress - (progress * progress) / 2);
+      } else {
+        const progress = exit.duration ? Math.min(1, (exit.elapsed - exit.brakeMs) / exit.duration) : 1;
+        const mix = exit.brakeMs ? gentleReturn(progress) : ease(progress);
+        reaction.time = exit.brakeTo + (exit.to - exit.brakeTo) * mix;
+        exit.done = progress === 1;
+      }
     } else {
       reaction.time = Math.min(reaction.elapsed, reaction.definition.durationMs);
     }
@@ -201,7 +234,10 @@ export class RiveRestRouter {
       leaving: false,
       boundary: false,
       exitMix: 0,
-      reaction: { animation: reaction.definition.animation, time: reaction.time / 1000 },
+      reaction: {
+        animation: reactionAnimation(reaction.definition, this.time),
+        time: reaction.time / 1000,
+      },
     };
   }
 

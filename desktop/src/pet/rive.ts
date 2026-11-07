@@ -182,7 +182,10 @@ export class RiveDrawer {
             clip.animation,
             ...(clip.exitAnimation ? [clip.exitAnimation] : []),
           ]),
-          ...(config.routing.reactions?.map((r) => r.animation) ?? []),
+          ...(config.routing.reactions?.flatMap((r) => [
+            r.animation,
+            ...(r.drawings?.map((drawing) => drawing.animation) ?? []),
+          ]) ?? []),
         ])) {
           const animation = artboard.animationByName(name);
           if (!animation) throw new Error(`Missing routed animation: ${name}`);

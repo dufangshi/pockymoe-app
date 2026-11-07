@@ -88,6 +88,34 @@ try {
     if (!error?.includes('Missing routed animation: MissingReaction'))
       throw new Error(`missing-reaction: ${error}`);
     results.push({ test: 'missing-reaction', result: 'passed', error });
+    const missingDrawing = {
+      ...config,
+      routing: {
+        ...config.routing,
+        reactions: [
+          {
+            clips: [config.routing.clips[0].value],
+            targets: [config.routing.clips[0].value],
+            animation: config.routing.clips[0].animation,
+            durationMs: 800,
+            settleMs: 100,
+            drawings: [{ atMs: 0, animation: 'MissingReactionDrawing' }],
+          },
+        ],
+      },
+    };
+    error = null;
+    try {
+      await app.evaluate((_, t) => globalThis.petHarness.verifyRive(t.bytes, t.config), {
+        bytes,
+        config: missingDrawing,
+      });
+    } catch (e) {
+      error = String(e);
+    }
+    if (!error?.includes('Missing routed animation: MissingReactionDrawing'))
+      throw new Error(`missing-reaction-drawing: ${error}`);
+    results.push({ test: 'missing-reaction-drawing', result: 'passed', error });
   }
   const zipIndex = process.argv.indexOf('--zip');
   if (zipIndex >= 0) {

@@ -115,6 +115,32 @@ describe('material-safe routing', () => {
     for (let i = 0; i < 27; i++) r.step(0.01);
     expect(r.step(0).reaction).toBeUndefined();
   });
+  it('selects reaction material from the held source time, including float32 key boundaries', () => {
+    const fixture = structuredClone(config);
+    fixture.reactions = [
+      {
+        clips: [4],
+        targets: [1],
+        animation: 'base',
+        durationMs: 800,
+        settleMs: 100,
+        drawings: [
+          { atMs: 0, animation: 'first' },
+          { atMs: 500, animation: 'second' },
+        ],
+      },
+    ];
+    const router = new RiveRestRouter(fixture, 4);
+    router.seek(4, 0.5 - 1e-12);
+    router.request(1);
+    expect(router.step(0).reaction?.animation).toBe('second');
+    router.seek(4, 0.4);
+    router.request(1);
+    expect(router.step(0).reaction?.animation).toBe('first');
+    expect(router.step(0.1).reaction?.animation).toBe('first');
+    expect(router.step(0.2).time).toBeCloseTo(0.45);
+    expect(router.step(0).reaction?.animation).toBe('first');
+  });
   it('keeps non-waking requests in bed even before the first local reaction', () => {
     const fixture = structuredClone(config);
     fixture.reactions = [
@@ -212,7 +238,7 @@ describe('material-safe routing', () => {
     r.request(2);
     expect(r.step(0).reaction!.time).toBe(peak.reaction!.time);
     const values = [];
-    for (let i = 0; i < 30; i++) values.push(r.step(0.01));
+    for (let i = 0; i < 40; i++) values.push(r.step(0.01));
     expect(values.some((s) => s.reaction?.time === 0)).toBe(true);
     expect(values.at(-1)!.value).toBe(2);
     r.request(0);
@@ -221,6 +247,26 @@ describe('material-safe routing', () => {
     expect(resumed).toMatchObject({ value: 4, leaving: false });
     expect(resumed.reaction).toBeUndefined();
     expect(resumed.time).toBeGreaterThan(0.5);
+  });
+  it('brakes forward before reversing an interrupted gesture and reaches neutral within 350 ms', () => {
+    const fixture = structuredClone(config);
+    fixture.reactions = [
+      { clips: [4], targets: [1, 2], animation: 'gesture', durationMs: 1000, settleMs: 100 },
+    ];
+    const router = new RiveRestRouter(fixture, 4);
+    router.request(1);
+    router.step(0.4);
+    router.request(2);
+    const first = router.step(0.001).reaction!.time;
+    expect(first).toBeCloseTo(0.400995, 6);
+    const stopped = router.step(0.099).reaction!.time;
+    expect(stopped).toBeCloseTo(0.45);
+    const returning = router.step(0.001).reaction!.time;
+    expect(returning).toBeLessThan(stopped);
+    expect(stopped - returning).toBeLessThan(0.00003);
+    expect(router.step(0.249).reaction!.time).toBeCloseTo(0);
+    expect(router.step(0).reaction!.time).toBeCloseTo(0);
+    expect(router.step(0.001).value).toBe(2);
   });
   it('caps source backing resolution and preserves the aspect ratio and legacy DPR', () => {
     expect(riveBackingSize(1037, 1123, 2, { width: 648, height: 702, scale: 1 })).toEqual({

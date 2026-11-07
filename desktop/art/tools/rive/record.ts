@@ -18,11 +18,18 @@ interface Scenario {
   events?: { at: number; motion: number }[];
   frameValues?: Record<string, number | boolean>[];
 }
-const [, , pack, out, scenariosFile, fpsString = '24'] = process.argv;
+const [, , pack, out, scenariosFile, fpsString = '24', sizeString = '648x702', dprString = '1'] =
+  process.argv;
 if (!pack || !out || !scenariosFile)
-  throw new Error('Usage: node art/tools/rive/record.ts PACK OUT SCENARIOS [24|30]');
+  throw new Error('Usage: node art/tools/rive/record.ts PACK OUT SCENARIOS [24|30] [WIDTHxHEIGHT] [DPR]');
 const fps = Number(fpsString);
 if (![24, 30].includes(fps)) throw new Error('Recording fps must be 24 or 30');
+const size = /^(\d+)x(\d+)$/.exec(sizeString);
+const width = Number(size?.[1]),
+  height = Number(size?.[2]),
+  dpr = Number(dprString);
+if (!size || width < 32 || height < 32 || width > 2048 || height > 2048 || ![1, 2].includes(dpr))
+  throw new Error('Recording size must be 32–2048 CSS pixels per edge; DPR must be 1 or 2');
 const backend = 'webgl2';
 const output = resolve(out);
 await mkdir(output, { recursive: true });
@@ -50,9 +57,10 @@ const profile = join(__dirname, 'profile');
 require('node:fs').mkdirSync(profile, { recursive: true });
 app.setPath('userData', profile);
 app.commandLine.appendSwitch('enable-unsafe-swiftshader');
+app.commandLine.appendSwitch('force-device-scale-factor', '${dpr}');
 app.whenReady().then(() => {
   const window = new BrowserWindow({
-    width: 648, height: 702, transparent: true, frame: false,
+    width: ${width}, height: ${height}, transparent: true, frame: false,
     webPreferences: { contextIsolation: true, sandbox: true, backgroundThrottling: false },
   });
   window.loadFile(process.argv.at(-1));
@@ -84,13 +92,16 @@ try {
     const directory = resolve(output, 'frames', s.name);
     await mkdir(directory, { recursive: true });
     await page.evaluate(
-      async ({ url, config, initial }) => {
+      async ({ url, config, initial, width, height, dpr }) => {
         const response = await fetch(url);
         if (!response.ok) throw new Error('Cannot read preview binary');
         await window.preview.load(new Uint8Array(await response.arrayBuffer()), config, { motion: initial });
-        window.preview.resize(648, 702);
+        window.preview.resize(width * dpr, height * dpr);
+        const canvas = document.querySelector('canvas')!;
+        canvas.style.width = `${width}px`;
+        canvas.style.height = `${height}px`;
       },
-      { url: binary.url, config, initial: s.initial },
+      { url: binary.url, config, initial: s.initial, width, height, dpr },
     );
     await page.waitForFunction(() => window.preview.ready(), {}, { timeout: 15000 });
     const count = Math.round(s.duration * fps),
@@ -117,7 +128,16 @@ try {
     }
     await writeFile(
       resolve(output, `${s.name}.json`),
-      JSON.stringify({ name: s.name, fps, backend, riveSha256, config, scenario: s, samples }),
+      JSON.stringify({
+        name: s.name,
+        fps,
+        backend,
+        viewport: { width, height, dpr },
+        riveSha256,
+        config,
+        scenario: s,
+        samples,
+      }),
     );
     console.log(`PASS ${s.name}: ${count} frames at ${fps}fps`);
   }

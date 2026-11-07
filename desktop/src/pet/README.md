@@ -452,15 +452,24 @@ built-app benchmark separates that presentation cost with a matched quad control
 it does not infer a different renderer from Chromium's feature-status labels.
 
 Optional `routing.reactions` entries declare `{clips, targets, animation,
-durationMs, settleMs, resumeValue?, resumeTargets?}`. These are authored reactions on the current material
-chart, useful for an event in a lying or suspended pose. The displayed body
+durationMs, settleMs, resumeValue?, resumeTargets?, drawings?}`. These are authored
+reactions on the current material chart, useful for an event in a lying or
+suspended pose. `drawings` is an optional, strictly time-ordered list of
+`{atMs, animation}` entries fitted to successive source drawings. The player
+selects the latest entry at the displayed body time, including while that clock
+decelerates, and advances its animation at the independent reaction time. Before
+the first entry it uses `animation`. All variant names are test-loaded during
+isolated import validation. The displayed body
 clock decelerates over `settleMs` (50–400 ms), then holds while the separate
 reaction animation plays; it never selects the requested upright clip's body
 drawing. The logical target is reported in `route.value`, while
 `route.animation` and `route.time` identify the actual body sample. A subsequent
-normal motion uses the shared-boundary router. An interrupted reaction first
-returns to its nearer neutral endpoint over at most 250 ms, retaining one exact
-neutral sample before routing the queued request. New requests replace that queue.
+normal motion uses the shared-boundary router. Before reversing an interrupted
+reaction, the player brakes its forward animation clock over 100 ms. It then
+returns to the nearer neutral endpoint over at most 250 ms, retaining one exact
+neutral sample before routing the queued request. This keeps a large moving arm
+from reversing in one frame; the total backward exit takes at most 350 ms.
+New requests replace the queued request.
 `resumeValue` and `resumeTargets` let non-waking requests resume the held lying
 pose without seeking back to its first frame. These resume targets also apply
 before the first reaction: an idle/waiting request cannot accidentally wake an
@@ -475,3 +484,8 @@ for a complete waking or landing bridge; authors must supply those performances
 for their desired transitions. Reaction-owned properties must have neutral reset
 keys in every body animation. Import validates references and time bounds, and
 the isolated runtime verifier loads each reaction animation.
+
+Record reactions at their actual display size with
+`node art/tools/rive/record.ts PACK OUTPUT SCENARIOS.json 24 189x205 2`.
+The final arguments specify CSS size and DPR (1 or 2); recordings include those
+values in their metadata and preserve the corresponding backing-store pixels.

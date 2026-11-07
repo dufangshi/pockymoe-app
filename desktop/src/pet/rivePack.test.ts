@@ -128,6 +128,25 @@ describe('Rive pack import', () => {
       reaction,
     ]);
     const resident = { ...reaction, resumeValue: 2, resumeTargets: [0, 2] };
+    const drawings = [
+      { atMs: 0, animation: 'first' },
+      { atMs: 500, animation: 'second' },
+    ];
+    expect(
+      parse({ ...route, reactions: [{ ...reaction, drawings }] }).remoteCodex?.rive?.routing?.reactions?.[0]
+        .drawings,
+    ).toEqual(drawings);
+    for (const bad of [
+      [],
+      [{ atMs: -1, animation: 'x' }],
+      [{ atMs: 0, animation: '' }],
+      [drawings[0], drawings[0]],
+      [{ atMs: 999999, animation: 'x' }],
+    ]) {
+      expect(() => parse({ ...route, reactions: [{ ...reaction, drawings: bad }] })).toThrow(
+        'reaction drawings',
+      );
+    }
     expect(parse({ ...route, reactions: [resident] }).remoteCodex?.rive?.routing?.reactions).toEqual([
       resident,
     ]);
@@ -146,8 +165,10 @@ describe('Rive pack import', () => {
       }).remoteCodex?.rive?.routing?.clips.every((c) => c.nativeExit),
     ).toBe(true);
     expect(
-      parse({ ...route, clips: route.clips.map((c) => ({ ...c, nativeExit: 'nearest' })) })
-        .remoteCodex?.rive?.routing?.clips.every((c) => c.nativeExit === 'nearest'),
+      parse({
+        ...route,
+        clips: route.clips.map((c) => ({ ...c, nativeExit: 'nearest' })),
+      }).remoteCodex?.rive?.routing?.clips.every((c) => c.nativeExit === 'nearest'),
     ).toBe(true);
     expect(() => parse({ ...route, clips: route.clips.map((c) => ({ ...c, nativeExit: 'yes' })) })).toThrow(
       'routing',

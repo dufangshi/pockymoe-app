@@ -275,6 +275,29 @@ export function parseManifest(data: Buffer): PetManifest {
           ))
       )
         fail('invalid Rive pose reaction');
+      for (const reaction of q.reactions ?? []) {
+        if (reaction.drawings === undefined) continue;
+        const duration = Math.min(
+          ...reaction.clips.map((value) => q.clips.find((clip) => clip.value === value)!.durationMs),
+        );
+        if (
+          !Array.isArray(reaction.drawings) ||
+          !reaction.drawings.length ||
+          reaction.drawings.length > 256 ||
+          reaction.drawings.some(
+            (drawing, index) =>
+              !drawing ||
+              !Number.isFinite(drawing.atMs) ||
+              drawing.atMs < 0 ||
+              drawing.atMs > duration ||
+              (index > 0 && drawing.atMs <= reaction.drawings![index - 1].atMs) ||
+              typeof drawing.animation !== 'string' ||
+              !drawing.animation.length ||
+              drawing.animation.length > 100,
+          )
+        )
+          fail('invalid Rive reaction drawings');
+      }
       if (
         Object.values(r.motions ?? {})
           .flat()
