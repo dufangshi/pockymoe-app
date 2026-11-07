@@ -8,10 +8,7 @@ struct ProductRootView: View {
     var body: some View {
         Group {
             if !store.hasRelayUrl { ConnectScreen(store: store) { model.webTarget = "/" } }
-            // The page lifts its composer above the keyboard itself, as in Safari.
-            // SwiftUI's own avoidance would shorten the web view as well and the
-            // composer would rise twice the keyboard's height.
-            else { ProductWebView(store: store, target: model.webTarget).id(store.relayUrl).ignoresSafeArea(.keyboard) }
+            else { ProductWebView(store: store, target: model.webTarget).id(store.relayUrl) }
         }
         .preferredColorScheme(store.themeMode == .system ? nil : (store.themeMode == .dark ? .dark : .light))
         .environment(\.rcColors, store.themeMode == .dark || (store.themeMode == .system && colorScheme == .dark) ? .dark : .light)
