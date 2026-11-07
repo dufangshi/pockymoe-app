@@ -87,6 +87,8 @@ final class RemoteCodexUITests: XCTestCase {
             add(shot)
         }
         capture("before tapping the composer")
+        let idle = app.images.matching(NSPredicate(format: "label BEGINSWITH 'KBPROBE'")).firstMatch
+        print("KEYBOARD-PROBE-BEFORE \(idle.exists ? idle.label : "missing")")
         let before = prompt.frame
         prompt.tap()
         let keyboard = app.keyboards.firstMatch
@@ -97,6 +99,8 @@ final class RemoteCodexUITests: XCTestCase {
         capture("three seconds later")
         let stays = keyboard.exists && keyboard.frame.height > 0
         let gap = keyboard.frame.minY - prompt.frame.maxY
+        let probe = app.images.matching(NSPredicate(format: "label BEGINSWITH 'KBPROBE'")).firstMatch
+        print("KEYBOARD-PROBE \(probe.exists ? probe.label : "missing")")
         print("KEYBOARD-CHECK shown=\(shown) stays=\(stays) keyboardTop=\(keyboard.frame.minY) keyboardHeight=\(keyboard.frame.height) promptBefore=\(before) promptAfter=\(prompt.frame) gap=\(gap) window=\(app.windows.firstMatch.frame)")
         XCTAssertTrue(shown, "The soft keyboard opens")
         XCTAssertTrue(stays, "The soft keyboard stays open")
