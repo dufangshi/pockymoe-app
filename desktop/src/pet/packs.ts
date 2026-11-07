@@ -214,7 +214,7 @@ export function parseManifest(data: Buffer): PetManifest {
             c.durationMs > 60000 ||
             ![c.start, c.end].every((n) => typeof n === 'string' && n.length > 0 && n.length <= 100) ||
             (c.loop !== undefined && typeof c.loop !== 'boolean') ||
-            (c.nativeExit !== undefined && typeof c.nativeExit !== 'boolean'),
+            (c.nativeExit !== undefined && typeof c.nativeExit !== 'boolean' && c.nativeExit !== 'nearest'),
         ) ||
         new Set(q.clips.map((c) => c.value)).size !== q.clips.length ||
         !Array.isArray(q.bridges) ||

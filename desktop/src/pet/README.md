@@ -464,10 +464,13 @@ neutral sample before routing the queued request. New requests replace that queu
 `resumeValue` and `resumeTargets` let non-waking requests resume the held lying
 pose without seeking back to its first frame. These resume targets also apply
 before the first reaction: an idle/waiting request cannot accidentally wake an
-already lying character. Authors select which requests need an awake pose. A routed clip with `nativeExit:true` finishes forward at source
+already lying character. Authors select which requests need an awake pose.
+A routed clip with `nativeExit:true` finishes forward at source
 speed, also when it is used as a bridge. This preserves complete bed-out and
 landing performances; these protected exits deliberately take longer than the
-normal 350 ms accelerated rest route. Such a reaction is not a shortcut
+normal 350 ms accelerated rest route. `nativeExit:"nearest"` instead returns a
+loop to its nearer shared boundary at source speed, avoiding both a full forward
+replay and skipped drawing keys during acceleration. Such a reaction is not a shortcut
 for a complete waking or landing bridge; authors must supply those performances
 for their desired transitions. Reaction-owned properties must have neutral reset
 keys in every body animation. Import validates references and time bounds, and

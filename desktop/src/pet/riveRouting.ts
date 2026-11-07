@@ -7,8 +7,8 @@ export interface RoutedClip {
   loop?: boolean;
   exitAnimation?: string;
   exitRestMs?: { start: number; end: number };
-  /** Finish forward at source speed, including when traversed as a bridge. */
-  nativeExit?: boolean;
+  /** Source-speed exit: forward by default, or toward the nearer shared boundary. */
+  nativeExit?: boolean | 'nearest';
 }
 export interface RivePoseReaction {
   clips: number[];
@@ -152,7 +152,8 @@ export class RiveRestRouter {
       this.residency = undefined;
     }
     const target = this.find(value);
-    const endpoint = this.clip.nativeExit || this.time > this.clip.durationMs / 2 ? this.clip.durationMs : 0;
+    const endpoint =
+      this.clip.nativeExit === true || this.time > this.clip.durationMs / 2 ? this.clip.durationMs : 0;
     const family = endpoint === 0 ? this.clip.start : this.clip.end;
     const bridge = this.path(family, target.start);
     const pieces = [

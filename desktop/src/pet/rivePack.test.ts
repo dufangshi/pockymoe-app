@@ -145,6 +145,10 @@ describe('Rive pack import', () => {
         clips: route.clips.map((c) => ({ ...c, nativeExit: true })),
       }).remoteCodex?.rive?.routing?.clips.every((c) => c.nativeExit),
     ).toBe(true);
+    expect(
+      parse({ ...route, clips: route.clips.map((c) => ({ ...c, nativeExit: 'nearest' })) })
+        .remoteCodex?.rive?.routing?.clips.every((c) => c.nativeExit === 'nearest'),
+    ).toBe(true);
     expect(() => parse({ ...route, clips: route.clips.map((c) => ({ ...c, nativeExit: 'yes' })) })).toThrow(
       'routing',
     );

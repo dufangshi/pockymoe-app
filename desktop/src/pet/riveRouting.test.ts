@@ -157,6 +157,25 @@ describe('material-safe routing', () => {
     }
     expect(router.step(0.01)).toMatchObject({ value: 4, animation: 'bed', leaving: false });
   });
+  it('returns a protected loop to its nearer boundary at source speed', () => {
+    const fixture = structuredClone(config);
+    fixture.clips[0].nativeExit = 'nearest';
+    const router = new RiveRestRouter(fixture, 0);
+    router.step(0.3);
+    router.request(1);
+    for (let i = 1; i <= 5; i++) {
+      const sample = router.step(0.05);
+      expect(sample.time).toBeCloseTo(0.3 - i * 0.05);
+      expect(sample).toMatchObject({ animation: fixture.clips[0].animation, exitMix: 0 });
+    }
+    expect(router.step(0.05)).toMatchObject({ time: 0, boundary: true });
+    expect(router.step(0.05)).toMatchObject({ value: 1, time: 0, leaving: false });
+
+    router.seek(0, fixture.clips[0].durationMs / 1000 - 0.2);
+    const before = router.step(0).time;
+    router.request(1);
+    expect(router.step(0.05).time).toBeCloseTo(before + 0.05);
+  });
   it('plays protected bed-out forward at source speed and replans a later event without rewinding', () => {
     const fixture = structuredClone(config);
     fixture.clips[3].nativeExit = true;
