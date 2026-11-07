@@ -53,4 +53,20 @@ describe('Rive authoring', () => {
     mesh.influences[0][0]={bone:'missing',weight:1};
     expect(()=>buildRig(rig,resolve('art/rive-sample'))).toThrow('Unknown reference');
   });
+  it('writes discrete Solo drawing choices and rejects non-child references', () => {
+    const rig=JSON.parse(readFileSync('art/rive-sample/rig.json','utf8')) as Rig;
+    rig.groups=[{name:'drawing',solo:true}];rig.images[0].parent='drawing';
+    rig.animations=[{name:'swap',duration:12,tracks:[{target:'drawing',property:'activeChild',keys:[{frame:0,value:rig.images[0].name}]}]}];
+    rig.stateMachine.layers=[];
+    expect(buildRig(rig,resolve('art/rive-sample')).length).toBeGreaterThan(8);
+    rig.groups.push({name:'empty',parent:'drawing'});
+    rig.animations[0].tracks[0].keys.push({frame:6,value:'empty'});
+    expect(buildRig(rig,resolve('art/rive-sample')).length).toBeGreaterThan(8);
+    rig.animations[0].tracks[0].keys[0].value=rig.images[1].name;
+    expect(()=>buildRig(rig,resolve('art/rive-sample'))).toThrow('Invalid Solo child');
+    rig.animations[0].tracks=[{target:`${rig.images[0].name}.v0`,property:'u',keys:[{frame:0,value:0}]}];
+    expect(()=>buildRig(rig,resolve('art/rive-sample'))).toThrow('Mesh UV animation');
+    rig.animations[0].tracks=[{target:rig.bones[0].name,property:'x',keys:[{frame:0,value:'bad'}]}];
+    expect(()=>buildRig(rig,resolve('art/rive-sample'))).toThrow('float keys');
+  });
 });

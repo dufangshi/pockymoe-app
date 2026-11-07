@@ -785,6 +785,68 @@
           "CoreDoubleType"
         ]
       }
+    },
+    "solo": {
+      "type": 147,
+      "props": {
+        "name": [
+          4,
+          "CoreStringType"
+        ],
+        "parentId": [
+          5,
+          "CoreIdType"
+        ],
+        "opacity": [
+          18,
+          "CoreDoubleType"
+        ],
+        "rotation": [
+          15,
+          "CoreDoubleType"
+        ],
+        "scaleX": [
+          16,
+          "CoreDoubleType"
+        ],
+        "scaleY": [
+          17,
+          "CoreDoubleType"
+        ],
+        "x": [
+          13,
+          "CoreDoubleType"
+        ],
+        "y": [
+          14,
+          "CoreDoubleType"
+        ],
+        "activeComponentId": [
+          296,
+          "CoreIdType"
+        ]
+      }
+    },
+    "keyframe_id": {
+      "type": 50,
+      "props": {
+        "frame": [
+          67,
+          "CoreUintType"
+        ],
+        "interpolationType": [
+          68,
+          "CoreUintType"
+        ],
+        "interpolatorId": [
+          69,
+          "CoreIdType"
+        ],
+        "value": [
+          122,
+          "CoreIdType"
+        ]
+      }
     }
   }
 }

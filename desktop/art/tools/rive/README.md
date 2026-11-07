@@ -49,6 +49,16 @@ uses op 0, false op 1. Trigger conditions consume trigger inputs. ViewModels,
 text, layout, audio, script authoring and arbitrary converter graphs are outside
 this subset. The runtime can still load imported scripts.
 
+`hold:true` on a float key holds its value until the next key. A group with
+`solo:true` selects exactly one direct child. Animate its virtual `activeChild`
+property with child names as string values; the writer emits discrete CoreId
+keys (Solo type 147, property 296; KeyFrameId type 50, property 122, from the
+same pinned runtime). All variants can bind the same control bones and retain
+one mesh topology while selecting different fixed atlas UVs. Inactive children
+collapse instead of drawing at partial opacity. Do not animate mesh `u`/`v`:
+the pinned runtime builds immutable UV buffers at asset loading and does not
+rebuild them for animated vertex dirt. The writer rejects these inert tracks.
+
 Binary keys/field types come from the MIT runtime source at
 [`a658a56a275ba473fe52e9d97a925d2468b0c853`](https://github.com/rive-app/rive-runtime/tree/a658a56a275ba473fe52e9d97a925d2468b0c853),
 the runtime submodule of rive-wasm tag **2.49.4** (tag commit
@@ -107,7 +117,9 @@ sheet. The standard seven-state/six-trigger checks run afterward from a fresh
 machine. With scenarios enabled their sheets use `state-` and `trigger-` prefixes
 so a scenario named idle or failed cannot be overwritten by the contract probe.
 Simulation advances at 60 Hz but only requested frames are drawn.
-PNG decode waiting never advances the animation until its cached image repeats.
+Initial runtime loading has a 60-second deadline, including the first software-GL
+draw. Image decode waiting then probes visible alpha at time zero and fails after
+15 seconds; it does not consume authored motion frames.
 The preview's Electron profile stays under its output directory.
 Large binaries cross the Node/renderer boundary as base64, avoiding millions of
 serialized integer entries.
@@ -144,3 +156,26 @@ spring/blink code and a deterministic RNG seed; production remains random. The
 recording profile and all images remain under OUTPUT. Recordings advance at
 fixed time steps independently of wall-clock throughput; use benchmark.mjs for
 real-time CPU measurements.
+
+Set `RIVE_BENCH_PROFILE=1` for a separate instrumented run. It writes
+`webgl-profile.json` (draw calls, submitted triangles, buffer uploads, texture
+allocations, API submission and synchronous readback time) and a Chromium
+`trace.pftrace` with GPU service/timeline events. Keep this run separate from the
+uninstrumented 60 s comparison. Submission time is not hardware GPU busy time;
+on SwiftShader the GPU service runs on the CPU. Texture records include render
+targets and reallocations, and submitted triangles do not measure visible
+overdraw.
+
+A 1D blend may set `reset:true` (LayerState flag 2, property 536) to seed
+its animated properties from the first animation before each application.
+For a two-pose blend this preserves the exact endpoint interpolation and stops
+repeated neutral updates from accumulating a bias. With multiple intervals the
+pinned runtime mixes poses sequentially from that first baseline; inspect the
+actual runtime output instead of assuming normalized multi-pose weights. Empty
+child groups are useful Solo choices for absent props: a transparent placeholder
+image still submits a draw, whereas an empty group submits none.
+
+Pass `--manifest /path/pet.json` to `preview.ts` to exercise optional motion,
+procedural and `eyeOpen` channels with the same configuration as the pet. Without
+it the command verifies the base input contract and explicit board/machine
+selectors. `record.ts` always reads its pack manifest.

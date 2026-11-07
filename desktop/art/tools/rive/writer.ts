@@ -48,15 +48,15 @@ export interface Part {
   assetSize?: [number, number];
   mesh?: { vertices: [number, number, number, number][]; triangles: number[]; bones?: string[]; influences?: { bone: string; weight: number }[][] };
 }
-export interface Track { target: string; property: string; keys: { frame: number; value: number; cubic?: [number, number, number, number] }[] }
+export interface Track { target: string; property: string; keys: { frame: number; value: number | string; cubic?: [number, number, number, number]; hold?: boolean }[] }
 export interface Rig {
   artboard: { name: string; width: number; height: number };
   bones: Bone[]; images: Part[];
   /** Identity-transform opacity groups, useful for pose sets with independent mouth layers. */
-  groups?: { name: string; opacity?: number; parent?: string }[];
+  groups?: { name: string; opacity?: number; parent?: string; solo?: boolean }[];
   animations: { name: string; fps?: number; duration: number; loop?: boolean; tracks: Track[] }[];
   stateMachine: { name: string; inputs: { name: string; type: 'number' | 'bool' | 'trigger'; value?: number | boolean }[];
-    layers: { name: string; states: { name: string; animation?: string; kind?: 'entry' | 'any' | 'exit'; blend?: { input: string; animations: { animation: string; value: number }[] }; transitions?: { to: string; duration?: number; exitTime?: number; conditions?: { input: string; op?: number; value?: number | boolean }[] }[] }[] }[] };
+    layers: { name: string; states: { name: string; animation?: string; kind?: 'entry' | 'any' | 'exit'; blend?: { input: string; reset?: boolean; animations: { animation: string; value: number }[] }; transitions?: { to: string; duration?: number; exitTime?: number; conditions?: { input: string; op?: number; value?: number | boolean }[] }[] }[] }[] };
 }
 /** Inverse-square distance to bone segments; largest-remainder byte weights sum to exactly 255. */
 export function weights(x: number, y: number, bones: { x: number; y: number; endX: number; endY: number }[]): { indices: number; values: number } {
@@ -101,7 +101,7 @@ export function buildRig(rig: Rig, base: string): Buffer {
   w.object('artboard', { name: rig.artboard.name, width: rig.artboard.width, height: rig.artboard.height });
   for (const g of rig.groups ?? []) {
     if (g.parent && !rig.groups?.some(p => p.name === g.parent)) throw new Error('Group parent must be an identity group');
-    add('node', g.name, { name: g.name, opacity: g.opacity ?? 1, parentId: id(g.parent) });
+    add(g.solo ? 'solo' : 'node', g.name, { name: g.name, opacity: g.opacity ?? 1, parentId: id(g.parent) });
   }
   // Bind transforms use root bones or chains extending along their parent's +X axis.
   const binds = new Map<string, { x: number; y: number; angle: number; length: number }>();
@@ -143,11 +143,23 @@ export function buildRig(rig: Rig, base: string): Buffer {
     w.object('linear_animation', { name: a.name, fps: a.fps ?? 60, duration: a.duration, loopValue: a.loop ? 1 : 0 });
     for (const t of a.tracks) {
       const type = types.get(t.target); if (!type) throw new Error(`Unknown track target ${t.target}`);
-      const prop = (schema.objects[type].props as Record<string, (string | number)[]>)[t.property];
+      // The pinned runtime uploads mesh UVs once; vertex dirt does not rebuild
+      // that buffer. Use Solo drawing variants rather than silently inert keys.
+      if (type === 'mesh_vertex' && (t.property === 'u' || t.property === 'v')) throw new Error('Mesh UV animation is unsupported by the pinned runtime; use Solo drawing variants');
+      if (t.property === 'activeChild') {
+        if (type !== 'solo' || t.keys.some(k => typeof k.value !== 'string' || !(rig.images.some(p=>p.name===k.value&&p.parent===t.target)||rig.groups?.some(g=>g.name===k.value&&g.parent===t.target)))) throw new Error(`Invalid Solo child ${t.target}`);
+      }
+      const prop = (schema.objects[type].props as Record<string, (string | number)[]>)[t.property === 'activeChild' ? 'activeComponentId' : t.property];
+      if (t.property === 'activeChild' && prop) {
+        if (!t.keys.length || t.keys.some((k,i)=>!Number.isInteger(k.frame)||k.frame<0||k.frame>a.duration||i>0&&k.frame<=t.keys[i-1].frame||k.cubic)) throw new Error('Invalid Solo keys');
+        w.object('keyed_object',{objectId:id(t.target)});w.object('keyed_property',{propertyKey:Number(prop[0])});
+        for(const k of t.keys)w.object('keyframe_id',{frame:k.frame,value:id(String(k.value)),interpolationType:0,interpolatorId:0xffffffff});
+        continue;
+      }
       if (!prop || prop[1] !== 'CoreDoubleType') throw new Error(`Not an animatable float: ${t.target}.${t.property}`);
-      if (!t.keys.length || t.keys.some((k, i) => !Number.isInteger(k.frame) || k.frame < 0 || k.frame > a.duration || i > 0 && k.frame <= t.keys[i - 1].frame)) throw new Error(`Unordered/out-of-range keys ${a.name}`);
+      if (!t.keys.length || t.keys.some((k, i) => typeof k.value !== 'number' || !Number.isFinite(k.value) || !Number.isInteger(k.frame) || k.frame < 0 || k.frame > a.duration || i > 0 && k.frame <= t.keys[i - 1].frame)) throw new Error(`Invalid/unordered/out-of-range float keys ${a.name}`);
       w.object('keyed_object', { objectId: id(t.target) }); w.object('keyed_property', { propertyKey: Number(prop[0]) });
-      for (const k of t.keys) w.object('keyframe_double', { frame: k.frame, value: k.value, interpolationType: k.cubic ? 2 : 1, interpolatorId: k.cubic ? curves.get(JSON.stringify(k.cubic))! : 0xffffffff });
+      for (const k of t.keys) w.object('keyframe_double', { frame: k.frame, value: k.value, interpolationType: k.hold ? 0 : k.cubic ? 2 : 1, interpolatorId: k.cubic ? curves.get(JSON.stringify(k.cubic))! : 0xffffffff });
     }
   }
   const sm = rig.stateMachine;
@@ -158,7 +170,7 @@ export function buildRig(rig: Rig, base: string): Buffer {
     for (const state of layer.states) {
       if (state.kind) w.object(`${state.kind}_state`);
       else if (state.blend) {
-        w.object('blend_state_1d_input', { inputId: index(sm.inputs.map(i => i.name), state.blend.input) });
+        w.object('blend_state_1d_input', { inputId: index(sm.inputs.map(i => i.name), state.blend.input), ...(state.blend.reset ? { flags: 2 } : {}) });
         for (const a of state.blend.animations) w.object('blend_animation_1d', { animationId: index(rig.animations.map(a => a.name), a.animation), value: a.value });
       } else w.object('animation_state', { animationId: index(rig.animations.map(a => a.name), state.animation!) });
       for (const tr of state.transitions ?? []) {

@@ -1,10 +1,11 @@
 import { RiveDrawer, RIVE_STATES, RIVE_TRIGGERS } from '../../../../src/pet/rive';
 import { RiveDynamics } from '../../../../src/pet/riveDynamics';
 let drawer: RiveDrawer;
-let dynamics: RiveDynamics | undefined, bodyBone = '';
+let dynamics: RiveDynamics | undefined, bodyBone = '', eyeOpen = false;
 function advance(seconds: number, values: Record<string, number | boolean> = {}): void {
   drawer.machine.advanceAndApply(seconds);
   if (!dynamics) return;
+  if (eyeOpen) drawer.set('eyeOpen', Number(drawer.inputs.get('lookX')?.value) !== 0 || Number(drawer.inputs.get('lookY')?.value) !== 0 ? 1 : 0);
   // worldTransform is a borrowed runtime matrix; copy its numbers, never delete it.
   const m = drawer.artboard.rootBone(bodyBone).worldTransform();
   const inputs = dynamics.step(seconds,{x:m.tx,y:m.ty,angle:Math.atan2(m.xy,m.xx)},{x:Number(values.dragVX ?? 0),y:Number(values.dragVY ?? 0)});
@@ -17,6 +18,7 @@ export const preview = {
     let seed = 0x1234abcd;
     dynamics = config.procedural ? new RiveDynamics(()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/0x100000000;}) : undefined;
     bodyBone = config.procedural?.bodyBone ?? '';
+    eyeOpen = !!config.procedural?.eyeOpen;
     return [...drawer.inputs.keys()];
   },
   render(state: number, frames: number, values: Record<string, number | boolean> = {}, trigger?: string) {
@@ -36,6 +38,14 @@ export const preview = {
     return { data: drawer.canvas.toDataURL('image/png'), transforms };
   },
   resize(width: number, height: number) { drawer.canvas.width = width; drawer.canvas.height = height; },
+  ready() {
+    // Embedded images may finish decoding after load(). Probe at t=0 so waiting
+    // for them cannot consume the first authored motion frames.
+    drawer.draw(0);
+    const canvas = document.createElement('canvas'); canvas.width=drawer.canvas.width; canvas.height=drawer.canvas.height;
+    const context=canvas.getContext('2d')!;context.drawImage(drawer.canvas,0,0);
+    return context.getImageData(0,0,canvas.width,canvas.height).data.some((v,i)=>i%4===3&&v>24);
+  },
   async sheet(title: string, frames: { label: string; data: string }[]) {
     const canvas = document.createElement('canvas'), width = drawer.canvas.width, height = drawer.canvas.height; canvas.width = width * frames.length; canvas.height = height + 48;
     const c = canvas.getContext('2d')!; c.fillStyle = '#eef1f4'; c.fillRect(0, 0, canvas.width, canvas.height);

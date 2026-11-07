@@ -5,43 +5,48 @@ import { resolve } from 'node:path';
 import { PNG } from 'pngjs';
 import { createHash } from 'node:crypto';
 import type { preview } from './preview/preview.ts';
+import type { RivePack } from '../../../src/pet/rive';
 declare global { interface Window { preview: typeof preview } }
 const [, , file, out, artboard = 'Pet', stateMachine = 'Pet'] = process.argv;
-if (!file || !out) throw new Error('Usage: node art/tools/rive/preview.ts pet.riv OUTPUT [artboard] [stateMachine] [--assert-motion]');
+if (!file || !out) throw new Error('Usage: node art/tools/rive/preview.ts pet.riv OUTPUT [artboard] [stateMachine] [--manifest pet.json] [--assert-motion]');
 const output = resolve(out); await mkdir(output, { recursive: true });
+const manifestArg = process.argv.indexOf('--manifest');
+const config: RivePack = manifestArg >= 0 ? (JSON.parse(await readFile(process.argv[manifestArg + 1], 'utf8')) as { remoteCodex: { rive: RivePack } }).remoteCodex.rive : { path: 'pet.riv', artboard, stateMachine };
+if (!config) throw new Error('Manifest has no remoteCodex.rive configuration');
 await build({ configFile: false, root: resolve('art/tools/rive/preview'), base: './', build: { outDir: resolve(output, 'app'), emptyOutDir: true, assetsInlineLimit: 0 } });
 const main = resolve(output, 'main.cjs');
 await writeFile(main, "const { app, BrowserWindow } = require('electron'); const { join } = require('node:path'); const profile = join(__dirname, 'profile'); require('node:fs').mkdirSync(profile, { recursive: true }); app.setPath('userData', profile); app.commandLine.appendSwitch('enable-unsafe-swiftshader'); app.whenReady().then(() => { const w = new BrowserWindow({width:384,height:416,transparent:true,frame:false,webPreferences:{contextIsolation:true,sandbox:true,backgroundThrottling:false}}); w.loadFile(process.argv.at(-1)); });");
 const app = await electron.launch({ executablePath: resolve('node_modules/electron/dist/electron'), timeout: 30000, args: ['--no-sandbox', '--ozone-platform=x11', main, resolve(output, 'app/index.html')] });
 try {
   const page = await app.firstWindow(); page.on('pageerror', e => console.error(e));
+  page.on('console', m => { if (m.type() === 'error') console.error(m.text()); });
   await page.waitForFunction(() => 'preview' in window);
   const bytes = (await readFile(file)).toString('base64');
   // Bound hangs in native import or script initialization as well as malformed files.
   let timer: ReturnType<typeof setTimeout> | undefined;
   try { await Promise.race([
-    new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('Rive load timed out')), 20000); }),
-    page.evaluate(async ({ bytes, artboard, stateMachine }) => window.preview.load(bytes, { path: 'pet.riv', artboard, stateMachine }), { bytes, artboard, stateMachine }),
+    // Large layered rigs can spend over 20 s compiling their first software-GL
+    // draw. Keep a finite tool deadline without rejecting that valid workload.
+    new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('Rive load timed out')), 60000); }),
+    page.evaluate(async ({ bytes, config }) => window.preview.load(bytes, config), { bytes, config }),
   ]); } finally { clearTimeout(timer); }
   // Image decoding finishes asynchronously after import. Verify visible pixels, not just successful parsing.
   const sizeArg = process.argv.indexOf('--size');
   const size = sizeArg >= 0 ? process.argv[sizeArg + 1].split('x').map(Number) : [384, 416];
   if (size.length !== 2 || size.some(n => !Number.isInteger(n) || n < 64 || n > 2048)) throw new Error('Invalid --size WIDTHxHEIGHT');
   await page.evaluate(([w, h]) => window.preview.resize(w, h), size);
-  await page.waitForFunction(async () => {
-    const data = window.preview.render(0, 1); const image = new Image(); image.src = data;
-    await image.decode(); return true;
-  });
+  await page.waitForFunction(() => window.preview.ready(), {}, { timeout: 15000 });
   const scenarioArg = process.argv.indexOf('--scenarios');
   if (scenarioArg >= 0) {
     const scenarios = JSON.parse(await readFile(process.argv[scenarioArg + 1], 'utf8')) as { name: string; values: Record<string, number | boolean>; trigger?: string; frames: number[] }[];
     for (const scenario of scenarios) {
       if (!/^[a-zA-Z0-9_-]+$/.test(scenario.name)) throw new Error('Unsafe scenario name');
-      await page.evaluate(async ({ bytes, artboard, stateMachine }) => window.preview.load(bytes, { path: 'pet.riv', artboard, stateMachine }), { bytes, artboard, stateMachine });
+      await page.evaluate(async ({ bytes, config }) => window.preview.load(bytes, config), { bytes, config });
       await page.evaluate(([w, h]) => window.preview.resize(w, h), size);
+      await page.waitForFunction(() => window.preview.ready(), {}, { timeout: 15000 });
       const captures: { label: string; data: string }[] = []; let previous = 0;
       for (const [i, frame] of scenario.frames.entries()) {
-        const data = await page.evaluate(({ values, trigger, frames }) => window.preview.render(0, frames, values, trigger), { values: scenario.values, trigger: i ? undefined : scenario.trigger, frames: Math.max(1, frame - previous) }); previous = frame;
+        const data = await page.evaluate(({ values, trigger, frames }) => window.preview.render(0, frames, values, trigger), { values: scenario.values, trigger: i ? undefined : scenario.trigger, frames: Math.max(0, frame - previous) }); previous = frame;
         await writeFile(resolve(output, `${scenario.name}-${frame}.png`), Buffer.from(data.split(',')[1], 'base64'));
         captures.push({ label: `frame=${frame} t=${(frame / 60).toFixed(2)}s`, data });
       }
@@ -49,8 +54,9 @@ try {
       await writeFile(resolve(output, `${scenario.name}.png`), Buffer.from(sheet.split(',')[1], 'base64'));
     }
     console.log(`PASS ${scenarios.length} preview scenarios`);
-    await page.evaluate(async ({ bytes, artboard, stateMachine }) => window.preview.load(bytes, { path: 'pet.riv', artboard, stateMachine }), { bytes, artboard, stateMachine });
+    await page.evaluate(async ({ bytes, config }) => window.preview.load(bytes, config), { bytes, config });
     await page.evaluate(([w, h]) => window.preview.resize(w, h), size);
+    await page.waitForFunction(() => window.preview.ready(), {}, { timeout: 15000 });
   }
   const hashes = new Set<string>();
   for (const [state, name] of ['idle', 'running', 'waiting', 'failed', 'review', 'sleeping', 'resting'].entries()) {

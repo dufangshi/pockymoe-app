@@ -19,12 +19,13 @@ await build({configFile:false,root:resolve('art/tools/rive/preview'),base:'./',b
 const main=resolve(output,'main.cjs');await writeFile(main,"const {app,BrowserWindow}=require('electron');const {join}=require('node:path');require('node:fs').mkdirSync(join(__dirname,'profile'),{recursive:true});app.setPath('userData',join(__dirname,'profile'));app.commandLine.appendSwitch('enable-unsafe-swiftshader');app.whenReady().then(()=>{const w=new BrowserWindow({width:648,height:702,transparent:true,frame:false,webPreferences:{contextIsolation:true,sandbox:true,backgroundThrottling:false}});w.loadFile(process.argv.at(-1));});");
 const app=await electron.launch({executablePath:resolve('node_modules/electron/dist/electron'),args:['--no-sandbox','--ozone-platform=x11',main,resolve(output,'app/index.html')]});
 try {
- const page=await app.firstWindow();page.on('pageerror',e=>console.error(e));await page.waitForFunction(()=>'preview' in window);
+ const page=await app.firstWindow();page.on('pageerror',e=>console.error(e));page.on('console',m=>{if(m.type()==='error')console.error(m.text());});await page.waitForFunction(()=>'preview' in window);
  const bytes=(await readFile(resolve(pack,config.path))).toString('base64');
  for(const s of scenarios){
   if(!/^[a-zA-Z0-9_-]+$/.test(s.name)||!Number.isFinite(s.duration)||s.duration<=0||s.duration>120)throw new Error('Invalid recording scenario');
   const directory=resolve(output,'frames',s.name);await mkdir(directory,{recursive:true});
   await page.evaluate(async({bytes,config,initial})=>{await window.preview.load(bytes,config,{motion:initial});window.preview.resize(648,702);},{bytes,config,initial:s.initial});
+  await page.waitForFunction(()=>window.preview.ready(),{},{timeout:15000});
   const count=Math.round(s.duration*fps),samples=[];
   for(let i=0;i<count;i++){
    const event=s.events?.find(e=>Math.round(e.at*fps)===i),values={...s.frameValues?.[i],...(event?{motion:event.motion}:{})};
