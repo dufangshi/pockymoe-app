@@ -1,1 +1,5 @@
-{"extends":"../../../tsconfig.json","compilerOptions":{"allowImportingTsExtensions":true},"include":["./**/*.ts","../../rive-sample/*.ts"]}
+{
+  "extends": "../../../tsconfig.json",
+  "compilerOptions": { "allowImportingTsExtensions": true },
+  "include": ["./**/*.ts", "../../rive-sample/*.ts"]
+}
