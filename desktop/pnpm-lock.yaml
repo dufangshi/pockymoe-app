@@ -12,6 +12,9 @@ importers:
 
   .:
     dependencies:
+      '@rive-app/canvas-advanced':
+        specifier: 2.49.4
+        version: 2.49.4
       '@rive-app/webgl2-advanced':
         specifier: 2.49.4
         version: 2.49.4
@@ -466,6 +469,9 @@ packages:
     resolution: {integrity: sha512-IaYGml/nSOiZWROfPtuIL7neuu9qDOZ3TNvNljUIrhDMxiGTgPjzj/g9p9RxpS2tSepPDRY+UwAaEeiKtUvIAg==}
     engines: {node: '>=20'}
     hasBin: true
+
+  '@rive-app/canvas-advanced@2.49.4':
+    resolution: {integrity: sha512-Ygv3DkuLFqm+zyUDhces7LPkenKQwbMa43XT7DPwZPbc+9qBOZzOu4uwYiC5eFyTPI3/pBdP+eTxuXw2Xwgm1A==}
 
   '@rive-app/webgl2-advanced@2.49.4':
     resolution: {integrity: sha512-WxyK98kaAksmBftLdRD5ioWiF3SzvR1X2hgP1X5xBpHr2xfE4aOVmvfSZ5eQ9jEuqYnbL7onre95COofIUBswg==}
@@ -2629,6 +2635,8 @@ snapshots:
   '@playwright/test@1.64.1':
     dependencies:
       playwright: 1.64.1
+
+  '@rive-app/canvas-advanced@2.49.4': {}
 
   '@rive-app/webgl2-advanced@2.49.4': {}
 

@@ -208,3 +208,23 @@ only; production still samples its normal dynamics and cursor envelope.
 Native benchmark and isolated import verification put their temporary harness
 profiles under the requested output directory. Choose a private output directory
 for private artwork; copied pack files stay there with the rest of the evidence.
+
+For the matched backend controls, run one command from `desktop/` with only the
+two importable packs. Linux uses an isolated Xvfb display for each run; macOS
+uses its normal desktop display and does not force SwiftShader:
+
+```sh
+node art/tools/rive/benchmark-suite.mjs /private/Rive.zip /private/WebM.zip /private/benchmark-output
+```
+
+It builds an isolated pet harness, validates/extracts both ZIPs, and runs WebM,
+a textured WebGL2 quad, forced WebGL2 Rive, forced Canvas Rive and automatic
+backend selection sequentially at DPR 1 and 2, three 60-second runs each.
+`backend-medians.json` and the printed table give renderer and GPU process CPU,
+median of their sum, ratios to WebM, logical core count, actual chosen backend,
+and Chromium-native ReadPixels per second from the same GPU-service CDP trace
+window. Native transfers are distinct from the app's pointer alpha probes.
+All runs include the same trace categories. The controls and URL override are
+compiled only into the isolated harness, never the production renderer.
+Use a fresh output directory after changing either ZIP; saved runs may be
+resumed only for identical packs. Keep other CPU/GPU work stopped during a run.

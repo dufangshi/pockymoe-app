@@ -5,6 +5,7 @@ import type { PetBubble } from './bubbles';
 import type { DockEdge, FaceBox, Rect, PeekArt } from './geometry';
 import type { ClipFormat, PetClip } from './packs';
 export interface PetViewState {
+  riveBackend?: import('./riveBackend').RiveBackend;
   rive?: import('./rive').RivePack & { epoch: number };
   cursor?: { x: number; y: number };
   dragging?: boolean;

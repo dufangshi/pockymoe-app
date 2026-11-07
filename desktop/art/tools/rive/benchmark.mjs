@@ -1,20 +1,24 @@
 import { PNG } from 'pngjs';
+import electronExecutable from 'electron';
 import { _electron as electron } from '@playwright/test';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
+import { summarizeNativeTrace } from './trace-summary.mjs';
 import { cpus } from 'node:os';
 import { createHash } from 'node:crypto';
 const [,,pack,out,id='mint-courier',seconds='60']=process.argv;
 if(!pack||!out)throw new Error('Usage: node art/tools/rive/benchmark.mjs PACK OUT ID [seconds=60]');
 const dpr=Number(process.env.RIVE_BENCH_DPR??'1');
 const profile=process.env.RIVE_BENCH_PROFILE==='1';
+const control=process.env.RIVE_BENCH_BACKEND??'auto';
+if(!['auto','webgl2','canvas','quad'].includes(control))throw new Error('Invalid RIVE_BENCH_BACKEND');
 if(![1,2].includes(dpr))throw new Error('RIVE_BENCH_DPR must be 1 or 2');
 const manifest=JSON.parse(await readFile(resolve(pack,'pet.json'),'utf8'));
 if(manifest.id!==id)throw new Error(`Benchmark ID ${id} does not match pack ${manifest.id}`);
 const riveBytes=manifest.remoteCodex?.rive?await readFile(resolve(pack,manifest.remoteCodex.rive.path)):null;
 const packEvidence={id:manifest.id,...(riveBytes?{riveBytes:riveBytes.length,riveSha256:createHash('sha256').update(riveBytes).digest('hex')}:{})};
 await mkdir(out,{recursive:true});
-const app=await electron.launch({executablePath:resolve('node_modules/electron/dist/electron'),args:['--no-sandbox','--ozone-platform=x11','--enable-unsafe-swiftshader',`--force-device-scale-factor=${dpr}`,resolve('.local/desktop-evidence/pet/qa1/harness/main/index.js')],env:{...process.env,TMPDIR:resolve(out),ELECTRON_RENDERER_URL:'',POCKYMOE_CLIP_PACK:resolve(pack)}});
+const app=await electron.launch({executablePath:electronExecutable,args:['--no-sandbox',...(process.platform==='linux'?['--ozone-platform=x11','--enable-unsafe-swiftshader']:[]),`--force-device-scale-factor=${dpr}`,resolve(process.env.RIVE_BENCH_HARNESS??'.local/desktop-evidence/pet/qa1/harness/main/index.js')],env:{...process.env,TMPDIR:resolve(out),ELECTRON_RENDERER_URL:'',POCKYMOE_CLIP_PACK:resolve(pack)}});
 try{
  await app.firstWindow();
  await app.evaluate(async()=>{while(!globalThis.petHarness)await new Promise(r=>setTimeout(r,20));});
@@ -29,6 +33,13 @@ try{
  // Keep both idle measurements awake with the same random choices. Production
  // still uses Math.random; reload installs this before either sequencer starts.
  await sprite.addInitScript(()=>{Math.random=()=>0.5;});
+ await sprite.addInitScript(()=>{
+  globalThis.benchDraws={frames:0,calls:0};let drawn=false;
+  for(const name of ['drawElements','drawElementsInstanced','drawArrays','drawArraysInstanced']){
+   const native=WebGL2RenderingContext.prototype[name];WebGL2RenderingContext.prototype[name]=function(...args){const result=native.apply(this,args);globalThis.benchDraws.calls++;drawn=true;return result;};
+  }
+  const raf=window.requestAnimationFrame;window.requestAnimationFrame=callback=>raf.call(window,time=>{callback(time);if(drawn){globalThis.benchDraws.frames++;drawn=false;}});
+ });
  if(profile)await sprite.addInitScript(()=>{
   const stats=globalThis.riveGLProfile={frames:[],textures:[],buffers:0,frame:{calls:0,triangles:0,submitMs:0,readbackMs:0,uploadBytes:0}};
   const proto=WebGL2RenderingContext.prototype;
@@ -36,7 +47,7 @@ try{
    const native=proto[name];proto[name]=function(...args){
     const t=performance.now(),result=native.apply(this,args);stats.frame.calls++;
     const count=name.startsWith('drawElements')?args[1]:args[2],instances=name==='drawElementsInstanced'?args[4]:name==='drawArraysInstanced'?args[3]:1;
-    if(args[0]===this.TRIANGLES)stats.frame.triangles+=count*instances/3;
+    if(args[0]===this.TRIANGLES)stats.frame.triangles+=count*instances/3;else if(args[0]===this.TRIANGLE_STRIP||args[0]===this.TRIANGLE_FAN)stats.frame.triangles+=Math.max(0,count-2)*instances;
     stats.frame.submitMs+=performance.now()-t;return result;
    };
   }
@@ -46,15 +57,16 @@ try{
   const storage=proto.texStorage2D;proto.texStorage2D=function(...args){stats.textures.push({kind:'storage',levels:args[1],format:args[2],width:args[3],height:args[4]});return storage.apply(this,args);};
   const texture=proto.texImage2D;proto.texImage2D=function(...args){const image=args[5];stats.textures.push({kind:'image',level:args[1],format:args[2],width:args.length>=9?args[3]:image?.width,height:args.length>=9?args[4]:image?.height});return texture.apply(this,args);};
  });
- await sprite.reload();
+ const url=new URL(sprite.url());if(control!=='auto')url.searchParams.set('riveControl',control);await sprite.goto(url.href);
  await sprite.waitForFunction(()=>document.querySelector('#character.rive')||document.querySelector('#character.clips'));
  await sprite.waitForTimeout(3000);
  await sprite.screenshot({path:resolve(out,'pet-window.png'),omitBackground:true});
- if(profile){
-  await sprite.evaluate(()=>{globalThis.riveGLProfile.frames=[];});
-  await app.evaluate(async({contentTracing})=>contentTracing.startRecording({included_categories:['gpu','disabled-by-default-gpu.service','devtools.timeline','v8.execute']}));
- }
- await sprite.evaluate(()=>{globalThis.riveReadbacks=0;const native=WebGL2RenderingContext.prototype.readPixels;WebGL2RenderingContext.prototype.readPixels=function(...args){globalThis.riveReadbacks++;return native.apply(this,args);};});
+ await sprite.evaluate(()=>{globalThis.benchDraws={frames:0,calls:0};});
+ const trace=await sprite.context().newCDPSession(sprite),traceEvents=[];
+ trace.on('Tracing.dataCollected',({value})=>traceEvents.push(...value));
+ await trace.send('Tracing.start',{categories:'gpu,disabled-by-default-gpu.service'+(profile?',devtools.timeline,v8.execute':''),transferMode:'ReportEvents'});
+ if(profile)await sprite.evaluate(()=>{globalThis.riveGLProfile.frames=[];});
+ await sprite.evaluate(()=>{globalThis.riveReadbacks=0;globalThis.riveCanvasReads=0;const canvasNative=CanvasRenderingContext2D.prototype.getImageData;CanvasRenderingContext2D.prototype.getImageData=function(...args){globalThis.riveCanvasReads++;return canvasNative.apply(this,args);};const native=WebGL2RenderingContext.prototype.readPixels;WebGL2RenderingContext.prototype.readPixels=function(...args){globalThis.riveReadbacks++;return native.apply(this,args);};});
  const read=()=>app.evaluate(({app,BrowserWindow})=>({time:performance.now(),metrics:app.getAppMetrics().map(m=>({pid:m.pid,type:m.type,cpu:m.cpu.percentCPUUsage,cumulativeCPU:m.cpu.cumulativeCPUUsage,memory:m.memory})),petPid:BrowserWindow.getAllWindows().find(w=>!w.getParentWindow()).webContents.getOSProcessId()}));
  const media=()=>sprite.evaluate(()=>({mood:document.querySelector('#app')?.dataset.mood,videos:[...document.querySelectorAll('video')].map(v=>({src:v.currentSrc,currentTime:v.currentTime,paused:v.paused,ended:v.ended,readyState:v.readyState,totalVideoFrames:v.getVideoPlaybackQuality().totalVideoFrames,droppedVideoFrames:v.getVideoPlaybackQuality().droppedVideoFrames}))}));
  const mediaStart=await media(),samples=[await read()];
@@ -63,6 +75,8 @@ try{
   samples.push(await read());
   if(i%20===19)console.log(`${id}: ${i+1}/${seconds}s`);
  }
+ const completed=new Promise(resolve=>trace.once('Tracing.tracingComplete',resolve));await trace.send('Tracing.end');await completed;
+ const nativeTrace=summarizeNativeTrace(traceEvents);await writeFile(resolve(out,'native-trace.json'),JSON.stringify({traceEvents}));
  const mediaEnd=await media(),first=samples[0],last=samples.at(-1),elapsed=(last.time-first.time)/1000;
  const total=(sample,type)=>sample.metrics.filter(m=>type==='pet'?m.pid===sample.petPid:m.type===type).reduce((s,m)=>s+m.cumulativeCPU,0);
  const mean=type=>100*(total(last,type)-total(first,type))/elapsed;
@@ -70,14 +84,16 @@ try{
  if(first.petPid!==last.petPid)throw new Error('Pet renderer restarted during measurement');
  const info=await app.evaluate(async({app})=>({features:app.getGPUFeatureStatus(),gpu:await app.getGPUInfo('basic')}));
  const readbacks=await sprite.evaluate(()=>globalThis.riveReadbacks);
- const display=await sprite.evaluate(()=>({dpr:devicePixelRatio,width:innerWidth,height:innerHeight,canvases:[...document.querySelectorAll('canvas')].map(c=>({width:c.width,height:c.height,cssWidth:c.clientWidth,cssHeight:c.clientHeight,...(document.querySelector('#character.rive')?{glAttributes:c.getContext('webgl2')?.getContextAttributes()}:{})}))}));
+ const canvasReadbacks=await sprite.evaluate(()=>globalThis.riveCanvasReads);
+ const drawCounts=await sprite.evaluate(()=>globalThis.benchDraws);
+ const display=await sprite.evaluate(()=>({dpr:devicePixelRatio,width:innerWidth,height:innerHeight,backend:document.querySelector('#rive')?.dataset.backend,control:document.querySelector('#rive')?.dataset.control,canvases:[...document.querySelectorAll('canvas')].map(c=>({width:c.width,height:c.height,cssWidth:c.clientWidth,cssHeight:c.clientHeight,...(c.id==='rive'&&c.dataset.backend==='webgl2'?{glAttributes:c.getContext('webgl2')?.getContextAttributes()}:{})}))}));
  if(display.dpr!==dpr)throw new Error(`Unexpected display DPR ${display.dpr}`);
- const result={id,packEvidence,mediaStart,mediaEnd,seconds:Number(seconds),elapsed,logicalCPUs:cpus().length,idleRandom:0.5,display,webglReadbacks:readbacks,readbacksPerSecond:readbacks/elapsed,rendererCPU:mean('pet'),gpuProcessCPU:mean('GPU'),allProcessCPU:100*(allCPU(last)-allCPU(first))/elapsed,note:'CPU seconds / measured wall seconds * 100 (one fully busy logical core = 100%). GPU process CPU is not GPU hardware utilization. allProcessCPU additionally includes browser, utility and control-window processes.',info,samples};
+ const result={id,control,drawCounts,nativeTrace,packEvidence,mediaStart,mediaEnd,seconds:Number(seconds),elapsed,logicalCPUs:cpus().length,idleRandom:0.5,display,webglReadbacks:readbacks,canvasReadbacks,readbacksPerSecond:(readbacks+canvasReadbacks)/elapsed,rendererCPU:mean('pet'),gpuProcessCPU:mean('GPU'),allProcessCPU:100*(allCPU(last)-allCPU(first))/elapsed,note:'CPU seconds / measured wall seconds * 100 (one fully busy logical core = 100%). GPU process CPU is not GPU hardware utilization. readbacks counts window WebGL readPixels and Canvas2D getImageData calls, not Chromium-native presentation readbacks. allProcessCPU additionally includes browser, utility and control-window processes.',info,samples};
  await writeFile(resolve(out,'metrics.json'),JSON.stringify(result,null,2));
  if(profile){
   const gl=await sprite.evaluate(()=>globalThis.riveGLProfile);
   await writeFile(resolve(out,'webgl-profile.json'),JSON.stringify({...gl,note:'Instrumented run: draw counts include runtime rendering passes; triangle count is submitted triangles, not visible coverage. submitMs is JS API time; readbackMs measures the readPixels call; PBO probes do not block for completion. Frames are captured at rAF boundaries independent of alpha probes. Texture records include render targets and startup reallocations. Not a hardware GPU utilization measurement.'},null,2));
-  await app.evaluate(async({contentTracing},path)=>contentTracing.stopRecording(path),resolve(out,'trace.pftrace'));
+
  }
  if(id==='mint-courier'||process.env.RIVE_BENCH_CAPTURE==='1'){
   const png=PNG.sync.read(await sprite.screenshot({omitBackground:true}));let sx=0,sy=0,n=0;

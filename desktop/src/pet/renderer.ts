@@ -267,14 +267,19 @@ let riveDrawer: RiveDrawer | null = null, riveToken = 0, riveKey = '', riveActiv
 function syncRive(): void {
   const config = state?.rive;
   if (!config || state?.surface !== 'sprite') return;
-  const key = `${state.packName}#${config.epoch}`;
+  const backend = state.riveBackend ?? 'webgl2';
+  const key = `${state.packName}#${config.epoch}#${backend}`;
   if (key === riveKey) return;
   riveKey = key; const token = ++riveToken;
-  const c = root.querySelector<HTMLCanvasElement>('#rive')!;
+  let c = root.querySelector<HTMLCanvasElement>('#rive')!;
+  if (riveDrawer) { riveDrawer.dispose(); riveDrawer = null; }
+  // A canvas cannot switch context types when GPU availability changes.
+  const fresh = c.cloneNode(false) as HTMLCanvasElement; c.replaceWith(fresh); c = fresh;
   Object.assign(c,riveBackingSize(state.pet.width,state.pet.height,devicePixelRatio,config.backing));
   void bridge.clip('pet.riv').then(async bytes => {
     if (!bytes || token !== riveToken) return;
-    const drawer = await RiveDrawer.load(c, bytes, config);
+    const drawer = await RiveDrawer.load(c, bytes, config, {}, backend);
+    c.dataset.backend = drawer.backend;
     if (token !== riveToken) { drawer.dispose(); return; }
     riveClock = config.motions ? new RiveMotionClock(config.motions, Math.random, !!config.procedural) : null;
     riveDynamics = config.procedural ? new RiveDynamics() : null; riveGate = new RiveFrameGate(); riveCadence = new RiveSourceCadence(); riveGaze = new RiveGazePulse();

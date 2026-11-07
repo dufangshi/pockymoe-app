@@ -1,5 +1,6 @@
 import { RiveDrawer, RIVE_STATES, RIVE_TRIGGERS } from '../../../../src/pet/rive';
 import { RiveDynamics } from '../../../../src/pet/riveDynamics';
+import type { RiveBackend } from '../../../../src/pet/riveBackend';
 let drawer: RiveDrawer;
 let dynamics: RiveDynamics | undefined, bodyBone = '', eyeOpen = false;
 function advance(seconds: number, values: Record<string, number | boolean> = {}): void {
@@ -14,8 +15,11 @@ function advance(seconds: number, values: Record<string, number | boolean> = {})
   drawer.advance(0);
 }
 export const preview = {
-  async load(bytes: number[] | string | Uint8Array, config: Parameters<typeof RiveDrawer.load>[2], initial: Record<string, number | boolean> = {}) {
-    drawer?.dispose(); drawer = await RiveDrawer.load(document.querySelector('canvas')!, typeof bytes === 'string' ? Uint8Array.from(atob(bytes), c => c.charCodeAt(0)) : new Uint8Array(bytes), config, initial);
+  async load(bytes: number[] | string | Uint8Array, config: Parameters<typeof RiveDrawer.load>[2], initial: Record<string, number | boolean> = {}, backend: RiveBackend = 'webgl2') {
+    drawer?.dispose();
+    let canvas = document.querySelector('canvas')!;
+    const fresh = canvas.cloneNode(false) as HTMLCanvasElement; canvas.replaceWith(fresh); canvas = fresh;
+    drawer = await RiveDrawer.load(canvas, typeof bytes === 'string' ? Uint8Array.from(atob(bytes), c => c.charCodeAt(0)) : new Uint8Array(bytes), config, initial, backend);
     let seed = 0x1234abcd;
     dynamics = config.procedural ? new RiveDynamics(()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/0x100000000;}) : undefined;
     bodyBone = config.procedural?.bodyBone ?? '';
@@ -48,10 +52,10 @@ export const preview = {
     // Embedded images may finish decoding after load(). Probe at t=0 so waiting
     // for them cannot consume the first authored motion frames.
     drawer.draw(0);
-    const { width, height } = drawer.canvas, gl = drawer.canvas.getContext('webgl2')!;
-    if (gl.isContextLost()) throw new Error('Rive preview WebGL2 context lost');
-    const pixels = new Uint8Array(width * height * 4);
-    gl.readPixels(0,0,width,height,gl.RGBA,gl.UNSIGNED_BYTE,pixels);
+    const { width, height } = drawer.canvas, gl = drawer.gl;
+    if (gl?.isContextLost()) throw new Error('Rive preview WebGL2 context lost');
+    const pixels = gl ? new Uint8Array(width * height * 4) : drawer.canvas.getContext('2d')!.getImageData(0,0,width,height).data;
+    gl?.readPixels(0,0,width,height,gl.RGBA,gl.UNSIGNED_BYTE,pixels);
     return pixels.some((v,i)=>i%4===3&&v>24);
   },
   async sheet(title: string, frames: { label: string; data: string }[]) {

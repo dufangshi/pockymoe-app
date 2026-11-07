@@ -1,4 +1,5 @@
 import { verifyRivePack } from './riveValidation';
+import { chooseRiveBackend } from './riveBackend';
 import { petMedia } from './media';
 import { app, BrowserWindow, dialog, ipcMain, nativeImage, nativeTheme, screen } from 'electron';
 import { release } from 'node:os';
@@ -188,6 +189,7 @@ export function createPetController(deps: PetControllerDeps): PetController {
     const shared = { appearance, glassFallback: process.platform === 'win32' && windowsGlassMaterial(release(), process.env.POCKYMOE_WINDOWS_GLASS === 'solid') === 'solid', accountId, items, recent, targets: effectiveTargets, mood: drag?.moved && pack?.manifest.remoteCodex?.clips?.dragging ? 'dragging' : moods.value(items, now, snoozed), moodEpoch, pinned: controlsPinned && !panel && !menu,
       peekArt: pack?.peekImage && pack.manifest.remoteCodex?.peek ? { ...pack.manifest.remoteCodex.peek, imageUrl: `data:image/${pack.manifest.remoteCodex.peek.path.endsWith('png') ? 'png' : 'webp'};base64,${pack.peekImage.toString('base64')}` } : undefined,
       rive: pack?.manifest.remoteCodex?.rive ? { ...pack.manifest.remoteCodex.rive, epoch: packEpoch } : undefined,
+      riveBackend: chooseRiveBackend(app.getGPUFeatureStatus?.() ?? {}),
       cursor: pack?.manifest.remoteCodex?.rive ? { x: screen.getCursorScreenPoint().x - window.getBounds().x - layout.pet.x, y: screen.getCursorScreenPoint().y - window.getBounds().y - layout.pet.y } : undefined,
       dragging: !!drag?.moved,
       ...(pack?.manifest.remoteCodex?.rive?.procedural ? { dragVelocity: drag?.moved && now-dragSample.at < 120 ? dragVelocity : { x: 0, y: 0 } } : {}),
@@ -424,12 +426,14 @@ export function createPetController(deps: PetControllerDeps): PetController {
   const nativeClosed = (): void => dispose();
   glass.on('close', closeGlass); window.on('close', closeSprite);
   app.once('before-quit', beforeQuit);
+  app.on('gpu-info-update', emit);
   window.once('closed', nativeClosed); glass.once('closed', nativeClosed);
   const devUrl = process.env.ELECTRON_RENDERER_URL;
   for (const view of [window, glass]) void (devUrl ? view.loadURL(`${devUrl.replace(/\/$/, '')}/pet/index.html`) : view.loadFile(join(__dirname, '../renderer/pet/index.html'))).then(() => { if (view === window) void refreshPacks(); });
   function dispose(destroyWindows = true): void {
     if (disposed) return; disposed = true; clearInterval(timer); clearTimeout(blurTimer); savePosition();
     app.removeListener('before-quit', beforeQuit);
+    app.removeListener('gpu-info-update', emit);
     window.removeListener('closed', nativeClosed); glass.removeListener('closed', nativeClosed);
     glass.removeListener('close', closeGlass); window.removeListener('close', closeSprite);
     for (const unsubscribe of unsubscribes) unsubscribe();

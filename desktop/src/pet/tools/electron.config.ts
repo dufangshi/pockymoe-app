@@ -4,5 +4,5 @@ const out = `${(process.env.POCKYMOE_DESKTOP_EVIDENCE || '.local/desktop-evidenc
 export default defineConfig({
   main: { plugins: [externalizeDepsPlugin()], build: { outDir: `${out}/main`, rollupOptions: { input: { index: resolve('src/pet/tools/harness.ts') } } } },
   preload: { build: { outDir: `${out}/preload`, rollupOptions: { input: { pet: resolve('src/pet/preload.ts') } } } },
-  renderer: { root: 'src', build: { outDir: `${out}/renderer`, rollupOptions: { input: { pet: resolve('src/pet/index.html'), riveValidate: resolve('src/pet/riveValidate.html') } } } },
+  renderer: { root: 'src', resolve: { alias: [{ find: './rive', replacement: resolve('src/pet/tools/riveControl.ts') }] }, build: { outDir: `${out}/renderer`, rollupOptions: { input: { pet: resolve('src/pet/index.html'), riveValidate: resolve('src/pet/riveValidate.html') } } } },
 });

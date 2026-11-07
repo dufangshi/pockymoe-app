@@ -46,3 +46,29 @@ export class RiveHitReadback {
   }
   dispose(): void { if (this.flight) this.gl.deleteSync(this.flight.fence); if (this.buffer) this.gl.deleteBuffer(this.buffer); this.flight = undefined; this.buffer = null; this.wanted = undefined; }
 }
+
+/** Canvas2D's CPU pixel path is also demand-only and capped at 10Hz. */
+export class RiveCanvasHit {
+  private wanted?: { x: number; y: number; width: number; height: number };
+  private last?: string;
+  private sampled?: { key: string; alpha: number };
+  private issuedAt = -Infinity;
+  private changed = false;
+  constructor(private readonly context: CanvasRenderingContext2D, private readonly now: () => number = () => performance.now()) {}
+  alphaAt(x: number, y: number, width: number, height: number, suspended = false): number {
+    if (x < 0 || y < 0 || x >= width || y >= height) { this.suspend(); return 0; }
+    x = Math.floor(x); y = Math.floor(y);
+    const key = `${x},${y},${width},${height}`;
+    if (!suspended && key !== this.last) { this.last = key; this.wanted = { x, y, width, height }; }
+    return this.sampled?.key === key ? this.sampled.alpha : 0;
+  }
+  get needsDraw(): boolean { return !!this.wanted && this.now() - this.issuedAt >= 100; }
+  issue(): void {
+    if (!this.needsDraw) return;
+    const p = this.wanted!; this.wanted = undefined; this.issuedAt = this.now();
+    this.sampled = { key: `${p.x},${p.y},${p.width},${p.height}`, alpha: this.context.getImageData(p.x, p.y, 1, 1).data[3] }; this.changed = true;
+  }
+  poll(width: number, height: number): boolean { if (this.sampled && !this.sampled.key.endsWith(`,${width},${height}`)) { this.sampled = undefined; this.changed = false; this.last = undefined; } const changed = this.changed; this.changed = false; return changed; }
+  suspend(): void { this.wanted = undefined; this.last = undefined; }
+  dispose(): void { this.suspend(); this.sampled = undefined; }
+}

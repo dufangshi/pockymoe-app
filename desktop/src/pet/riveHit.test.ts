@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { RiveHitReadback } from './riveHit';
+import { RiveHitReadback, RiveCanvasHit } from './riveHit';
 function fixture() {
   let now = 0, ready = false;
   const gl = { PIXEL_PACK_BUFFER: 1, PIXEL_PACK_BUFFER_BINDING: 2, STREAM_READ: 3, RGBA: 4, UNSIGNED_BYTE: 5, SYNC_GPU_COMMANDS_COMPLETE: 6, TIMEOUT_EXPIRED: 7, WAIT_FAILED: 8,
@@ -28,5 +28,17 @@ describe('asynchronous Rive alpha hit testing', () => {
     const { gl, probe } = fixture(); probe.alphaAt(20, 30, 100, 200, true); expect(probe.needsDraw).toBe(false);
     probe.alphaAt(20, 30, 100, 200); probe.suspend(); probe.issue(); expect(gl.readPixels).not.toHaveBeenCalled();
     probe.alphaAt(20, 30, 100, 200); probe.alphaAt(-1, 30, 100, 200); probe.issue(); expect(gl.readPixels).not.toHaveBeenCalled();
+  });
+});
+
+describe('Canvas backend demand-only hit testing',()=>{
+  it('reads a pixel only on new pointer demand, coalesces at 10Hz and cancels when tucked',()=>{
+    let now=0;const getImageData=vi.fn(()=>({data:new Uint8ClampedArray([0,0,0,201])}));
+    const hit=new RiveCanvasHit({getImageData} as unknown as CanvasRenderingContext2D,()=>now);
+    hit.issue();expect(getImageData).not.toHaveBeenCalled();hit.alphaAt(2,3,100,200);hit.issue();expect(getImageData).toHaveBeenCalledWith(2,3,1,1);
+    expect(hit.poll(100,200)).toBe(true);expect(hit.poll(100,200)).toBe(false);expect(hit.alphaAt(2,3,100,200)).toBe(201);
+    hit.issue();expect(getImageData).toHaveBeenCalledTimes(1);hit.alphaAt(4,5,100,200);now=99;hit.issue();expect(getImageData).toHaveBeenCalledTimes(1);
+    now=100;hit.issue();expect(getImageData).toHaveBeenCalledTimes(2);hit.alphaAt(7,8,100,200);hit.suspend();now=200;hit.issue();
+    hit.alphaAt(7,8,100,200,true);hit.issue();expect(getImageData).toHaveBeenCalledTimes(2);hit.dispose();
   });
 });

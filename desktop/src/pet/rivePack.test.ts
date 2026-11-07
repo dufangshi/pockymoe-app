@@ -30,6 +30,9 @@ describe('Rive pack import', () => {
     const route={maxExitMs:350,bridges:[1,2],clips:[{value:0,animation:'idle',durationMs:1000,start:'rest',end:'rest'},{value:1,animation:'in',durationMs:1000,start:'rest',end:'bed'},{value:2,animation:'out',durationMs:1000,start:'bed',end:'rest'}]};
     const parse=(routing:unknown,backing:unknown={width:648,height:702,scale:1})=>parseManifest(Buffer.from(JSON.stringify({...manifest,remoteCodex:{rive:{...manifest.remoteCodex.rive,motions:{idle:[{value:0,durationMs:1000}]},routing,backing}}})));
     expect(parse(route).remoteCodex?.rive?.routing).toEqual(route);
+    const reaction={clips:[2],targets:[0],animation:'local-startle',durationMs:800,settleMs:100};
+    expect(parse({...route,reactions:[reaction]}).remoteCodex?.rive?.routing?.reactions).toEqual([reaction]);
+    for(const bad of [{...reaction,clips:[99]},{...reaction,targets:[]},{...reaction,settleMs:0},{...reaction,durationMs:Infinity},{...reaction,animation:''}])expect(()=>parse({...route,reactions:[bad]})).toThrow('pose reaction');
     for(const q of [{...route,maxExitMs:800},{...route,bridges:[99]},{...route,bridges:[1]},{...route,clips:[...route.clips,route.clips[0]]}])expect(()=>parse(q)).toThrow('routing');
     expect(()=>parse(route,{width:648,height:702,scale:2})).toThrow('backing');
     for(const exitRestMs of [{start:501,end:0},{start:-1,end:0},{start:0,end:null}])expect(()=>parse({...route,clips:route.clips.map(c=>({...c,exitRestMs}))})).toThrow('exit rest');

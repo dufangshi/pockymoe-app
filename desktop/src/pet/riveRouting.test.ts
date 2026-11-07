@@ -41,6 +41,18 @@ describe('material-safe routing',()=>{
     expect(r.step(.01).time).toBe(0);expect(r.step(0).value).toBe(1);
     r.seek(1,1.8);expect(r.step(0).time).toBe(1.8);r.request(0);expect(r.step(.01).time).toBe(2);
   });
+  it('decelerates a distant material locally for an authored reaction without selecting an unrelated frame',()=>{
+    const fixture=structuredClone(config);fixture.reactions=[{clips:[4],targets:[1],animation:'bed-startle',durationMs:800,settleMs:100}];
+    const r=new RiveRestRouter(fixture,4);r.step(.419);r.request(1,false,.375);
+    expect(r.step(0)).toMatchObject({value:1,animation:'bed',time:.375,reaction:{animation:'bed-startle',time:0}});
+    const samples=Array.from({length:50},()=>r.step(.01));
+    expect(samples.every(s=>s.animation==='bed'&&!s.leaving)).toBe(true);
+    expect(samples.at(-1)!.time).toBeCloseTo(.425);
+    r.request(1);expect(r.step(0).reaction!.time).toBeCloseTo(.5);
+    r.request(1,true);expect(r.step(0).reaction!.time).toBe(0);
+    const before=r.step(.02);r.request(0,false,before.time);expect(r.step(0).time).toBe(before.time);
+    expect(r.step(0).reaction).toBeUndefined();
+  });
   it('caps source backing resolution and preserves the aspect ratio and legacy DPR',()=>{
     expect(riveBackingSize(1037,1123,2,{width:648,height:702,scale:1})).toEqual({width:648,height:702});
     expect(riveBackingSize(648,702,2,{width:648,height:702,scale:1.25})).toEqual({width:810,height:878});

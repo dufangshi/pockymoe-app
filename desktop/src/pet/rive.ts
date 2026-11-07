@@ -1,4 +1,5 @@
-import { RiveHitReadback } from './riveHit';
+import { RiveHitReadback, RiveCanvasHit } from './riveHit';
+import type { RiveBackend } from './riveBackend';
 import { RiveRestRouter, type RiveRouting } from './riveRouting';
 import type { LinearAnimationInstance } from '@rive-app/webgl2-advanced';
 import type { RiveMotions } from './riveMotion';
@@ -6,12 +7,17 @@ import { RIVE_DYNAMIC_INPUTS, riveSourceTime, type RiveProcedural } from './rive
 import Rive, { type RiveCanvas, type File, type Artboard, type StateMachineInstance, type WrappedRenderer, type SMIInput } from '@rive-app/webgl2-advanced';
 import wasmUrl from '@rive-app/webgl2-advanced/rive.wasm?url';
 import fallbackUrl from '@rive-app/webgl2-advanced/rive_fallback.wasm?url';
+import CanvasRive from '@rive-app/canvas-advanced';
+import canvasWasmUrl from '@rive-app/canvas-advanced/rive.wasm?url';
+import canvasFallbackUrl from '@rive-app/canvas-advanced/rive_fallback.wasm?url';
 export const RIVE_STATES = ['idle', 'running', 'waiting', 'failed', 'review', 'sleeping', 'resting'] as const;
 export const RIVE_TRIGGERS = ['complete', 'fail', 'poke', 'dragStart', 'land', 'wave'] as const;
 export const RIVE_INPUTS = { state: 'number', mouth: 'number', lookX: 'number', lookY: 'number', dragging: 'bool', dock: 'number', ...Object.fromEntries(RIVE_TRIGGERS.map(n => [n, 'trigger'])) };
 export interface RivePack { path: 'pet.riv'; artboard: string; stateMachine: string; viewModel?: string; motions?: RiveMotions; procedural?: RiveProcedural; routing?: RiveRouting; backing?: { width: number; height: number; scale: number } }
-let runtime: Promise<RiveCanvas> | undefined;
-export function riveRuntime(): Promise<RiveCanvas> { return runtime ??= Rive({ locateFile: file => file.includes('fallback') ? fallbackUrl : wasmUrl }); }
+const runtimes: Partial<Record<RiveBackend, Promise<RiveCanvas>>> = {};
+export function riveRuntime(backend: RiveBackend = 'webgl2'): Promise<RiveCanvas> {
+  return runtimes[backend] ??= backend === 'canvas' ? CanvasRive({ locateFile: file => file.includes('fallback') ? canvasFallbackUrl : canvasWasmUrl }) : Rive({ locateFile: file => file.includes('fallback') ? fallbackUrl : wasmUrl });
+}
 /** Owns WASM handles and drawing, without a high-level player or implicit rAF. */
 export class RiveDrawer {
   inputs = new Map<string, SMIInput>();
@@ -19,7 +25,7 @@ export class RiveDrawer {
   private animations = new Map<string, LinearAnimationInstance>();
   private config?: RivePack;
   private motionSelected = false;
-  private applied?: { animation: string; time: number; exitMix: number };
+  private applied?: { animation: string; time: number; exitMix: number; reaction?: string };
   route?: ReturnType<RiveRestRouter['step']>;
   seekMotion(value: number, seconds: number): void { if (!this.router) throw new Error('Pack has no rest routing'); this.router.seek(value,seconds); }
   advance(seconds: number): boolean {
@@ -27,12 +33,13 @@ export class RiveDrawer {
     if (this.router) {
       this.route = this.router.step(seconds);
       this.route.time = riveSourceTime(this.route.time,this.config?.procedural?.sourceFps,this.route.leaving);
-      if (this.applied?.animation !== this.route.animation || this.applied.time !== this.route.time || this.applied.exitMix !== this.route.exitMix) {
+      if (this.applied?.animation !== this.route.animation || this.applied.time !== this.route.time || this.applied.exitMix !== this.route.exitMix || this.applied.reaction !== this.route.reaction?.animation) {
         const animation = this.animations.get(this.route.animation)!; animation.time = this.route.time; animation.apply(1);
         const correction = this.config?.routing?.clips.find(c => c.value === this.route!.value)?.exitAnimation;
         if (this.route.leaving && correction) { const exit = this.animations.get(correction)!; exit.time = this.route.time; exit.apply(this.route.exitMix); }
-        this.applied = { animation: this.route.animation, time: this.route.time, exitMix: this.route.exitMix };
+        this.applied = { animation: this.route.animation, time: this.route.time, exitMix: this.route.exitMix, reaction: this.route.reaction?.animation };
       }
+      if (this.route.reaction) { const reaction = this.animations.get(this.route.reaction.animation)!; reaction.time = this.route.reaction.time; reaction.apply(1); }
     }
     // An accelerated exit deliberately departs from its source face chart.
     // Transient overlays yield to source paint until the destination is safe.
@@ -44,18 +51,18 @@ export class RiveDrawer {
     return active || !!this.router;
   }
   private disposed = false;
-  private hitReadback: RiveHitReadback;
+  private hitReadback: RiveHitReadback | RiveCanvasHit;
   alphaAt(pointer: { x: number; y: number }, suspended = false): number {
     return this.hitReadback.alphaAt(pointer.x, pointer.y, this.canvas.width, this.canvas.height, suspended);
   }
   get needsHitDraw(): boolean { return this.hitReadback.needsDraw; }
   pollHit(): boolean { return this.hitReadback.poll(this.canvas.width, this.canvas.height); }
   suspendHit(): void { this.hitReadback.suspend(); }
-  private constructor(readonly runtime: RiveCanvas, readonly file: File, readonly artboard: Artboard, readonly machine: StateMachineInstance, readonly renderer: WrappedRenderer, readonly canvas: HTMLCanvasElement, readonly gl: WebGL2RenderingContext) { this.hitReadback = new RiveHitReadback(gl); }
-  static async load(canvas: HTMLCanvasElement, bytes: Uint8Array, config: RivePack, initial: Record<string, number | boolean> = {}): Promise<RiveDrawer> {
-    const r = await riveRuntime(), file = await r.load(bytes, undefined, false);
+  private constructor(readonly runtime: RiveCanvas, readonly file: File, readonly artboard: Artboard, readonly machine: StateMachineInstance, readonly renderer: WrappedRenderer, readonly canvas: HTMLCanvasElement, readonly backend: RiveBackend, readonly gl?: WebGL2RenderingContext) { this.hitReadback = gl ? new RiveHitReadback(gl) : new RiveCanvasHit(canvas.getContext('2d')!); }
+  static async load(canvas: HTMLCanvasElement, bytes: Uint8Array, config: RivePack, initial: Record<string, number | boolean> = {}, backend: RiveBackend = 'webgl2'): Promise<RiveDrawer> {
+    const r = await riveRuntime(backend), file = await r.load(bytes, undefined, false);
     if (!file) throw new Error('Rive runtime rejected file');
-    let artboard: Artboard | undefined, machine: StateMachineInstance | undefined, renderer: WrappedRenderer | undefined;
+    let artboard: Artboard | undefined, machine: StateMachineInstance | undefined, renderer: WrappedRenderer | undefined, drawer: RiveDrawer | undefined;
     try {
       artboard = file.artboardByName(config.artboard);
       if (!artboard) throw new Error(`Missing artboard: ${config.artboard}`);
@@ -63,9 +70,10 @@ export class RiveDrawer {
       if (!definition) throw new Error(`Missing state machine: ${config.stateMachine}`);
       if (config.viewModel) throw new Error('This prototype uses state-machine inputs; omit viewModel');
       machine = new r.StateMachineInstance(definition, artboard);
-      renderer = r.makeRenderer(canvas, false, config.backing ? { inkbleed: true } : undefined);
-      const gl = canvas.getContext('webgl2'); if (!gl) throw new Error('WebGL2 unavailable');
-      const drawer = new RiveDrawer(r, file, artboard, machine, renderer, canvas, gl);
+      if (backend === 'canvas' && !canvas.getContext('2d', { willReadFrequently: true })) throw new Error('Canvas2D unavailable');
+      renderer = r.makeRenderer(canvas, false, backend === 'webgl2' && config.backing ? { inkbleed: true } : undefined);
+      const gl = backend === 'webgl2' ? canvas.getContext('webgl2') : undefined; if (backend === 'webgl2' && !gl) throw new Error('WebGL2 unavailable');
+      drawer = new RiveDrawer(r, file, artboard, machine, renderer, canvas, backend, gl ?? undefined);
       for (let i = 0; i < machine.inputCount(); i++) { const input = machine.input(i); if (drawer.inputs.has(input.name)) throw new Error(`Duplicate input ${input.name}`); drawer.inputs.set(input.name, input.type === r.SMIInput.number ? input.asNumber() : input.type === r.SMIInput.bool ? input.asBool() : input.asTrigger()); }
       for (const [name, type] of Object.entries({ ...RIVE_INPUTS, ...(config.motions ? { motion: 'number', motionStart: 'trigger' } : {}), ...(config.procedural ? Object.fromEntries(RIVE_DYNAMIC_INPUTS.map(n => [n, 'number'])) : {}), ...(config.procedural?.eyeOpen ? { eyeOpen: 'number' } : {}) })) {
         const input = drawer.inputs.get(name);
@@ -74,7 +82,7 @@ export class RiveDrawer {
       if (config.procedural && !artboard.rootBone(config.procedural.bodyBone)) throw new Error(`Missing procedural body bone: ${config.procedural.bodyBone}`);
       drawer.config = config;
       if (config.routing) {
-        for (const name of new Set(config.routing.clips.flatMap(clip => [clip.animation,...(clip.exitAnimation ? [clip.exitAnimation] : [])]))) {
+        for (const name of new Set([...config.routing.clips.flatMap(clip => [clip.animation,...(clip.exitAnimation ? [clip.exitAnimation] : [])]),...(config.routing.reactions?.map(r => r.animation) ?? [])])) {
           const animation = artboard.animationByName(name);
           if (!animation) throw new Error(`Missing routed animation: ${name}`);
           if (!drawer.animations.has(name)) drawer.animations.set(name,new r.LinearAnimationInstance(animation,artboard));
@@ -83,7 +91,7 @@ export class RiveDrawer {
       }
       for (const [name,value] of Object.entries(initial)) drawer.set(name,value);
       drawer.draw(0); return drawer;
-    } catch (error) { renderer?.delete(); machine?.delete(); artboard?.delete(); file.unref(); throw error; }
+    } catch (error) { if (drawer) drawer.dispose(); else { renderer?.delete(); machine?.delete(); artboard?.delete(); file.unref(); } throw error; }
   }
   set(name: string, value: number | boolean): boolean {
     if (name === 'motion') this.motionSelected = true;

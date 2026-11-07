@@ -20,6 +20,12 @@ try{
   if(test.error?!error?.includes(test.error):error)throw new Error(`${test.name}: ${error}`);
   results.push({test:test.name,result:'passed',error});
  }
+ if(config.routing){
+  let error=null;const invalid={...config,routing:{...config.routing,reactions:[{clips:[config.routing.clips[0].value],targets:[config.routing.clips[0].value],animation:'MissingReaction',durationMs:800,settleMs:100}]}};
+  try{await app.evaluate((_,t)=>globalThis.petHarness.verifyRive(t.bytes,t.config),{bytes,config:invalid});}catch(e){error=String(e);}
+  if(!error?.includes('Missing routed animation: MissingReaction'))throw new Error(`missing-reaction: ${error}`);
+  results.push({test:'missing-reaction',result:'passed',error});
+ }
  const zipIndex=process.argv.indexOf('--zip');
  if(zipIndex>=0){const installed=await app.evaluate((_,source)=>globalThis.petHarness.importRive(source),resolve(process.argv[zipIndex+1]));if(installed.id===undefined)throw new Error('ZIP installation failed');results.push({test:'atomic-zip-install',result:'passed',error:null});}
  await writeFile(resolve(out,'results.json'),JSON.stringify(results,null,2));console.log(`PASS ${results.length} isolated runtime import checks`);

@@ -4,6 +4,7 @@ import { build } from 'vite';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { createHash } from 'node:crypto';
+import type { RiveBackend } from '../../../src/pet/riveBackend';
 import type { RivePack } from '../../../src/pet/rive';
 import type { preview } from './preview/preview';
 declare global { interface Window { preview: typeof preview } }
@@ -11,6 +12,7 @@ interface Scenario { name: string; duration: number; initial: number; events?: {
 const [,,pack,out,scenariosFile,fpsString='24']=process.argv;
 if(!pack||!out||!scenariosFile) throw new Error('Usage: node art/tools/rive/record.ts PACK OUT SCENARIOS [24|30]');
 const fps=Number(fpsString);if(![24,30].includes(fps))throw new Error('Recording fps must be 24 or 30');
+const backend=process.env.RIVE_RECORD_BACKEND ?? 'webgl2';if(backend!=='webgl2'&&backend!=='canvas')throw new Error('Invalid RIVE_RECORD_BACKEND');
 const output=resolve(out);await mkdir(output,{recursive:true});
 const manifest=JSON.parse(await readFile(resolve(pack,'pet.json'),'utf8')) as {remoteCodex:{rive:RivePack}};
 const config=manifest.remoteCodex.rive;
@@ -28,7 +30,7 @@ try {
  for(const s of scenarios){
   if(!/^[a-zA-Z0-9_-]+$/.test(s.name)||!Number.isFinite(s.duration)||s.duration<=0||s.duration>120)throw new Error('Invalid recording scenario');
   const directory=resolve(output,'frames',s.name);await mkdir(directory,{recursive:true});
-  await page.evaluate(async({url,config,initial})=>{const response=await fetch(url);if(!response.ok)throw new Error('Cannot read preview binary');await window.preview.load(new Uint8Array(await response.arrayBuffer()),config,{motion:initial});window.preview.resize(648,702);},{url:binary.url,config,initial:s.initial});
+  await page.evaluate(async({url,config,initial,backend})=>{const response=await fetch(url);if(!response.ok)throw new Error('Cannot read preview binary');await window.preview.load(new Uint8Array(await response.arrayBuffer()),config,{motion:initial},backend);window.preview.resize(648,702);},{url:binary.url,config,initial:s.initial,backend:backend as RiveBackend});
   await page.waitForFunction(()=>window.preview.ready(),{},{timeout:15000});
   const count=Math.round(s.duration*fps),samples=[];
   for(let i=0;i<count;i++){
@@ -38,7 +40,7 @@ try {
    samples.push({time:i/fps,transforms:frame.transforms,route:frame.route,inputs:frame.inputs,values});
    if(i%120===119)console.log(`${s.name}: ${i+1}/${count}`);
   }
-  await writeFile(resolve(output,`${s.name}.json`),JSON.stringify({name:s.name,fps,riveSha256,config,scenario:s,samples}));
+  await writeFile(resolve(output,`${s.name}.json`),JSON.stringify({name:s.name,fps,backend,riveSha256,config,scenario:s,samples}));
   console.log(`PASS ${s.name}: ${count} frames at ${fps}fps`);
  }
  await page.evaluate(()=>window.preview.dispose());
