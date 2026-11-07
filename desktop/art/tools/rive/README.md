@@ -120,6 +120,11 @@ Simulation advances at 60 Hz but only requested frames are drawn.
 Initial runtime loading has a 60-second deadline, including the first software-GL
 draw. Image decode waiting then probes visible alpha at time zero and fails after
 15 seconds; it does not consume authored motion frames.
+The probe reads framebuffer alpha directly and reports lost WebGL contexts.
+On the current software-GL host, some small embedded-image fixtures lose context
+during this time-zero probe although the normal pet ticker renders the same
+binary. That startup failure remains unresolved; the verifier does not advance
+the animation to hide it.
 The preview's Electron profile stays under its output directory.
 Large binaries cross the Node/renderer boundary as base64, avoiding millions of
 serialized integer entries.

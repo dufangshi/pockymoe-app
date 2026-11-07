@@ -42,9 +42,11 @@ export const preview = {
     // Embedded images may finish decoding after load(). Probe at t=0 so waiting
     // for them cannot consume the first authored motion frames.
     drawer.draw(0);
-    const canvas = document.createElement('canvas'); canvas.width=drawer.canvas.width; canvas.height=drawer.canvas.height;
-    const context=canvas.getContext('2d')!;context.drawImage(drawer.canvas,0,0);
-    return context.getImageData(0,0,canvas.width,canvas.height).data.some((v,i)=>i%4===3&&v>24);
+    const { width, height } = drawer.canvas, gl = drawer.canvas.getContext('webgl2')!;
+    if (gl.isContextLost()) throw new Error('Rive preview WebGL2 context lost');
+    const pixels = new Uint8Array(width * height * 4);
+    gl.readPixels(0,0,width,height,gl.RGBA,gl.UNSIGNED_BYTE,pixels);
+    return pixels.some((v,i)=>i%4===3&&v>24);
   },
   async sheet(title: string, frames: { label: string; data: string }[]) {
     const canvas = document.createElement('canvas'), width = drawer.canvas.width, height = drawer.canvas.height; canvas.width = width * frames.length; canvas.height = height + 48;
