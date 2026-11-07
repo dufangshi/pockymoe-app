@@ -16,6 +16,13 @@ concurrency:
   cancel-in-progress: true
 jobs:
   simulator:
+    strategy:
+      fail-fast: false
+      matrix:
+        layout: [dock, classic]
+        keyboard: [en, zh]
+        shell: [original, ignore]
+    name: ${{ matrix.layout }} ${{ matrix.keyboard }} ${{ matrix.shell }}
     runs-on: macos-15
     timeout-minutes: 40
     steps:
@@ -48,12 +55,20 @@ jobs:
           pnpm --filter @pockymoe/supervisor-web build
       - name: Serve it and boot a simulator with the software keyboard
         run: |
-          python3 scripts/ios-keyboard-mock.py control-plane/apps/supervisor-web/dist 8765 &
+          python3 scripts/ios-keyboard-mock.py control-plane/apps/supervisor-web/dist 8765 ${{ matrix.layout }} &
           brew install xcodegen
           defaults write com.apple.iphonesimulator ConnectHardwareKeyboard -bool false
           SIMULATOR_ID=$(xcrun simctl list devices available -j | python3 -c 'import json,sys; print(next(d["udid"] for ds in json.load(sys.stdin)["devices"].values() for d in ds if d["name"].startswith("iPhone")))')
           xcrun simctl boot "$SIMULATOR_ID"
           xcrun simctl bootstatus "$SIMULATOR_ID" -b
+          if [ "${{ matrix.keyboard }}" = zh ]; then
+            xcrun simctl spawn "$SIMULATOR_ID" defaults write .GlobalPreferences AppleLanguages -array zh-Hans en
+            xcrun simctl spawn "$SIMULATOR_ID" defaults write .GlobalPreferences AppleLocale zh_CN
+            xcrun simctl spawn "$SIMULATOR_ID" defaults write .GlobalPreferences AppleKeyboards -array "zh_Hans-Pinyin@sw=Pinyin10-Simplified;hw=Automatic"
+            xcrun simctl shutdown "$SIMULATOR_ID"
+            xcrun simctl boot "$SIMULATOR_ID"
+            xcrun simctl bootstatus "$SIMULATOR_ID" -b
+          fi
           echo "IOS_DEST=platform=iOS Simulator,id=$SIMULATOR_ID" >> "$GITHUB_ENV"
           curl -sf -o /dev/null http://127.0.0.1:8765/index.html
       - name: Tap the composer and measure the keyboard
@@ -61,10 +76,10 @@ jobs:
           cd ios
           xcodegen generate
           set -o pipefail
-          TEST_RUNNER_E2E_RELAY_URL=http://127.0.0.1:8765 xcodebuild \
+          TEST_RUNNER_E2E_IGNORE_KEYBOARD=${{ matrix.shell == 'ignore' && '1' || '0' }} TEST_RUNNER_E2E_RELAY_URL=http://127.0.0.1:8765 xcodebuild \
             -project RemoteCodex.xcodeproj -scheme RemoteCodex -destination "$IOS_DEST" \
             -only-testing:RemoteCodexUITests/RemoteCodexUITests/testComposerStaysAboveKeyboard \
-            -resultBundlePath "$GITHUB_WORKSPACE/keyboard.xcresult" CODE_SIGNING_ALLOWED=NO test 2>&1 | tee ../xcodebuild.log | grep -E "KEYBOARD-CHECK|error:|Test Case|passed|failed" || true
+            -resultBundlePath "$GITHUB_WORKSPACE/keyboard.xcresult" CODE_SIGNING_ALLOWED=NO test 2>&1 | tee ../xcodebuild.log | grep -E "KEYBOARD-|error:|Test Case|passed|failed" || true
           grep -q "Test Suite 'Selected tests' passed" ../xcodebuild.log
       - name: Export screenshots
         if: always()
@@ -75,7 +90,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: ios-keyboard-${{ github.run_id }}
+          name: ios-keyboard-${{ matrix.layout }}-${{ matrix.keyboard }}-${{ matrix.shell }}
           path: |
             shots
             xcodebuild.log

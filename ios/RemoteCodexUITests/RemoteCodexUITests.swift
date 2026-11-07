@@ -69,16 +69,16 @@ final class RemoteCodexUITests: XCTestCase {
         continueAfterFailure = true
         let relay = try XCTUnwrap(ProcessInfo.processInfo.environment["E2E_RELAY_URL"], "Missing E2E_RELAY_URL")
         let app = XCUIApplication()
-        app.launchArguments = ["--uitesting"]
+        app.launchArguments = ["--uitesting"] + (ProcessInfo.processInfo.environment["E2E_IGNORE_KEYBOARD"] == "1" ? ["--ignore-keyboard-safe-area"] : [])
         app.launchEnvironment = ["E2E_RELAY_URL": relay, "E2E_TOKEN": "keyboard-check"]
         app.launch()
         let system = XCUIApplication(bundleIdentifier: "com.apple.springboard")
         let allow = system.alerts.buttons["Allow"].firstMatch
         if allow.waitForExistence(timeout: 5) { allow.tap() }
-        let prompt = app.textViews["Prompt"]
+        let prompt = app.textViews.matching(NSPredicate(format: "label IN %@", ["Prompt", "提示词"])).firstMatch
         XCTAssertTrue(prompt.waitForExistence(timeout: 40), app.debugDescription)
         // A first-visit card can sit over the page; it is not part of this check.
-        let later = app.buttons["Later"].firstMatch
+        let later = app.buttons.matching(NSPredicate(format: "label IN %@", ["Later", "稍后"])).firstMatch
         if later.waitForExistence(timeout: 3) { later.tap() }
         func capture(_ name: String) {
             let shot = XCTAttachment(screenshot: app.screenshot())
@@ -97,6 +97,11 @@ final class RemoteCodexUITests: XCTestCase {
         capture("keyboard just opened")
         Thread.sleep(forTimeInterval: 2.5)
         capture("three seconds later")
+        let typedKeyboard = keyboard.exists
+        if typedKeyboard { app.typeText("ni") }
+        Thread.sleep(forTimeInterval: 1.5)
+        capture("after typing")
+        print("KEYBOARD-TYPED before=\(typedKeyboard) after=\(keyboard.exists)")
         let stays = keyboard.exists && keyboard.frame.height > 0
         let gap = keyboard.frame.minY - prompt.frame.maxY
         let probe = app.images.matching(NSPredicate(format: "label BEGINSWITH 'KBPROBE'")).firstMatch
