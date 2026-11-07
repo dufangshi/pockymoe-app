@@ -184,3 +184,11 @@ Pass `--manifest /path/pet.json` to `preview.ts` to exercise optional motion,
 procedural and `eyeOpen` channels with the same configuration as the pet. Without
 it the command verifies the base input contract and explicit board/machine
 selectors. `record.ts` always reads its pack manifest.
+
+Meshes can supply `binds: {boneName: {x, y, rotation?}}` in world coordinates.
+These are drawing-specific tendon bind transforms for a shared skeleton. Omitted
+entries use the skeleton rest bind. Mesh vertex positions must describe that
+same drawing's bind geometry; stretch is measured against these vertices, not
+against a different drawing's silhouette. Nonfinite transforms and unlisted
+bones are rejected. Use this for discrete source drawing swaps, never as an
+animation track or as permission to blend incompatible charts between clips.

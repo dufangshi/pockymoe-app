@@ -46,7 +46,7 @@ export interface Part {
   parent?: string; scaleX?: number; scaleY?: number; opacity?: number;
   /** Shared texture dimensions; mesh UVs address this atlas, not the part rectangle. */
   assetSize?: [number, number];
-  mesh?: { vertices: [number, number, number, number][]; triangles: number[]; bones?: string[]; influences?: { bone: string; weight: number }[][] };
+  mesh?: { vertices: [number, number, number, number][]; triangles: number[]; bones?: string[]; binds?: Record<string, { x: number; y: number; rotation?: number }>; influences?: { bone: string; weight: number }[][] };
 }
 export interface Track { target: string; property: string; keys: { frame: number; value: number | string; cubic?: [number, number, number, number]; hold?: boolean }[] }
 export interface Rig {
@@ -122,7 +122,8 @@ export function buildRig(rig: Rig, base: string): Buffer {
     const mesh = part.mesh;
     if (mesh.vertices.length < 3 || mesh.vertices.length > 65535 || mesh.vertices.some(v => v.length !== 4 || v.some(n => !Number.isFinite(n))) || mesh.triangles.length < 3 || mesh.triangles.length % 3 || mesh.triangles.some(i => !Number.isInteger(i) || i < 0 || i >= mesh.vertices.length)) throw new Error(`Invalid triangles ${part.name}`);
     const mid = add('mesh', `${part.name}.mesh`, { parentId: image, triangleIndexBytes: Buffer.concat(mesh.triangles.map(varuint)) });
-    const bs = (mesh.bones ?? []).map(name => { const b = binds.get(name); if (!b) throw new Error(`Unknown bone ${name}`); return b; });
+    if (mesh.binds && Object.entries(mesh.binds).some(([name,b]) => !mesh.bones?.includes(name) || !b || ![b.x,b.y,b.rotation ?? 0].every(Number.isFinite))) throw new Error(`Invalid drawing bind ${part.name}`);
+    const bs = (mesh.bones ?? []).map(name => { const b = binds.get(name); if (!b) throw new Error(`Unknown bone ${name}`); const override = mesh.binds?.[name]; return override ? { ...b, x: override.x, y: override.y, angle: override.rotation ?? 0 } : b; });
     if (bs.length > 255 || mesh.influences && (mesh.influences.length !== mesh.vertices.length || !bs.length)) throw new Error('Invalid vertex influence count');
     mesh.vertices.forEach(([x, y, u, v], i) => {
       const vid = add('mesh_vertex', `${part.name}.v${i}`, { parentId: mid, x, y, u, v });

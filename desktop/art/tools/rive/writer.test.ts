@@ -53,6 +53,14 @@ describe('Rive authoring', () => {
     mesh.influences[0][0]={bone:'missing',weight:1};
     expect(()=>buildRig(rig,resolve('art/rive-sample'))).toThrow('Unknown reference');
   });
+  it('validates drawing-specific bind coordinates for a shared skeleton', () => {
+    const rig=JSON.parse(readFileSync('art/rive-sample/rig.json','utf8')) as Rig;
+    const mesh=rig.images[0].mesh!;
+    mesh.binds={[mesh.bones![0]]:{x:100,y:150}};
+    expect(buildRig(rig,resolve('art/rive-sample')).length).toBeGreaterThan(8);
+    mesh.binds[mesh.bones![0]].x=NaN;
+    expect(()=>buildRig(rig,resolve('art/rive-sample'))).toThrow('drawing bind');
+  });
   it('writes discrete Solo drawing choices and rejects non-child references', () => {
     const rig=JSON.parse(readFileSync('art/rive-sample/rig.json','utf8')) as Rig;
     rig.groups=[{name:'drawing',solo:true}];rig.images[0].parent='drawing';
