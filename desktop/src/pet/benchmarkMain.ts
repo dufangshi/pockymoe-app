@@ -371,7 +371,8 @@ export async function runPetBenchmark(argv: string[]): Promise<void> {
     console.log(result.unit, `(${result.logicalCPUs} logical cores, DPR ${result.dpr})`);
     console.table(table);
     console.log(
-      `Rive minus quad / WebM: ${result.overheadRatioToWebM.toFixed(3)}; 60-second software-host gate: ${result.softwareHostGatePass}`,
+      `Rive minus quad / WebM: ${result.overheadRatioToWebM.toFixed(3)}; ` +
+        `60-second software-host gate: ${result.softwareHostGatePass}`,
     );
   } finally {
     app.quit();

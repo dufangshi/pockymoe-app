@@ -213,7 +213,16 @@ function paintPeek(): void {
 }
 function renderSprite(): void {
   if (!state) return;
-  if (!root.querySelector('#character')) root.innerHTML = `<div id="character" role="button" tabindex="0"><div id="sprite-old"></div><div id="sprite"></div><canvas id="clip"></canvas><canvas id="rive"></canvas><canvas id="talk" aria-hidden="true"></canvas><svg class="sleep-motes" viewBox="0 0 36 48" aria-hidden="true"><path d="M7 34h6l-6 6h6"/><path d="M17 24h7l-7 7h7"/><path d="M23 13h5l-5 5h5"/></svg></div>`;
+  if (!root.querySelector('#character'))
+    root.innerHTML = [
+      '<div id="character" role="button" tabindex="0">',
+      '<div id="sprite-old"></div><div id="sprite"></div>',
+      '<canvas id="clip"></canvas><canvas id="rive"></canvas>',
+      '<canvas id="talk" aria-hidden="true"></canvas>',
+      '<svg class="sleep-motes" viewBox="0 0 36 48" aria-hidden="true">',
+      '<path d="M7 34h6l-6 6h6"/><path d="M17 24h7l-7 7h7"/><path d="M23 13h5l-5 5h5"/>',
+      '</svg></div>',
+    ].join('');
   const character = root.querySelector<HTMLElement>('#character')!;
   character.setAttribute('aria-label', t('桌宠，点击查看任务，拖动以移动'));
   character.style.width = `${state.pet.width}px`; character.style.height = `${state.pet.height}px`;
@@ -261,9 +270,17 @@ function renderSprite(): void {
 }
 
 let riveClock: RiveMotionClock | null = null;
-let riveDynamics: RiveDynamics | null = null, riveGate = new RiveFrameGate();
-let riveCadence = new RiveSourceCadence(), riveGaze = new RiveGazePulse();
-let riveDrawer: RiveDrawer | null = null, riveToken = 0, riveKey = '', riveActive = true, riveAt = 0, riveEpoch = -1, riveDragging = false;
+let riveDynamics: RiveDynamics | null = null,
+  riveGate = new RiveFrameGate();
+let riveCadence = new RiveSourceCadence(),
+  riveGaze = new RiveGazePulse();
+let riveDrawer: RiveDrawer | null = null,
+  riveToken = 0,
+  riveKey = '',
+  riveActive = true,
+  riveAt = 0,
+  riveEpoch = -1,
+  riveDragging = false;
 function syncRive(): void {
   const config = state?.rive;
   if (!config || state?.surface !== 'sprite') return;
@@ -647,7 +664,7 @@ function opaqueAt(point: { clientX: number; clientY: number }): boolean {
   if (feather === 0) return false;
   const threshold = 24 / feather;
   if (riveDrawer) {
-    const pointer = { x: x / 192 * riveDrawer.canvas.width, y: y / 208 * riveDrawer.canvas.height };
+    const pointer = { x: (x / 192) * riveDrawer.canvas.width, y: (y / 208) * riveDrawer.canvas.height };
     return riveDrawer.alphaAt(pointer, !!state.edge && state.dockAmount > 0) > threshold;
   }
   const talk = root.querySelector<HTMLCanvasElement>('#talk');
@@ -713,8 +730,21 @@ bridge.onState(next => {
   if (next.surface === 'sprite') {
     // Another pack's sheets share nothing with this one's.
     const packKey = `${next.packName}#${next.rive?.epoch ?? next.clips?.epoch ?? 0}`;
-    if (packKey !== clipPack) { riveToken++; riveKey = ''; riveDrawer?.dispose(); riveDrawer = null; root.querySelector('#character')?.classList.remove('rive'); videoPlayer?.dispose(); videoPlayer = null; clipContext = null; peekSource = null; talkBaseKey = ''; talkBitmap?.close(); talkLoading = ''; talkBitmap = null; talkFrame = -1; clipPack = packKey; for (const entry of clipCache.values()) void entry.then(bitmap => bitmap?.close()); clipCache.clear(); dockClipHeld = false; clipSequence = null; clipPlayer = null; clipToken++; lastEpoch = -1; }
-    if (next.rive && next.cursor) lastPointer = next.cursor.x >= 0 && next.cursor.y >= 0 && next.cursor.x < next.pet.width && next.cursor.y < next.pet.height ? { clientX: next.cursor.x, clientY: next.cursor.y } : null;
+    if (packKey !== clipPack) {
+      riveToken++;
+      riveKey = '';
+      riveDrawer?.dispose();
+      riveDrawer = null;
+      root.querySelector('#character')?.classList.remove('rive');
+    }
+    if (packKey !== clipPack) { videoPlayer?.dispose(); videoPlayer = null; clipContext = null; peekSource = null; talkBaseKey = ''; talkBitmap?.close(); talkLoading = ''; talkBitmap = null; talkFrame = -1; clipPack = packKey; for (const entry of clipCache.values()) void entry.then(bitmap => bitmap?.close()); clipCache.clear(); dockClipHeld = false; clipSequence = null; clipPlayer = null; clipToken++; lastEpoch = -1; }
+    if (next.rive && next.cursor) {
+      lastPointer =
+        next.cursor.x >= 0 && next.cursor.y >= 0 &&
+        next.cursor.x < next.pet.width && next.cursor.y < next.pet.height
+          ? { clientX: next.cursor.x, clientY: next.cursor.y }
+          : null;
+    }
     renderSprite(); updateHit(); return;
   }
   if (old?.detailOpen && !next.detailOpen) root.querySelector<HTMLButtonElement>('.error-mark[aria-expanded="true"]')?.click();
@@ -724,7 +754,13 @@ bridge.onState(next => {
   if (changedMode && next.mode === 'menu') root.querySelector<HTMLElement>('[role^="menuitem"]')?.focus();
 });
 function animate(now: number): void {
-  if (state?.surface === 'sprite') { if (riveDrawer) stepRive(now); else { stepClip(now); paintTalk(now); } }
+  if (state?.surface === 'sprite') {
+    if (riveDrawer) stepRive(now);
+    else {
+      stepClip(now);
+      paintTalk(now);
+    }
+  }
   if (state?.surface === 'sprite' && !riveDrawer && !clipPlayer && !videoPlayer?.playing) {
     const elapsedMs = now - animationStart, idleTime = elapsedMs % 46000;
     const cycle = animationState === 'idle' ? idleTime >= 31000 ? idleTime - 31000 : idleTime >= 14000 ? idleTime - 14000 : idleTime : elapsedMs;

@@ -17,6 +17,7 @@ export function summarizeNativeTrace(events) {
       ? values[Math.min(values.length - 1, Math.floor(values.length * 0.95))]
       : null,
     scope:
-      'All GPU service processes in the isolated pet harness, including native presentation transfers; app pointer probes counted separately.',
+      'All GPU service processes in the isolated pet harness, including native presentation transfers; ' +
+      'app pointer probes counted separately.',
   };
 }

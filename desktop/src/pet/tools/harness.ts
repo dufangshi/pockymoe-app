@@ -47,8 +47,15 @@ void app.whenReady().then(() => {
   const setIgnored = window.setIgnoreMouseEvents.bind(window);
   window.setIgnoreMouseEvents = (value, options) => { ignored = value; setIgnored(value, options); };
   Object.assign(globalThis, { petHarness: {
-    async importRive(source: string) { const pack = await importPetPack(source, join(app.getPath('userData'), 'verified-pets'), undefined, [], verifyRivePack); return pack.manifest; },
-    verifyRive(bytes: number[] | string, config: import('../rive').RivePack) { return verifyRivePack(typeof bytes === 'string' ? Buffer.from(bytes, 'base64') : Buffer.from(bytes), config); },
+    async importRive(source: string) {
+      const destination = join(app.getPath('userData'), 'verified-pets');
+      const pack = await importPetPack(source, destination, undefined, [], verifyRivePack);
+      return pack.manifest;
+    },
+    verifyRive(bytes: number[] | string, config: import('../rive').RivePack) {
+      const buffer = typeof bytes === 'string' ? Buffer.from(bytes, 'base64') : Buffer.from(bytes);
+      return verifyRivePack(buffer, config);
+    },
     sync(value: ActivitySnapshot) { snapshot = value; for (const listener of snapshotListeners) listener(value); },
     event(value: ActivityEvent) { for (const listener of eventListeners) listener(value); },
     acknowledge(id: string) { hub.acknowledge(id, 'notification'); },
