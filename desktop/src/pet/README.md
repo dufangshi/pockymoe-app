@@ -320,11 +320,9 @@ sandbox. Script authoring is outside the writer's subset.
 
 `@rive-app/webgl2-advanced` is pinned to **2.49.4**, with bundled local primary and
 fallback WASM. The drawer owns advancement, clearing, transparent WebGL2 rendering
-and sparse one-pixel alpha probes after drawing. A moved cursor inside the
-canvas queues a probe at most every 100 ms. WebGL2 pixel-pack buffers and fences
-return it on a later frame without waiting for GPU completion; a new or resized
-pixel stays click-through until its result arrives. A remote or tucked cursor
-queues no probes. Canvas backing size follows full devicePixelRatio. The existing docked geometry/masks still apply. Tucked
+and synchronous CPU silhouette lookup. Grabbing never queues GPU alpha probes;
+older packs without baked masks use a conservative artboard rectangle. Canvas
+backing size follows full devicePixelRatio. Docked geometry still applies. Tucked
 pets stop time advancement; settled machines stop drawing until inputs or size
 change. Runtime failure keeps the atlas visible.
 
@@ -378,8 +376,8 @@ Procedural rigs evaluate at the configured cadence and draw only when inputs,
 size or `artboard.didChange()` require it. Breathing is quantized to 0.1, weight
 shift to 1/12, and springs to 1/1024; author small micro-motion ranges so these
 steps remain below a visible pixel at the intended size/DPR. Speech still uses
-the existing 60/120 ms envelope. The benchmark records actual WebGL readbacks
-per second as hit-test demand; draw counts come from the separate GL profile.
+the existing 60/120 ms envelope. The benchmark distinguishes app alpha probes (now zero) from Chromium
+presentation readbacks; draw counts come from the separate GL profile.
 
 A procedural pack may additionally set `eyeOpen:true` and provide a number
 input named `eyeOpen`. The pet sets this to 1 for a cursor gaze and 0 otherwise.
@@ -404,7 +402,7 @@ procedural layers. Such files must not also animate the body from their machine.
 
 `rive.backing: {width, height, scale}` caps the backing store to native source
 resolution × scale (1–1.25), preserving aspect ratio. CSS controls visual size;
-alpha hit coordinates use the actual backing store. Opted-in bitmap drawing packs
+hit masks use normalized artboard coordinates. Opted-in bitmap drawing packs
 use the pinned runtime's inkbleed renderer option to avoid native MSAA; ordinary
 packs retain the existing renderer and full DPR. The native-size cap has no effect
 when the pet's CSS size × DPR is already below it. The prototype binary limit is
@@ -491,3 +489,31 @@ Record reactions at their actual display size with
 `node art/tools/rive/record.ts PACK OUTPUT SCENARIOS.json 24 189x205 2`.
 The final arguments specify CSS size and DPR (1 or 2); recordings include those
 values in their metadata and preserve the corresponding backing-store pixels.
+
+Rive grabbing uses an optional baked `rive.hitMask` instead of GPU alpha probes.
+The mask has `width` and `height` (4–64), `clips` mapping motion numbers to base64
+bit planes, and optional `extra` for reaction extensions. Bits are row-major,
+least-significant bit first. Bake a slightly dilated union of every displayed
+pose per clip; transitions use the complete union. Every routed clip must have a
+mask. Transparent cells pass clicks through. An older Rive pack without a mask
+uses its whole artboard rectangle conservatively, including transparent corners.
+
+Windows/Linux install the mask as a native window shape. macOS uses forwarded
+pointer moves and the synchronous CPU lookup; drawn frames also update the hit
+answer when a pose moves under a stationary cursor. Neither path reads the GPU.
+The capsule background drags both windows after 4 px of movement; buttons and
+clicks without movement keep their existing actions. macOS pet and glass windows
+accept the first mouse press. Native macOS delivery still needs testing on a Mac.
+
+Focused native X11 grab checks accept either an installed pack folder or its ZIP:
+
+```sh
+pnpm exec electron-vite build --config src/pet/tools/electron.config.ts
+PET_GRAB_SWIFTSHADER=1 xvfb-run -a node src/pet/tools/grab.mjs PACK.zip OUT
+```
+
+The harness records 250 random body grabs across five motion categories, 20
+capsule grabs, desktop click delivery, capsule/button regressions, and app alpha
+readback counts. Separate forwarded-input policy checks cover one move followed
+by a press and motion under a stationary cursor using CDP on Linux; they do not
+claim macOS OS delivery. Atlas and video hit testing retain their raster path.

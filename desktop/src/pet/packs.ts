@@ -1,4 +1,5 @@
 import type { RivePack } from './rive';
+import { RiveHitMask } from './riveHitMask';
 import { inspectWebM } from './webm';
 import type { PeekArt } from './geometry';
 import type { FaceBox } from './geometry';
@@ -160,6 +161,14 @@ export function parseManifest(data: Buffer): PetManifest {
       )
         fail('invalid Rive motions');
     }
+    // Newer mask packs may omit the old cadence fields. Keep the existing
+    // player's defaults; this compatibility does not change its motion clock.
+    if (r.procedural && typeof r.procedural === 'object') {
+      if (r.procedural.idleFps === undefined) r.procedural.idleFps = 24;
+      if (r.procedural.activeFps === undefined) r.procedural.activeFps = 60;
+    }
+    if (r.routing && typeof r.routing === 'object' && r.routing.maxExitMs === undefined)
+      r.routing.maxExitMs = 350;
     if (
       r.procedural !== undefined &&
       (!r.procedural ||
@@ -315,6 +324,15 @@ export function parseManifest(data: Buffer): PetManifest {
         if (families.some((n) => !seen.has(n))) fail('Rive routing has disconnected boundaries');
       }
     }
+    if (r.hitMask !== undefined) {
+      try {
+        new RiveHitMask(r.hitMask);
+        if (r.routing?.clips.some((c) => !(c.value in r.hitMask!.clips)))
+          fail('Rive hit mask misses a motion');
+      } catch {
+        fail('invalid Rive hit mask');
+      }
+    }
     remoteCodex.rive = {
       path: 'pet.riv',
       artboard: r.artboard,
@@ -323,6 +341,7 @@ export function parseManifest(data: Buffer): PetManifest {
       ...(r.procedural ? { procedural: r.procedural } : {}),
       ...(r.routing ? { routing: r.routing } : {}),
       ...(r.backing ? { backing: r.backing } : {}),
+      ...(r.hitMask ? { hitMask: r.hitMask } : {}),
     };
   }
   const extension = extensions?.sleeping as SleepingStrip | undefined;

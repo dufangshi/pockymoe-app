@@ -2,7 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 import type { PetAction, PetBridge, PetCue, PetViewState } from './bridge';
 const pet: PetBridge = {
   ready: () => ipcRenderer.send('rcDesktop:pet:ready'),
-  hitTest: (interactive) => ipcRenderer.send('rcDesktop:pet:hitTest', interactive === true),
+  hitTest: (interactive, motion) => ipcRenderer.send('rcDesktop:pet:hitTest', interactive === true, motion),
   action: (action: PetAction) => ipcRenderer.invoke('rcDesktop:pet:action', action),
   onCue: (listener) => {
     const wrapped = (_event: Electron.IpcRendererEvent, cue: PetCue): void => listener(cue);

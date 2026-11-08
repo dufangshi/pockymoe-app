@@ -33,7 +33,7 @@ let draft = '', sendState: 'idle' | 'sending' | 'sent' | 'error' = 'idle';
 let selected: string | null = null, selectedRequest: string | null = null;
 const collapsedRequests = new Set<string>();
 const failures = new Map<string, { result: HostCommandResult; key?: string }>(), pending = new Set<string>();
-let drag: { id: number; x: number; y: number; moved: boolean } | null = null;
+let drag: { id: number; x: number; y: number; moved: boolean; capsule?: boolean; started?: boolean } | null = null;
 let scrollDrag: { id: number; grab: number } | null = null;
 let animationState: SpriteState = 'idle', animationStart = performance.now(), frame = 0;
 let spriteImage: HTMLImageElement | null = null, alpha: Uint8ClampedArray | null = null, lastImage = '', hit = false;
@@ -664,8 +664,7 @@ function opaqueAt(point: { clientX: number; clientY: number }): boolean {
   if (feather === 0) return false;
   const threshold = 24 / feather;
   if (riveDrawer) {
-    const pointer = { x: (x / 192) * riveDrawer.canvas.width, y: (y / 208) * riveDrawer.canvas.height };
-    return riveDrawer.alphaAt(pointer, !!state.edge && state.dockAmount > 0) > threshold;
+    return riveDrawer.contains(x / 192, y / 208);
   }
   const talk = root.querySelector<HTMLCanvasElement>('#talk');
   if (character.classList.contains('talking') && talk) return talk.getContext('2d')!.getImageData(Math.floor(x / 192 * talk.width), Math.floor(y / 208 * talk.height), 1, 1).data[3]! > threshold;
@@ -674,27 +673,93 @@ function opaqueAt(point: { clientX: number; clientY: number }): boolean {
   const row = state.dockAmount === 1 || animationState === 'sleeping' && state.sleeping ? 0 : ANIMATIONS[animationState].row;
   return alpha[((row * 208 + y) * (spriteImage?.width ?? 1536) + (state.dockAmount === 1 ? 0 : frame) * 192 + x) * 4 + 3] > threshold;
 }
-function updateHit(): void { const next = !!drag || !!lastPointer && opaqueAt(lastPointer); if (next !== hit) { hit = next; bridge.hitTest(hit); } }
-window.addEventListener('pointermove', event => {
-  if (scrollDrag) { scrollToPointer(event.clientY); return; }
-  if (state?.surface !== 'sprite') return;
-  lastPointer = { clientX: event.clientX, clientY: event.clientY }; updateHit();
-  if (drag) { if (Math.hypot(event.screenX - drag.x, event.screenY - drag.y) >= 4) drag.moved = true; if (drag.moved) void bridge.action({ type: 'dragMove', x: event.screenX, y: event.screenY }); }
+let hitMotion: number | null | undefined;
+function updateHit(force = false): void {
+  const next = !!drag || (!!lastPointer && opaqueAt(lastPointer));
+  const nextMotion = riveDrawer?.hitMotion;
+  if (force || next !== hit || nextMotion !== hitMotion) {
+    hit = next;
+    hitMotion = nextMotion;
+    bridge.hitTest(hit, hitMotion);
+  }
+}
+window.addEventListener('pointermove', (event) => {
+  if (scrollDrag) {
+    scrollToPointer(event.clientY);
+    return;
+  }
+  if (state?.surface !== 'sprite' && !drag) return;
+  lastPointer = { clientX: event.clientX, clientY: event.clientY };
+  updateHit();
+  if (drag) {
+    if (Math.hypot(event.screenX - drag.x, event.screenY - drag.y) >= 4) drag.moved = true;
+    if (drag.moved) {
+      if (!drag.started) {
+        drag.started = true;
+        void bridge.action({ type: 'dragStart', x: drag.x, y: drag.y });
+      }
+      void bridge.action({ type: 'dragMove', x: event.screenX, y: event.screenY });
+    }
+  }
 });
-root.addEventListener('pointerdown', event => {
+root.addEventListener('pointerdown', (event) => {
   const track = (event.target as HTMLElement).closest<HTMLElement>('.scroll-track');
-  if (track) { const thumb = track.querySelector<HTMLElement>('.scroll-thumb')!; scrollDrag = { id: event.pointerId, grab: (event.target as HTMLElement).closest('.scroll-thumb') ? event.clientY - thumb.getBoundingClientRect().top : thumb.offsetHeight / 2 }; root.setPointerCapture(event.pointerId); event.preventDefault(); scrollToPointer(event.clientY); return; }
-  if (state?.surface !== 'sprite' || !opaqueAt(event)) return;
-  event.preventDefault(); drag = { id: event.pointerId, x: event.screenX, y: event.screenY, moved: false }; root.setPointerCapture(event.pointerId); root.querySelector('#character')?.classList.add('dragging'); void bridge.action({ type: 'dragStart', x: event.screenX, y: event.screenY });
+  if (track) {
+    const thumb = track.querySelector<HTMLElement>('.scroll-thumb')!;
+    scrollDrag = {
+      id: event.pointerId,
+      grab: (event.target as HTMLElement).closest('.scroll-thumb')
+        ? event.clientY - thumb.getBoundingClientRect().top
+        : thumb.offsetHeight / 2,
+    };
+    root.setPointerCapture(event.pointerId);
+    event.preventDefault();
+    scrollToPointer(event.clientY);
+    return;
+  }
+  const capsule =
+    state?.surface !== 'sprite' &&
+    state?.mode === 'controls' &&
+    !!(event.target as HTMLElement).closest('.controls') &&
+    !(event.target as HTMLElement).closest('button, a, input, textarea, [role="button"]');
+  if (!capsule && (state?.surface !== 'sprite' || !opaqueAt(event))) return;
+  if (event.button !== 0) return;
+  if (capsule) {
+    event.preventDefault();
+    drag = {
+      id: event.pointerId,
+      x: event.screenX,
+      y: event.screenY,
+      moved: false,
+      capsule: true,
+      started: false,
+    };
+    root.setPointerCapture(event.pointerId);
+    return;
+  }
+  event.preventDefault();
+  drag = { id: event.pointerId, x: event.screenX, y: event.screenY, moved: false, started: true };
+  root.setPointerCapture(event.pointerId);
+  root.querySelector('#character')?.classList.add('dragging');
+  void bridge.action({ type: 'dragStart', x: event.screenX, y: event.screenY });
 });
 function release(event: PointerEvent, cancelled = false): void {
   if (scrollDrag) { if (root.hasPointerCapture(scrollDrag.id)) root.releasePointerCapture(scrollDrag.id); scrollDrag = null; return; }
   if (!drag) return;
-  const clicked = !drag.moved && !cancelled; if (root.hasPointerCapture(drag.id)) root.releasePointerCapture(drag.id); drag = null; root.querySelector('#character')?.classList.remove('dragging');
-  void bridge.action({ type: 'dragEnd', x: event.screenX, y: event.screenY }); if (clicked) void bridge.action({ type: 'click' });
+  const clicked = !drag.moved && !cancelled && !drag.capsule;
+  const started = drag.started;
+  if (root.hasPointerCapture(drag.id)) root.releasePointerCapture(drag.id);
+  drag = null;
+  root.querySelector('#character')?.classList.remove('dragging');
+  if (started) void bridge.action({ type: 'dragEnd', x: event.screenX, y: event.screenY });
+  if (clicked) void bridge.action({ type: 'click' });
 }
-root.addEventListener('pointerup', event => release(event)); root.addEventListener('pointercancel', event => release(event, true));
-window.addEventListener('pointerleave', () => { lastPointer = null; updateHit(); });
+root.addEventListener('pointerup', (event) => release(event));
+root.addEventListener('pointercancel', (event) => release(event, true));
+window.addEventListener('pointerleave', () => {
+  lastPointer = null;
+  updateHit();
+});
 window.addEventListener('keydown', event => {
   if (event.key === 'Escape') { event.preventDefault(); void bridge.action({ type: 'close' }); return; }
   if (!state) return;
@@ -730,6 +795,7 @@ bridge.onState(next => {
   if (next.surface === 'sprite') {
     // Another pack's sheets share nothing with this one's.
     const packKey = `${next.packName}#${next.rive?.epoch ?? next.clips?.epoch ?? 0}`;
+    const packChanged = packKey !== clipPack;
     if (packKey !== clipPack) {
       riveToken++;
       riveKey = '';
@@ -745,7 +811,11 @@ bridge.onState(next => {
           ? { clientX: next.cursor.x, clientY: next.cursor.y }
           : null;
     }
-    renderSprite(); updateHit(); return;
+    renderSprite();
+    // Main's conservative Rive policy can differ from the last alpha answer.
+    // Re-emit it when changing packs or entering/leaving the docked hit area.
+    updateHit(packChanged || (old?.dockAmount === 0) !== (next.dockAmount === 0));
+    return;
   }
   if (old?.detailOpen && !next.detailOpen) root.querySelector<HTMLButtonElement>('.error-mark[aria-expanded="true"]')?.click();
   if (changedMode && next.mode === 'panel') { selected = next.targetKey; selectedRequest = null; collapsedRequests.clear(); }
