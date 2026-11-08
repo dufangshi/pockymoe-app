@@ -388,6 +388,34 @@ closed-eye bed pose. Blink can close the same eye overlay above this channel.
 This lets one shared eye drawing respond to both gaze axes without submitting
 two overlapping eye images. Explicit preview gaze values open this channel.
 
+An experimental `rive.dissolves` compositor can retain the existing Rive drawings
+and insert local drawing exchanges without trimming or reversing source time:
+
+```json
+{"stateMs":450,"bedMs":550,"clips":[{"value":0,"windows":[
+  {"atMs":750,"durationMs":350,"regions":[[0.2,0.2,0.8,0.8]]}
+]}]}
+```
+
+Times are milliseconds; rectangles use normalized artboard coordinates. Each
+window holds the two coherent material charts while procedural inputs can keep
+moving. Outside windows the source clock advances normally at display rate.
+State changes retain the last visible composite and start the destination
+immediately, completing the fade in `stateMs` (300–500 ms), or `bedMs` (400–600 ms)
+when a clip boundary is not `rest`. Blink, mouth and gaze paint yield during a
+fade. Hit testing uses the union CPU mask during exchanges.
+Clip entries can also declare `overlayYieldMs: [[startMs,endMs], ...]` for unsafe
+source-time intervals beside a chart exchange. This covers interpolated samples
+where a face patch starts travelling before the painted head changes. Verify
+forced overlays at display cadence as well as at the original source samples.
+
+The GPU compositor interpolates premultiplied colour and preserves union alpha.
+This prevents transparent fringes but can expose overlapping contours or outline
+pops. It is a pilot path, **not a certified motion repair**. Qualify each pack
+with colour, alpha-union and visual checks before enabling it. It requires this
+runtime; older clients do not implement this timing or composition. Packs without
+`dissolves` use their existing renderer and router unchanged.
+
 Source drawing packs may additionally opt into `rive.routing` with
 `clips` (`value`, `animation`, `durationMs`, `start`, `end`, optional
 `loop`) and `bridges` (motion values). Boundary names describe **identical shared

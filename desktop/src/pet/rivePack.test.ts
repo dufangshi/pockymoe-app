@@ -11,6 +11,34 @@ const manifest = {
   remoteCodex: { rive: { path: 'pet.riv', artboard: 'Pet', stateMachine: 'Pet' } },
 };
 describe('Rive pack import', () => {
+  it('keeps validated drawing dissolves and rejects invalid or unrouted windows', () => {
+    const routing = {
+      bridges: [],
+      clips: [{ value: 0, animation: 'idle', durationMs: 1000, start: 'rest', end: 'rest' }],
+    };
+    const dissolves = {
+      stateMs: 450,
+      bedMs: 550,
+      clips: [{ value: 0, windows: [{ atMs: 500, durationMs: 350, regions: [[0, 0, 1, 1]] }] }],
+    };
+    const parse = (route: unknown, fades: unknown) =>
+      parseManifest(Buffer.from(JSON.stringify({
+        ...manifest,
+        remoteCodex: { rive: {
+          ...manifest.remoteCodex.rive,
+          motions: { idle: [{ value: 0, durationMs: 1000 }] },
+          routing: route,
+          dissolves: fades,
+        } },
+      })));
+    expect(parse(routing, dissolves).remoteCodex?.rive?.dissolves).toEqual(dissolves);
+    expect(() => parse(undefined, dissolves)).toThrow('dissolves');
+    expect(() => parse(routing, { ...dissolves, stateMs: 5000 })).toThrow('dissolves');
+    expect(() => parse(routing, {
+      ...dissolves,
+      clips: [{ value: 99, windows: [] }],
+    })).toThrow('dissolves');
+  });
   it('does not require obsolete frame-rate or exit-speed settings', () => {
     const rive = {
       ...manifest.remoteCodex.rive,

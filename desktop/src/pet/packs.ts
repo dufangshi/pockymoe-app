@@ -1,5 +1,6 @@
 import type { RivePack } from './rive';
 import { RiveHitMask } from './riveHitMask';
+import { validateDissolves } from './riveDissolve';
 import { inspectWebM } from './webm';
 import type { PeekArt } from './geometry';
 import type { FaceBox } from './geometry';
@@ -332,6 +333,14 @@ export function parseManifest(data: Buffer): PetManifest {
         if (families.some((n) => !seen.has(n))) fail('Rive routing has disconnected boundaries');
       }
     }
+    if (r.dissolves !== undefined) {
+      if (!r.routing) fail('Rive dissolves require routing');
+      try {
+        validateDissolves(r.dissolves, r.routing!);
+      } catch {
+        fail('invalid Rive dissolves');
+      }
+    }
     if (r.hitMask !== undefined) {
       try {
         new RiveHitMask(r.hitMask);
@@ -350,6 +359,7 @@ export function parseManifest(data: Buffer): PetManifest {
       ...(r.routing ? { routing: r.routing } : {}),
       ...(r.backing ? { backing: r.backing } : {}),
       ...(r.hitMask ? { hitMask: r.hitMask } : {}),
+      ...(r.dissolves ? { dissolves: r.dissolves } : {}),
     };
   }
   const extension = extensions?.sleeping as SleepingStrip | undefined;
