@@ -278,3 +278,216 @@ clip canvas. This applies to all four edges and both media formats; the atlas
 is used only for packs/states with no decodable clip. Video decoding pauses on
 frame zero and discards the unused preload while tucked. Dedicated side art
 still covers that held body frame. Alpha hit testing uses the held clip pixels.
+
+### Rive packs (branch prototype)
+
+Rive is optional; the atlas, WebP and VP9-alpha players remain available. Declare:
+
+```json
+{"spritesheetPath":"spritesheet.png","remoteCodex":{"rive":{"path":"pet.riv","artboard":"Pet","stateMachine":"Pet"},"faceBox":[0.25,0.28,0.75,0.64]}}
+```
+
+`spritesheetPath` remains the catalog thumbnail and decode-failure fallback. Rive
+wins over clips while loaded. This prototype uses **state-machine inputs**, not a
+ViewModel: omit `viewModel`. A declared ViewModel is rejected explicitly rather
+than silently binding the wrong interface. Names are case-sensitive, and types
+are checked before installation:
+
+| Input | Type / values |
+| --- | --- |
+| `state` | number: idle=0, running=1, waiting=2, failed=3, review=4, sleeping=5, resting=6 |
+| `complete`, `fail`, `poke`, `dragStart`, `land`, `wave` | trigger; fire once per reaction/drag boundary |
+| `mouth` | number 0–1, from the existing Web Audio RMS, 60 ms attack / 120 ms release |
+| `lookX`, `lookY` | number −1…1, from the controller's existing 100 ms cursor poll |
+| `dragging` | bool |
+| `dock` | number: none=0, left=1, right=2, top=3, bottom=4 |
+
+Completion (`waving` or `jumping`) fires `complete`, failure fires `fail`, clicks
+fire `poke`, and drag boundaries fire `dragStart`/`land`. `wave` is available to
+authored packs and preview; there is no separate wave command in the current UI. Repeated
+reaction epochs replay triggers. Sustained controller mood semantics are unchanged.
+`resting` is available to authoring/preview. Automatic resting requires the
+optional Rive motion plan described below; packs without it retain direct state control.
+
+Only `pet.riv` is accepted, up to 96 MiB. Layered drawing variants can exceed a single raster clip; the expanded pack cap remains 256 MiB. ZIPs and Rive folders must contain exactly
+`pet.json`, its atlas, `pet.riv`, and any declared sleeping/peek/clip files. Existing
+path, symlink, image and ZIP limits still apply. Import requires a test-load in a
+fresh sandboxed renderer with no preload or host bridge. It checks selectors and
+all typed inputs, advances each state, disables asset CDN loading, bounds the
+operation to 30 seconds, then destroys the renderer before atomic installation.
+Rive Scripting is **not filtered out**; imported scripts execute in the runtime's
+sandbox. Script authoring is outside the writer's subset.
+
+`@rive-app/webgl2-advanced` is pinned to **2.49.4**, with bundled local primary and
+fallback WASM. The drawer owns advancement, clearing, transparent WebGL2 rendering
+and sparse one-pixel alpha probes after drawing. A moved cursor inside the
+canvas queues a probe at most every 100 ms. WebGL2 pixel-pack buffers and fences
+return it on a later frame without waiting for GPU completion; a new or resized
+pixel stays click-through until its result arrives. A remote or tucked cursor
+queues no probes. Canvas backing size follows full devicePixelRatio. The existing docked geometry/masks still apply. Tucked
+pets stop time advancement; settled machines stop drawing until inputs or size
+change. Runtime failure keeps the atlas visible.
+
+Writer/schema provenance, rig shape, sample build and preview commands are in
+[`art/tools/rive/README.md`](../../art/tools/rive/README.md). This is a prototype,
+not a published pack-format compatibility promise.
+
+Rive packs may opt into full motion choreography with `rive.motions`. Each state
+maps to an ordered list of `{value, durationMs, role?}` beats; `value` is an integer
+0–1023, duration is 16–60000 ms, and `role` is `intro` or `outro` when needed.
+Supported keys match raster clip states (including dragging, landing and resting).
+Such packs must also expose `motion:number` and `motionStart:trigger`. The pet
+sets the selected value and fires motionStart once at a beat boundary; author an
+Any-state transition conditioned on both. The original state/trigger contract
+remains available for standalone playback. The pack's state machine should give
+motionStart priority and avoid repeatedly transitioning to the current state.
+
+The pet uses the shared ClipSequencer for intro/loop/outro ordering, the 8% idle
+rest chance, 1–4 minute resting duration and wake-up outro. Idle variants are
+shuffled each cycle (neutral intervals retained); work and reaction variants cycle.
+One-shot reactions hold their final frame until the controller's reaction expires. Reaction
+durations come from the motion plan; Rive landing beats run after drag release.
+Time advancement pauses while tucked. This behavior applies only to opt-in Rive
+motion plans; raster packs retain their previous sequencing.
+
+Rive packs with a shared skeleton may opt into pet-side dynamics:
+
+```json
+{"procedural":{"bodyBone":"body","idleFps":24,"activeFps":60}}
+```
+
+This lives inside `remoteCodex.rive`. `bodyBone` must name a root bone. Idle FPS
+accepts 15/24/30, active FPS 30/60. Installation additionally requires number
+inputs `blink`, `breath`, `weightShift`, `swayHair`, `swayGown`, `swayWings`, and
+`dragLean`. Author their blend layers on separate child bones so they combine
+with the pose rather than replacing it. Hair/gown/wing values are −1…1; blink
+and breath are 0…1. The drawer reads the animated body's world translation and
+rotation. Damped springs respond to its acceleration and to window drag velocity,
+integrated in steps of at most 1/120 s; stale drag samples expire after 120 ms.
+Random blink intervals and incommensurate breathing/shift phases continue on
+all authored poses. Closed-eye sleeping art may mask the blink layer.
+
+Only these opt-in rigs interrupt intros/outros immediately on a new mood or
+reaction; their state machine must blend the same bones to the destination
+within 300 ms. Their frame gate limits slow idle/sleep/rest draws to idleFps,
+uses activeFps for work, reactions and speech, and freezes procedural time while
+tucked or under reduced motion. Packs without procedural settings keep the
+previous choreography and drawing policy.
+
+Procedural rigs evaluate at the configured cadence and draw only when inputs,
+size or `artboard.didChange()` require it. Breathing is quantized to 0.1, weight
+shift to 1/12, and springs to 1/1024; author small micro-motion ranges so these
+steps remain below a visible pixel at the intended size/DPR. Speech still uses
+the existing 60/120 ms envelope. The benchmark records actual WebGL readbacks
+per second as hit-test demand; draw counts come from the separate GL profile.
+
+A procedural pack may additionally set `eyeOpen:true` and provide a number
+input named `eyeOpen`. The pet sets this to 1 for a cursor gaze and 0 otherwise.
+For sleeping/resting poses it requires the cursor within a region three pet
+widths/heights centred on the character, so a distant cursor does not wake a
+closed-eye bed pose. Blink can close the same eye overlay above this channel.
+This lets one shared eye drawing respond to both gaze axes without submitting
+two overlapping eye images. Explicit preview gaze values open this channel.
+
+Source drawing packs may additionally opt into `rive.routing` with `maxExitMs`
+(100–400), `clips` (`value`, `animation`, `durationMs`, `start`, `end`, optional
+`loop`) and `bridges` (motion values). Boundary names describe **identical shared
+paint, selectors and bone coordinates**, not just a similar pose. The loader
+checks animation references; import validation requires a connected bridge graph.
+On interruption, the pet-side router scrubs the active clip to its nearer end,
+then traverses any required bridge clips within the combined exit budget, using
+smoothstep time warping. It never blends incompatible material charts. A later
+interrupt replans from the currently displayed position. Normal choreography and
+random resting still use `RiveMotionClock`; its beat clock pauses during exit.
+The body is applied with `LinearAnimationInstance`; the state machine owns the
+procedural layers. Such files must not also animate the body from their machine.
+
+`rive.backing: {width, height, scale}` caps the backing store to native source
+resolution × scale (1–1.25), preserving aspect ratio. CSS controls visual size;
+alpha hit coordinates use the actual backing store. Opted-in bitmap drawing packs
+use the pinned runtime's inkbleed renderer option to avoid native MSAA; ordinary
+packs retain the existing renderer and full DPR. The native-size cap has no effect
+when the pet's CSS size × DPR is already below it. The prototype binary limit is
+96 MiB for lossless source drawing atlases; expanded ZIPs remain capped at 256 MiB.
+
+Routed source drawings may set `procedural.sourceFps` to 24 or 30. This opt-in
+keeps work, reactions and speech at the source cadence rather than using
+`activeFps` just because the mood is active. Source animation time is sampled at
+that cadence (including float32 endpoint handling). Dragging, landing, 150 ms
+after an actual cursor change, or a spring displacement >.1 / velocity >.5 use
+60 Hz for live inputs; the source drawing itself still holds between source
+samples. These spring thresholds avoid spending a draw on imperceptible noise.
+Repeated zero-time passes do not reapply an unchanged body sample. The existing
+input/dirt check skips unchanged renders, and tucked/reduced-motion poses hold.
+Packs without this field retain their previous cadence and continuous source
+animation sampling.
+
+
+Routed source packs may author an `exitAnimation` on each clip. This is an
+optional additive correction applied with an 80 ms ramp during accelerated exits;
+it must reset its affected bones in the normal clip and be identity at shared
+boundaries. It never blends one drawing chart into another. Optional
+`exitRestMs: {start, end}` declares source-verified corridors (0–500 ms, less than
+half the clip) in which an accelerated exit may sample the exact shared rest
+paint. Neutral playback keeps every source sample. Requests rebase to the last
+displayed source time. Accelerated exits use continuous time and 60 Hz drawing;
+neutral source playback remains quantized. Zero-time procedural/draw passes cannot consume a
+boundary hold.
+
+`procedural.transientFace:true` requires `eyeOpen:true`. Gaze activates only for
+nearby cursor movement, holds for 180 ms, then fades to source paint over 180 ms.
+The authored eyeOpen layer must expose the original source pupils through an eye
+mask, and zero input must show source paint. Blink layers should use the current
+expression's lids and return to opacity zero; mouth layers should preserve its
+lip corners and mood. Closed source eyes stay closed unless the pack explicitly
+authors a wake expression. During an accelerated rest exit, transient face
+inputs yield to source paint because global exit stabilization leaves the
+source face chart. This setting preserves existing behavior for other
+packs. Preview capture accepts explicit procedural input overrides for repeatable
+blink, gaze and speech comparisons.
+
+Rive always uses the pinned `@rive-app/webgl2-advanced` runtime. Software WebGL
+presentation can incur Chromium readbacks even with zero app alpha probes. The
+built-app benchmark separates that presentation cost with a matched quad control;
+it does not infer a different renderer from Chromium's feature-status labels.
+
+Optional `routing.reactions` entries declare `{clips, targets, animation,
+durationMs, settleMs, resumeValue?, resumeTargets?, drawings?}`. These are authored
+reactions on the current material chart, useful for an event in a lying or
+suspended pose. `drawings` is an optional, strictly time-ordered list of
+`{atMs, animation}` entries fitted to successive source drawings. The player
+selects the latest entry at the displayed body time, including while that clock
+decelerates, and advances its animation at the independent reaction time. Material
+selection happens after the source frame clock is quantized, so a 60 Hz input
+update cannot select a drawing ahead of the held 24 fps body sample. Before the
+first entry it uses `animation`. All variant names are test-loaded during isolated
+import validation. The displayed body clock decelerates over `settleMs`
+(50–400 ms), then holds while the separate
+reaction animation plays; it never selects the requested upright clip's body
+drawing. The logical target is reported in `route.value`, while
+`route.animation` and `route.time` identify the actual body sample. A subsequent
+normal motion uses the shared-boundary router. Before reversing an interrupted
+reaction, the player brakes its forward animation clock over 100 ms. It then
+returns to the nearer neutral endpoint over at most 250 ms, retaining one exact
+neutral sample before routing the queued request. This keeps a large moving arm
+from reversing in one frame; the total backward exit takes at most 350 ms.
+New requests replace the queued request.
+`resumeValue` and `resumeTargets` let non-waking requests resume the held lying
+pose without seeking back to its first frame. These resume targets also apply
+before the first reaction: an idle/waiting request cannot accidentally wake an
+already lying character. Authors select which requests need an awake pose.
+A routed clip with `nativeExit:true` finishes forward at source
+speed, also when it is used as a bridge. This preserves complete bed-out and
+landing performances; these protected exits deliberately take longer than the
+normal 350 ms accelerated rest route. `nativeExit:"nearest"` instead returns a
+loop to its nearer shared boundary at source speed, avoiding both a full forward
+replay and skipped drawing keys during acceleration. Such a reaction is not a shortcut
+for a complete waking or landing bridge; authors must supply those performances
+for their desired transitions. Reaction-owned properties must have neutral reset
+keys in every body animation. Import validates references and time bounds, and
+the isolated runtime verifier loads each reaction animation.
+
+Record reactions at their actual display size with
+`node art/tools/rive/record.ts PACK OUTPUT SCENARIOS.json 24 189x205 2`.
+The final arguments specify CSS size and DPR (1 or 2); recordings include those
+values in their metadata and preserve the corresponding backing-store pixels.

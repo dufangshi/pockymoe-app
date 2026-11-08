@@ -35,7 +35,8 @@ test('synthetic VP9 alpha streams through the pet protocol and switches without 
       const c=document.querySelector<HTMLCanvasElement>('#clip')!,ctx=c.getContext('2d')!;
       const source=document.querySelector<HTMLVideoElement>('video.pet-video')!.src;
       const records:{opaque:number;corner:number;decoders:number;time:number;path:string}[]=[];
-      for(let i=0;i<340;i++){records.push({opaque:ctx.getImageData(Math.floor(c.width/2),Math.floor(c.height/2),1,1).data[3],corner:ctx.getImageData(0,0,1,1).data[3],decoders:document.querySelectorAll('video.pet-video').length,time:performance.now(),path:document.querySelector<HTMLVideoElement>('video.pet-video')!.src});await new Promise<void>(r=>requestAnimationFrame(()=>r()));}
+      const start=performance.now();
+      for(let i=0;i<340 && performance.now()-start<6000;i++){records.push({opaque:ctx.getImageData(Math.floor(c.width/2),Math.floor(c.height/2),1,1).data[3],corner:ctx.getImageData(0,0,1,1).data[3],decoders:document.querySelectorAll('video.pet-video').length,time:performance.now(),path:document.querySelector<HTMLVideoElement>('video.pet-video')!.src});await new Promise<void>(r=>requestAnimationFrame(()=>r()));}
       return {records,source};
     });
     expect(sample.records.every(r=>r.opaque>200&&r.corner===0&&r.decoders<=2)).toBe(true);
@@ -45,7 +46,8 @@ test('synthetic VP9 alpha streams through the pet protocol and switches without 
     await app.evaluate(()=> (globalThis as unknown as {petHarness:{settings(p:unknown):void}}).petHarness.settings({petEdgeHide:true}));
     const act = (value: unknown) => sprite.evaluate(v => (window as unknown as {rcDesktop:{pet:{action(v:unknown):Promise<unknown>}}}).rcDesktop.pet.action(v), value);
     for (const edge of ['top','bottom','right'] as const) {
-      const {bounds,area}=await app.evaluate(({BrowserWindow,screen})=>({bounds:BrowserWindow.getAllWindows().find(w=>!w.getParentWindow())!.getBounds(),area:screen.getPrimaryDisplay().workArea}));
+      // Hidden windows can report stale native coordinates on a headless display.
+      const {bounds,area}=await app.evaluate(({screen})=>({bounds:(globalThis as unknown as {petHarness:{metrics():{requestedBounds:Electron.Rectangle}}}).petHarness.metrics().requestedBounds,area:screen.getPrimaryDisplay().workArea}));
       const x=edge==='right'?area.x+area.width-bounds.width:area.x+Math.round(area.width/2),y=edge==='top'?area.y:edge==='bottom'?area.y+area.height-bounds.height:area.y+100;
       await act({type:'dragStart',x:bounds.x,y:bounds.y});await act({type:'dragMove',x,y});await act({type:'dragEnd',x,y});
       await expect(sprite.locator('#app')).toHaveAttribute('data-edge',edge);await expect(sprite.locator('#app')).toHaveAttribute('data-dock-amount','1');

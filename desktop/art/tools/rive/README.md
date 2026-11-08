@@ -1,0 +1,247 @@
+# Rive authoring without the Editor
+
+Run from `desktop/` with Node 22.23+ and the desktop pnpm dependencies installed.
+The writer uses Node's TypeScript stripping; preview uses the desktop's Vite,
+Playwright, Electron and pngjs. No Rive Editor or hosted authoring service is used.
+
+```sh
+node art/rive-sample/make-rig.ts
+node art/rive-sample/build.ts .scratch/rive/pack
+xvfb-run -a node art/tools/rive/preview.ts \
+  .scratch/rive/pack/pet.riv .scratch/rive/sheets Pet Pet --assert-motion
+# Any other rig:
+node art/tools/rive/writer.ts path/to/rig.json path/to/pet.riv
+pnpm exec vitest run --config art/tools/rive/vitest.config.ts
+pnpm exec tsc --noEmit --project art/tools/rive/tsconfig.json
+```
+
+The sample source and part PNGs are original art generated here in one paid LNZ
+call. `art/rive-sample/cut.py` regenerates parts from `source.png` using Pillow.
+The generated pack contains exactly three files; zip those files directly to
+import it. Source art/rig/tooling is deliberately outside the importable pack.
+
+`Rig` in `writer.ts` is the input schema; `art/rive-sample/rig.json` is a complete
+example. Artboard dimensions, image placement and mesh coordinates are in pixels;
+rotations are radians; UV coordinates are normalized. Image placement is the
+image center. Image array order is **front to back** (Rive draws in reverse).
+Mesh vertices are `[x,y,u,v]` relative to the image center; triangle indices are
+unsigned varints. A skinned image must have unit scale; its parent may be an identity opacity group. Skeleton
+parents precede children. A normal child bone starts at the parent's +X tip;
+`offset:true` creates a RootBone with explicit local x/y under its parent.
+Skin/tendon bind transforms are calculated from the rest pose. Distance to bone
+segments gives inverse-square weights, retaining the nearest four influences;
+byte quantization sums to 255. At most 255 tendons per mesh are supported.
+For batching disconnected islands, `mesh.influences` may supply one array of
+`{bone,weight}` entries per vertex, with one to four positive finite weights and
+no duplicate bones. Bone names must belong to that mesh's `bones` list. These
+weights use the same byte quantization; omitted influences retain distance-based
+weighting. This preserves a part's original skin when combining mesh islands.
+
+Animations have integer frame times, fps, duration, loop and tracks. Tracks name
+an object and an animatable float property (`x`, `y`, `rotation`, `scaleX`,
+`scaleY`, `opacity`, or a mesh vertex coordinate). Vertices are named
+`<image>.v<index>`; root/child bones and images use their rig names. Each key has
+frame/value and optionally `cubic:[x1,y1,x2,y2]`. State machines have typed inputs,
+layers, entry/any/exit states, animation states or input-driven 1D blend states.
+Transitions refer to state names within the layer, with duration/exitTime in ms
+and ANDed conditions. Number ops are 0 ==, 1 !=, 2 <=, 3 <, 4 >=, 5 >; bool true
+uses op 0, false op 1. Trigger conditions consume trigger inputs. ViewModels,
+text, layout, audio, script authoring and arbitrary converter graphs are outside
+this subset. The runtime can still load imported scripts.
+
+`hold:true` on a float key holds its value until the next key. A group with
+`solo:true` selects exactly one direct child. Animate its virtual `activeChild`
+property with child names as string values; the writer emits discrete CoreId
+keys (Solo type 147, property 296; KeyFrameId type 50, property 122, from the
+same pinned runtime). All variants can bind the same control bones and retain
+one mesh topology while selecting different fixed atlas UVs. Inactive children
+collapse instead of drawing at partial opacity. Do not animate mesh `u`/`v`:
+the pinned runtime builds immutable UV buffers at asset loading and does not
+rebuild them for animated vertex dirt. The writer rejects these inert tracks.
+
+Binary keys/field types come from the MIT runtime source at
+[`a658a56a275ba473fe52e9d97a925d2468b0c853`](https://github.com/rive-app/rive-runtime/tree/a658a56a275ba473fe52e9d97a925d2468b0c853),
+the runtime submodule of rive-wasm tag **2.49.4** (tag commit
+`ada7b9f35f951ff491f65f5ffc74a3ed3c582203`). `schema.json` records that pin. Relevant
+sources are `include/rive/runtime_header.hpp`, `src/core/binary_reader.cpp`,
+`include/rive/generated/**`, `src/file.cpp`, and `src/importers/**`. The writer
+emits RIVE header 7.0 with file id 0 and an empty property ToC: every emitted key
+is known to the pinned runtime. Values use uint32 LEB128, LE float32, one-byte
+bool, or length-prefixed UTF-8/bytes. Objects end in property key zero; EOF ends
+the stream. Asset references index embedded images; component/curve ids index
+the artboard (artboard=0), while animation/input/layer-state ids have their own
+lists. Cubic easing uses concrete **CubicEaseInterpolator type 28**, not abstract
+CubicInterpolator type 139. Unknown properties are rejected by the writer.
+
+Preview fails on rejected files, missing artboard/machine, missing/wrong-type
+contract inputs and blank frames. It drives all seven states, six triggers,
+mouth/look ranges, both dragging values and all five dock numbers, producing
+labelled PNG sheets. `--assert-motion` additionally requires at least eight
+distinct rendered frames (useful for the sample, not a universal pack rule).
+It also captures `electron-preview.png`. Output, bundled preview assets and
+performance evidence belong in `.scratch/`, never maintained docs.
+
+To measure the actual pet window against a local raster pack, build the isolated
+existing harness, then run both sequentially under the same display/GPU setup:
+
+```sh
+pnpm exec electron-vite build --config src/pet/tools/electron.config.ts
+xvfb-run -a node art/tools/rive/benchmark.mjs .scratch/rive/pack \
+  .scratch/rive/benchmark-rive mint-courier 60
+xvfb-run -a node art/tools/rive/benchmark.mjs /local/private/raster-pack \
+  .scratch/rive/benchmark-raster raster-pack-id 60
+```
+
+`metrics.json` records a baseline and 60 one-second samples, actual elapsed time,
+and cumulative CPU seconds of the pet renderer and GPU
+**process CPU**, GPU feature/device information and memory. CPU percentages use
+CPU-seconds divided by measured wall seconds, with one busy logical core = 100%;
+they do not depend on Electron's normalized percentage or sampling intervals. GPU process CPU is
+not hardware GPU busy percentage; virtual/software GPU runs do not measure a
+physical GPU's utilization. The harness has an isolated account/profile, no
+Supervisor connection, and produces pet-window and appearance captures.
+
+`Rig.groups` adds identity-transform opacity nodes. A mesh may use one of these
+as its parent while retaining artboard-space coordinates and skin binds; other
+mesh parents are rejected. This lets a pose fade as one group while independent
+mouth/gaze layers animate its children. Linear keys explicitly write the unset
+interpolator sentinel (`0xffffffff`); cubic keys reference the pinned concrete
+CubicEaseInterpolator.
+
+For authored motion plans or arbitrary contract probes, preview additionally
+accepts `--size 648x702 --scenarios /private/path/scenarios.json`. A scenario is
+`{name, values, trigger?, frames}`: safe filename stem, typed input values, optional
+one-shot trigger, and ascending sample times measured in 60 Hz frames. Each
+scenario starts from a fresh machine and writes individual frames plus a labelled
+sheet. The standard seven-state/six-trigger checks run afterward from a fresh
+machine. With scenarios enabled their sheets use `state-` and `trigger-` prefixes
+so a scenario named idle or failed cannot be overwritten by the contract probe.
+Simulation advances at 60 Hz but only requested frames are drawn.
+Initial runtime loading has a 60-second deadline, including the first software-GL
+draw. Image decode waiting then probes visible alpha at time zero and fails after
+15 seconds; it does not consume authored motion frames.
+The probe reads framebuffer alpha directly and reports lost WebGL contexts.
+On the current software-GL host, some small embedded-image fixtures lose context
+during this time-zero probe although the normal pet ticker renders the same
+binary. That startup failure remains unresolved; the verifier does not advance
+the animation to hide it.
+The preview's Electron profile stays under its output directory.
+Large binaries cross the Node/renderer boundary as base64, avoiding millions of
+serialized integer entries.
+
+The isolated verifier accepts `OUTPUT --pack PACK --zip ZIP` to test a chosen
+pack and its real ZIP installation. `RIVE_BENCH_CAPTURE=1` enables alpha and dock
+assertions plus the full theme/dark-light captures for any benchmark pack ID.
+Dock captures include all four edges in all six appearances. Benchmarks record
+logical CPU count and actual elapsed seconds; one logical core = 100%.
+`RIVE_BENCH_DPR=1|2` explicitly chooses the display scale (default 1); metrics
+include actual DPR and CSS/backing canvas dimensions. Compare both formats at
+the same DPR. WebGL readbacks count actual Rive draws, including hit testing.
+`allProcessCPU` includes the isolated app's browser, utility and control-window
+processes as well; report this separately from pet-renderer plus GPU-process CPU.
+The benchmark reloads the pet renderer with a fixed random value of 0.5 before
+measuring either format, keeping the random resting entry disabled and idle
+choices repeatable. Production animation randomness is unchanged.
+
+Shared-rig authoring can point multiple mesh parts at the same texture path and
+set `assetSize:[width,height]`. The writer embeds each resolved path once and
+requires consistent dimensions. Mesh positions remain part-local; normalized
+UVs address the shared atlas. Identity opacity groups may have an earlier
+identity-group parent, useful for eyelids that mask independently aimed eyes.
+
+`record.ts PACK OUTPUT SCENARIOS [24|30]` records full-resolution 648×702 PNG
+sequences. A scenario is `{name,duration,initial,events?,frameValues?}`; initial
+is a motion input, events are `{at,motion}` in seconds, and frameValues optionally
+supplies typed inputs per output frame. Synthetic dragVX/dragVY fields feed the
+same spring integrator without becoming Rive contract inputs. The authored entry
+state can condition on the initial motion to begin directly at its first frame.
+With `RIVE_RECORD_RIG=/local/rig.json`, per-frame JSON also records every bone's
+world matrix for deformation analysis. Procedural recordings use the production
+spring/blink code and a deterministic RNG seed; production remains random. The
+recording profile and all images remain under OUTPUT. Recordings advance at
+fixed time steps independently of wall-clock throughput; use benchmark.mjs for
+real-time CPU measurements.
+
+Set `RIVE_BENCH_PROFILE=1` for a separate instrumented run. It writes
+`webgl-profile.json` (draw calls, submitted triangles, buffer uploads, texture
+allocations, API submission and synchronous readback time) and a Chromium
+`trace.pftrace` with GPU service/timeline events. Keep this run separate from the
+uninstrumented 60 s comparison. Submission time is not hardware GPU busy time;
+on SwiftShader the GPU service runs on the CPU. Texture records include render
+targets and reallocations, and submitted triangles do not measure visible
+overdraw.
+
+A 1D blend may set `reset:true` (LayerState flag 2, property 536) to seed
+its animated properties from the first animation before each application.
+For a two-pose blend this preserves the exact endpoint interpolation and stops
+repeated neutral updates from accumulating a bias. With multiple intervals the
+pinned runtime mixes poses sequentially from that first baseline; inspect the
+actual runtime output instead of assuming normalized multi-pose weights. Empty
+child groups are useful Solo choices for absent props: a transparent placeholder
+image still submits a draw, whereas an empty group submits none.
+
+Pass `--manifest /path/pet.json` to `preview.ts` to exercise optional motion,
+procedural and `eyeOpen` channels with the same configuration as the pet. Without
+it the command verifies the base input contract and explicit board/machine
+selectors. `record.ts` always reads its pack manifest.
+
+Meshes can supply `binds: {boneName: {x, y, rotation?}}` in world coordinates.
+These are drawing-specific tendon bind transforms for a shared skeleton. Omitted
+entries use the skeleton rest bind. Mesh vertex positions must describe that
+same drawing's bind geometry; stretch is measured against these vertices, not
+against a different drawing's silhouette. Nonfinite transforms and unlisted
+bones are rejected. Use this for discrete source drawing swaps, never as an
+animation track or as permission to blend incompatible charts between clips.
+
+
+Alpha hit probes use asynchronous WebGL2 PBO/fence readback only on cursor demand,
+at most 10 Hz, with no synchronous per-draw probe. Benchmark `readbacksPerSecond`
+therefore measures hit-test demand, not draw FPS. Instrumented GL frames are
+captured at rAF boundaries independently of readbacks. The native capture checks
+both a solid hit and a transparent miss after allowing the asynchronous probe to
+complete, then verifies that all four tucked edges hold their image.
+
+Deterministic capture `frameValues` may override procedural `blink`, `breath`,
+`weightShift`, spring and `eyeOpen` values. These controls affect verification
+only; production still samples its normal dynamics and cursor envelope.
+
+Native benchmark and isolated import verification put their temporary harness
+profiles under the requested output directory. Choose a private output directory
+for private artwork; copied pack files stay there with the rest of the evidence.
+
+The built application includes a self-contained benchmark command. On macOS,
+quit the normal app, then run the executable inside the built app bundle:
+
+```sh
+/Applications/Pockymoe.app/Contents/MacOS/Pockymoe --pet-benchmark \
+  /private/Rive.zip /private/WebM.zip --output /private/benchmark-output
+```
+
+Only the built app and the two ZIPs are needed: no source checkout, Node, pnpm,
+Playwright, account or Supervisor. The command validates/imports the packs into
+isolated profiles, then runs WebM, a textured quad and WebGL2 Rive sequentially,
+three 60-second runs each, at the primary display's native DPR. Each run launches
+a fresh process. The middle repetition reverses the order. Keep other CPU/GPU
+work stopped and leave the primary display attached for the measurement.
+
+`backend-medians.json` and the printed table give renderer and GPU process CPU,
+median of their sum, raw ratios to WebM, logical core count, pack SHA-256s,
+Chromium-native ReadPixels/s and app alpha probes/s. One logical core = 100%;
+GPU process CPU is not physical GPU utilization. Native transfers are distinct
+from app alpha probes. Each run uses the same CDP GPU-service trace categories.
+The software-host diagnostic gate is `(median Rive − median quad) ≤ median WebM`;
+the raw total and ratio remain in the report. Hardware results should be reviewed
+as raw values too. `--seconds 1` is a smoke check and never passes the 60-second
+gate. Choose a new output directory for each benchmark.
+
+Linux can prefix the same built executable command with `xvfb-run -a`. It enables
+SwiftShader only in the Linux benchmark children; macOS retains its normal GPU.
+For local development, substitute `node_modules/electron/dist/electron
+out/main/index.js` after `pnpm build`. The benchmark renderer is a separate entry;
+the normal pet renderer contains neither the quad nor instrumentation wrappers.
+
+The quad control retains the same Rive source clock and procedural spring inputs
+to match its adaptive 24/60 Hz schedule, while replacing all character drawing
+with one textured quad. Its CPU includes scene advancement; its measured GPU
+work is the quad and presentation. The per-run draw-frame and call counters
+allow checking this control rather than assuming a fixed requested fps.

@@ -12,6 +12,9 @@ importers:
 
   .:
     dependencies:
+      '@rive-app/webgl2-advanced':
+        specifier: 2.49.4
+        version: 2.49.4
       sherpa-onnx-node:
         specifier: 2.0.1
         version: 2.0.1
@@ -463,6 +466,9 @@ packages:
     resolution: {integrity: sha512-IaYGml/nSOiZWROfPtuIL7neuu9qDOZ3TNvNljUIrhDMxiGTgPjzj/g9p9RxpS2tSepPDRY+UwAaEeiKtUvIAg==}
     engines: {node: '>=20'}
     hasBin: true
+
+  '@rive-app/webgl2-advanced@2.49.4':
+    resolution: {integrity: sha512-WxyK98kaAksmBftLdRD5ioWiF3SzvR1X2hgP1X5xBpHr2xfE4aOVmvfSZ5eQ9jEuqYnbL7onre95COofIUBswg==}
 
   '@rolldown/binding-android-arm-eabi@1.2.16':
     resolution: {integrity: sha512-ia3DwAs0OsMGS7+IConptSiyk9pEXkOx/AbJ2n/lAGxH3QkWQus1t8d7gnAT38FCU2sQu8lUbeR6AiZFv4JxaA==}
@@ -2623,6 +2629,8 @@ snapshots:
   '@playwright/test@1.64.1':
     dependencies:
       playwright: 1.64.1
+
+  '@rive-app/webgl2-advanced@2.49.4': {}
 
   '@rolldown/binding-android-arm-eabi@1.2.16':
     optional: true

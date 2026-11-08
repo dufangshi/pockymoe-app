@@ -171,3 +171,9 @@ hr { border:0;border-top:1px solid var(--theme-border);margin:4px; }
 /* The clip remains the sole body source while its outgoing/incoming fade runs. */
 .has-peek.clips #sprite,.has-peek.clips #sprite-old { display:none!important; }
 .has-peek.docked-rest #clip { visibility:visible; }
+
+#rive { position:absolute;inset:0;width:100%;height:100%;display:none; }
+#character.rive #rive { display:block; }
+#character.rive #clip,#character.rive #sprite,#character.rive #sprite-old,#character.rive #talk { display:none; }
+.has-peek #rive { transition:opacity 80ms linear,translate 160ms ease;translate:var(--body-slide) 0; }
+.has-peek.art-tucked #rive { opacity:0!important; }

@@ -1,6 +1,6 @@
 {
   "name": "@pockymoe/desktop",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "private": true,
   "description": "Pockymoe desktop client",
   "author": "Pockymoe",
@@ -17,6 +17,7 @@
     "dist:win": "pnpm build && electron-builder --win nsis --x64 --publish never"
   },
   "dependencies": {
+    "@rive-app/webgl2-advanced": "2.49.4",
     "sherpa-onnx-node": "2.0.1"
   },
   "devDependencies": {

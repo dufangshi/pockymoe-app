@@ -19,18 +19,18 @@ export class ClipSequencer {
 
   constructor(private readonly states: Partial<Record<string, PetClip[]>>, private readonly random: () => number = Math.random) {}
 
-  next(mood: string, now: number): PetClip | null {
+  next(mood: string, now: number, interrupt = false): PetClip | null {
     if (this.restUntil) {
       if (mood === 'idle' && now < this.restUntil) return this.cycle('resting');
       this.restUntil = 0;
       const outro = this.role('resting', 'outro');
-      if (outro) return outro;
+      if (outro && !interrupt) return outro;
     }
     if (mood !== this.mood) {
       const previous = this.mood;
       this.mood = mood; this.entering = true; this.played = 0;
       const outro = previous === null ? undefined : this.role(previous, 'outro');
-      if (outro) return outro;
+      if (outro && !interrupt) return outro;
     }
     if (this.entering) {
       this.entering = false;
