@@ -18,8 +18,9 @@ type Testing = { hub: { sync(value: unknown): void }; settings: { set(patch: Par
 const clipPackId = (): string => (JSON.parse(readFileSync(join(clipPack!, 'pet.json'), 'utf8')) as { id: string }).id;
 let server: Server, origin: string, app: ElectronApplication, profile: string, page: Page;
 let speech: string[] = [];
+let speechSamples = 480;
 function wav(): Buffer {
-  const n = 480, b = Buffer.alloc(44 + n * 2);
+  const n = speechSamples, b = Buffer.alloc(44 + n * 2);
   b.write('RIFF', 0); b.writeUInt32LE(36 + n * 2, 4); b.write('WAVEfmt ', 8); b.writeUInt32LE(16, 16); b.writeUInt16LE(1, 20); b.writeUInt16LE(1, 22); b.writeUInt32LE(24000, 24); b.writeUInt32LE(48000, 28); b.writeUInt16LE(2, 32); b.writeUInt16LE(16, 34); b.write('data', 36); b.writeUInt32LE(n * 2, 40);
   return b;
 }
@@ -44,10 +45,10 @@ test.beforeAll(async () => {
 });
 test.afterAll(async () => { await new Promise<void>(done => server.close(() => done())); });
 test.beforeEach(async () => {
-  speech = []; profile = mkdtempSync(join(tmpdir(), 'pockymoe-pet-work-'));
+  speech = []; speechSamples = 480; profile = mkdtempSync(join(tmpdir(), 'pockymoe-pet-work-'));
   if (clipPack && test.info().title.startsWith('clips')) { mkdirSync(join(profile, 'pets')); cpSync(clipPack, join(profile, 'pets', clipPackId()), { recursive: true }); }
   const env: Record<string, string> = {};
-  for (const key of ['PATH', 'HOME', 'TMPDIR', 'USER', 'LOGNAME', 'SystemRoot', 'WINDIR', 'TEMP', 'TMP', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'ComSpec', 'PATHEXT']) if (process.env[key]) env[key] = process.env[key]!;
+  for (const key of ['PATH', 'HOME', 'TMPDIR', 'USER', 'LOGNAME', 'DISPLAY', 'XAUTHORITY', 'SystemRoot', 'WINDIR', 'TEMP', 'TMP', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'ComSpec', 'PATHEXT']) if (process.env[key]) env[key] = process.env[key]!;
   Object.assign(env, { POCKYMOE_DESKTOP_E2E: '1', POCKYMOE_DESKTOP_USER_DATA: profile, POCKYMOE_DESKTOP_WEB_ORIGIN: origin, POCKYMOE_DESKTOP_RELAY_ORIGIN: origin });
   const packaged = process.env.POCKYMOE_PACKAGED_EXECUTABLE || process.env.POCKYMOE_DESKTOP_APP;
   app = await electron.launch({ ...(packaged ? { executablePath: packaged, args: [`--lang=${process.env.POCKYMOE_TEST_SYSTEM_LOCALE || 'en-US'}`, ...(process.env.POCKYMOE_DESKTOP_SCALE ? [`--force-device-scale-factor=${process.env.POCKYMOE_DESKTOP_SCALE}`] : [])] } : { args: [resolve('.'), `--lang=${process.env.POCKYMOE_TEST_SYSTEM_LOCALE || 'en-US'}`] }), env });
@@ -166,6 +167,74 @@ const openPreferences = async (): Promise<Page> => {
   }), { timeout: 20_000, message: 'Fixture discovery must answer after the command-ready handshake' }).toEqual({ muteTargets: true, connections: true });
   return preferences;
 };
+const announce = async (resultSummary?: string): Promise<Page> => {
+  await settings(remoteVoice());
+  await pet('sprite').then(sprite => sprite.waitForTimeout(2700)); // The sample from turning voice on is rate limited with alerts.
+  speech = [];
+  await baseline(); await sync([item()]); await sync([item({ state: 'completed', unread: true, resultSummary })]);
+  await expect.poll(() => speech.length).toBe(1);
+  return pet('glass');
+};
+const spriteBounds = (): Promise<{ y: number }> => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find(window => window.webContents.getURL().includes('pet/index.html') && !window.getParentWindow())!.getBounds());
+test('speech bubble: names the thread above the pet while it is read, and opens on hover', async () => {
+  speechSamples = 24000 * 60;
+  const glass = await announce('Fixed the callback that read the user before it had loaded.'), bubble = glass.locator('.bubble.speech');
+  await expect(bubble.locator('.bubble-line .bubble-title')).toBeVisible();
+  await expect(bubble.locator('.speech-wave.playing')).toBeVisible();
+  // It stands in for the same thread's pill rather than repeating it.
+  await expect(glass.locator('.bubble')).toHaveCount(1);
+  await expect(bubble.locator('.speech-detail')).toBeHidden();
+  await expect.poll(async () => { const g = await glassBounds(), s = await spriteBounds(); return g.visible && g.y + g.height <= s.y; }).toBe(true);
+  const closed = await glassBounds();
+  for (const pack of ['classic', 'plum-pocket', 'terminal'] as const) for (const effective of ['light', 'dark'] as const) {
+    await app.evaluate((_e, value) => globalThis.__pockymoeDesktopTest.appearance.sync(value), { pack, effective, accent: '#8f5a9e', locale: 'zh-CN' });
+    await glass.mouse.move(0, 0);
+    await expect(bubble.locator('.speech-detail')).toBeHidden();
+    await glass.screenshot({ path: join(evidence, `speech-bubble-${pack}-${effective}.png`), animations: 'disabled' });
+    await bubble.hover();
+    await expect(bubble.locator('.speech-text')).toHaveText(speech[0]!);
+    await expect(bubble.locator('.speech-result')).toContainText('Fixed the callback');
+    await expect(bubble.locator('.speech-meta')).toContainText('MacBook');
+    await expect(bubble.locator('.speech-foot button')).toHaveCount(2);
+    await expect.poll(async () => { const size = await glass.evaluate(() => { const r = document.querySelector('#app')!.getBoundingClientRect(); return { fits: r.height <= innerHeight + 1 && r.width <= innerWidth + 1 }; }); return size.fits; }).toBe(true);
+    await glass.screenshot({ path: join(evidence, `speech-bubble-${pack}-${effective}-open.png`), animations: 'disabled' });
+  }
+  // Growing keeps the side: the bubble's bottom edge stays over her head, next to the pointer.
+  const open = await glassBounds();
+  expect(open.height).toBeGreaterThan(closed.height);
+  expect(open.y + open.height).toBeLessThanOrEqual((await spriteBounds()).y);
+  await bubble.locator('.speech-foot button[data-action="open"]').click();
+  await expect.poll(() => page.evaluate(() => window.commands.map(command => JSON.stringify(command)).join())).toContain(`/devices/${item().deviceId}/threads/${item().threadId}`);
+  await expect(bubble).toHaveCount(0);
+});
+test('speech bubble: a request stays where it is while another thread is read', async () => {
+  speechSamples = 24000 * 60;
+  await settings(remoteVoice());
+  const sprite = await pet('sprite'), glass = await pet('glass');
+  await sprite.waitForTimeout(2700);
+  const request = item({ key: 'mac:waiting', threadId: 'waiting', title: 'Waiting for you', state: 'needsInput', request: { id: 'r1', kind: 'approval', summary: 'Allow the command?' } as ActivityItem['request'] });
+  await baseline(); await sync([request]);
+  const approve = glass.locator('.bubble.sticky [data-action="approve"]');
+  await expect(approve).toBeVisible();
+  // Its own announcement only marks the bubble, with no second line naming the same thread.
+  await expect(glass.locator('.bubble.sticky .speech-wave.playing')).toBeVisible();
+  await expect(glass.locator('.bubble.speech')).toHaveCount(0);
+  const position = async (): Promise<{ x: number; y: number }> => { const g = await glassBounds() as { x?: number; y: number }, box = (await approve.boundingBox())!; return { x: Math.round((g.x ?? 0) + box.x), y: Math.round(g.y + box.y) }; };
+  await expect.poll(async () => (await glassBounds()).visible).toBe(true);
+  const before = await position();
+  await sprite.waitForTimeout(2700);
+  await sync([request, item({ state: 'completed', unread: true })]);
+  await expect(glass.locator('.bubble.speech')).toBeVisible();
+  await expect.poll(position).toEqual(before);
+  await glass.screenshot({ path: join(evidence, 'speech-bubble-with-request.png'), animations: 'disabled' });
+});
+test('speech bubble: after the audio ends it lingers, then gives way to the pill', async () => {
+  const glass = await announce();
+  await expect(glass.locator('.bubble.speech')).toBeVisible();
+  await expect(glass.locator('.speech-wave.playing')).toHaveCount(0);
+  await expect(glass.locator('.bubble.speech')).toHaveCount(0, { timeout: 8000 });
+  await expect(glass.locator('.bubble .bubble-title')).toBeVisible();
+});
 test('summary: picks a saved upstream and its model, and reads what the model said', async () => {
   await settings(remoteVoice());
   const preferences = await openPreferences();

@@ -111,6 +111,10 @@ export type SurfaceSide = 'below' | 'above';
 export function surfaceSide(sprite: Rect, area: Rect, height: number): SurfaceSide {
   return sprite.y + sprite.height + 6 + height <= area.y + area.height ? 'below' : 'above';
 }
+/** What is being read goes over her head when it fits, where it does not cover the controls below. */
+export function speechSurfaceSide(sprite: Rect, area: Rect, height: number): SurfaceSide {
+  return sprite.y - 6 - height >= area.y ? 'above' : 'below';
+}
 /** Pass the side a visible surface already has: growing on hover must not flip it away from the pointer. */
 export function surfaceLayout(sprite: Rect, area: Rect, width: number, height: number, side = surfaceSide(sprite, area, height), edge: DockEdge | null = null): Rect {
   return clampRect({ x: Math.round(edge === 'left' ? area.x + 8 : edge === 'right' ? area.x + area.width - width - 8 : sprite.x + sprite.width / 2 - width / 2), y: Math.round(side === 'below' ? sprite.y + sprite.height + 6 : sprite.y - height - 6), width, height }, area);

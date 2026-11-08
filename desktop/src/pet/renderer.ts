@@ -18,6 +18,7 @@ import { showError } from '../local/errorMark';
 import { commandErrorMessage } from './errors';
 import { scrollGeometry } from './scroll';
 import { playSound, playSpeech, speechMouth, speechLevel, speechPlaying } from './sounds';
+import { speechPresentation, type PetSpeech } from './speechBubble';
 import { isMuted } from '../shared/mutes';
 import { dockedPose, dockTilt, peekPose, DEFAULT_FACE_BOX } from './geometry';
 import { ClipSequencer } from './clipSequence';
@@ -103,6 +104,16 @@ function runningList(): string {
   const more = groups.length > 4 ? button('toggleTray', t('其余 {n} 个', { n: groups.length - 4 }), escape(t('其余 {n} 个', { n: groups.length - 4 })), 'class="running-more"') : '';
   return `<section class="running-list" aria-label="${escape(t('运行中的线程'))}"><div class="scroll-frame" data-scroll-area><div class="task-list scroll-content" id="pet-running-list">${rows}${more}</div><div class="scroll-track" role="scrollbar" aria-label="${escape(t('滚动活动任务'))}" aria-controls="pet-running-list" aria-orientation="vertical" aria-valuemin="0" tabindex="0" hidden><div class="scroll-thumb"></div></div></div></section>`;
 }
+const speechWave = (playing: boolean): string => `<span class="speech-wave${playing ? ' playing' : ''}"${playing ? ` role="img" aria-label="${escape(t('正在播报'))}" title="${escape(t('正在播报'))}"` : ' aria-hidden="true"'}><i></i><i></i><i></i></span>`;
+/** The thread being read: one line, opening on hover or focus to what was said and where it ran. */
+function speechBubble(speech: PetSpeech, group: PetConversation): string {
+  const item = group.statusItem.key === speech.item.key ? group.statusItem : speech.item;
+  const heading = alertHeading(group.items), metadata = petMetadata(group.root);
+  const result = item.request?.summary ?? item.resultSummary ?? '';
+  const when = new Date(item.since), time = Number.isNaN(when.getTime()) ? '' : when.toLocaleTimeString(state?.locale, { hour: '2-digit', minute: '2-digit' });
+  const foot = [metadata, time].filter(Boolean).join(' · ');
+  return `<aside class="bubble speech" data-key="${escape(group.key)}" data-conversation-key="${escape(group.key)}" aria-label="${escape(t('正在播报'))}"><div class="bubble-line">${status(group.statusItem)}${button('open', group.title, heading, 'class="bubble-title"')}<span class="bubble-device"> · ${escape(item.deviceName)}</span>${speechWave(speech.playing)}${errorSlot(`bubble:${group.key}`)}</div><div class="speech-detail">${speech.text.startsWith(group.title) ? '' : `<p class="speech-heading">${heading}</p>`}<p class="speech-text">${escape(speech.text)}</p>${result && result !== speech.text ? `<p class="speech-result">${escape(result)}</p>` : ''}<div class="speech-foot"><span class="speech-meta" title="${escape(foot)}">${escape(foot)}</span>${muteButton(group)}${button('open', t('打开'), icon('open'))}</div></div></aside>`;
+}
 function renderGlass(): void {
   if (!state || state.surface !== 'glass') return;
   const input = document.querySelector<HTMLInputElement>('#reply-input'), focused = document.activeElement === input;
@@ -121,10 +132,18 @@ function renderGlass(): void {
   const bubble = state.bubble;
   const bubbleGroups = bubble ? petConversations(bubble.events.map(event => event.item), state.items) : [];
   const group = bubbleGroups[0];
-  if (state.mode === 'bubble' && bubble && group) {
+  const speech = state.mode === 'bubble' ? state.speech : null;
+  const presentation = speechPresentation(speech, bubble);
+  const speechGroup = speech ? petConversations([speech.item], state.items)[0] : undefined;
+  if (state.mode === 'bubble' && bubble && group && presentation !== 'replace') {
     const item = group.requests[0] ?? group.statusItem, count = bubbleGroups.length, event = bubble.events.find(event => event.item.key === item.key) ?? bubble.events[0];
     const heading = count > 1 ? t('{count} 完成', { count }) : alertTitle(group.items, state.items);
-    content = `<aside class="bubble ${bubble.sticky ? 'sticky' : ''}" data-key="${escape(group.key)}" data-conversation-key="${escape(group.key)}" data-alert-id="${escape(event.alertId)}"><div class="bubble-line">${status(group.statusItem)}${button('open', heading, (count > 1 ? escape(heading) : alertHeading(group.items)), `class="bubble-title"${bubble.sticky && item.request?.summary ? ' aria-describedby="bubble-summary"' : ''}`)}<span class="bubble-device" title="${escape(petMetadata(group.root))}"> · ${escape(item.deviceName)}</span>${bubble.sticky && item.request?.kind === 'approval' ? `<span data-key="${escape(item.key)}">${decisions(item, 'bubble')}${errorSlot(`bubble:${item.key}`)}</span>` : errorSlot(`bubble:${item.key}`)}</div>${bubble.sticky && item.request?.summary ? `<div class="bubble-request-line"><div class="request-summary" id="bubble-summary" title="${escape(item.request.summary)}" aria-label="${escape(item.request.summary)}">${requestSummaryHtml(item.request.summary)}</div>${group.requests.length > 1 ? button('showConversation', `${t('活动面板')} (${group.requests.length})`, `+${group.requests.length - 1}`, 'class="request-more"') : ''}</div>` : ''}</aside>${state.near ? controls() : ''}`;
+    content = `<aside class="bubble ${bubble.sticky ? 'sticky' : ''}" data-key="${escape(group.key)}" data-conversation-key="${escape(group.key)}" data-alert-id="${escape(event.alertId)}"><div class="bubble-line">${status(group.statusItem)}${button('open', heading, (count > 1 ? escape(heading) : alertHeading(group.items)), `class="bubble-title"${bubble.sticky && item.request?.summary ? ' aria-describedby="bubble-summary"' : ''}`)}<span class="bubble-device" title="${escape(petMetadata(group.root))}"> · ${escape(item.deviceName)}</span>${presentation === 'mark' && speech ? speechWave(speech.playing) : ''}${bubble.sticky && item.request?.kind === 'approval' ? `<span data-key="${escape(item.key)}">${decisions(item, 'bubble')}${errorSlot(`bubble:${item.key}`)}</span>` : errorSlot(`bubble:${item.key}`)}</div>${bubble.sticky && item.request?.summary ? `<div class="bubble-request-line"><div class="request-summary" id="bubble-summary" title="${escape(item.request.summary)}" aria-label="${escape(item.request.summary)}">${requestSummaryHtml(item.request.summary)}</div>${group.requests.length > 1 ? button('showConversation', `${t('活动面板')} (${group.requests.length})`, `+${group.requests.length - 1}`, 'class="request-more"') : ''}</div>` : ''}</aside>${state.near ? controls() : ''}`;
+  } else if (speech) content = state.near ? controls() : '';
+  if (speechGroup && speech && presentation !== 'mark') {
+    // Grow away from the pet's side of what is already there, so a request's buttons stay put.
+    const after = state.surfaceSide === 'below' && presentation === 'line' && !!bubble;
+    content = after ? content + speechBubble(speech, speechGroup) : speechBubble(speech, speechGroup) + content;
   }
   root.innerHTML = content;
   root.querySelectorAll<HTMLElement>('[data-error-id]').forEach(slot => {
@@ -149,6 +168,8 @@ root.addEventListener('pointerover', event => { if ((event.target as Element).cl
 root.addEventListener('pointerleave', () => { if (!root.contains(document.activeElement)) root.querySelector('.bubble-full-text')?.remove(); });
 root.addEventListener('focusin', event => { if ((event.target as Element).closest('.bubble-title')) showFullSummary(); });
 root.addEventListener('focusout', event => { if (!root.contains(event.relatedTarget as Node | null)) root.querySelector('.bubble-full-text')?.remove(); });
+// Opening on hover is CSS alone, so nothing else tells the window it needs to grow.
+new ResizeObserver(() => { if (root.querySelector('.bubble.speech')) measure(); }).observe(root);
 function measure(): void {
   const rect = root.getBoundingClientRect(), value = { type: 'surfaceMeasure' as const, width: Math.ceil(rect.width), height: Math.ceil(rect.height) };
   const next = JSON.stringify(value); if (next !== lastMeasure) { lastMeasure = next; void bridge.action(value); }
@@ -782,9 +803,10 @@ bridge.onCue(cue => {
   if (state?.surface !== 'sprite') return;
   void playSound(cue.sound).then(audio => { root.dataset.lastCue = `${cue.sound}:${audio}`; });
 });
-bridge.onSpeech(audio => {
+bridge.onSpeech((audio, id) => {
   if (state?.surface !== 'sprite') return;
-  void playSpeech(audio).then(() => { root.dataset.lastSpeech = String(audio.byteLength); }, () => { root.dataset.lastSpeech = 'undecodable'; });
+  const report = (playing: boolean): void => { if (id) void bridge.action({ type: 'speechState', id, playing }); };
+  void playSpeech(audio, () => report(false)).then(started => { root.dataset.lastSpeech = String(audio.byteLength); report(started); }, () => { root.dataset.lastSpeech = 'undecodable'; report(false); });
 });
 bridge.onState(next => {
   const old = state, changedMode = old?.mode !== next.mode;
@@ -819,7 +841,7 @@ bridge.onState(next => {
   }
   if (old?.detailOpen && !next.detailOpen) root.querySelector<HTMLButtonElement>('.error-mark[aria-expanded="true"]')?.click();
   if (changedMode && next.mode === 'panel') { selected = next.targetKey; selectedRequest = null; collapsedRequests.clear(); }
-  const contentKey = JSON.stringify([next.accountId, next.items, next.recent, next.mode, next.pinned, next.mode === 'bubble' && next.near, next.bubble, next.settings, next.locale, next.appearance, next.edgeHide]);
+  const contentKey = JSON.stringify([next.accountId, next.items, next.recent, next.mode, next.pinned, next.mode === 'bubble' && next.near, next.bubble, next.speech, next.speech && next.surfaceSide, next.settings, next.locale, next.appearance, next.edgeHide]);
   if (signature !== contentKey) { signature = contentKey; renderGlass(); }
   if (changedMode && next.mode === 'menu') root.querySelector<HTMLElement>('[role^="menuitem"]')?.focus();
 });

@@ -45,14 +45,17 @@ export function speechMouth(now: number): 0 | 1 | 2 {
   speechLevel(now);
   return !speech || envelope < .018 ? 0 : envelope < .055 ? 1 : 2;
 }
-/** Decodes whatever the voice service produced; a newer alert cuts off the one being read. */
-export async function playSpeech(audio: Uint8Array): Promise<void> {
+/**
+ * Decodes whatever the voice service produced; a newer alert cuts off the one being read.
+ * @returns whether this audio started. `onEnd` fires when audio that started stops, cut off or not.
+ */
+export async function playSpeech(audio: Uint8Array, onEnd?: () => void): Promise<boolean> {
   const request = ++speechRequest;
   context ??= new AudioContext();
   if (context.state !== 'running') await context.resume();
   const copy = audio.buffer.slice(audio.byteOffset, audio.byteOffset + audio.byteLength) as ArrayBuffer;
   const buffer = await context.decodeAudioData(copy);
-  if (request !== speechRequest) return;
+  if (request !== speechRequest) return false;
   speech?.stop();
   analyser?.disconnect();
   analyser = context.createAnalyser(); analyser.fftSize = 512;
@@ -60,5 +63,6 @@ export async function playSpeech(audio: Uint8Array): Promise<void> {
   const source = context.createBufferSource();
   source.buffer = buffer; source.connect(analyser); analyser.connect(context.destination); source.start();
   speech = source;
-  source.onended = () => { source.disconnect(); if (speech === source) { speech = null; analyser?.disconnect(); analyser = null; samples = null; envelope = 0; } };
+  source.onended = () => { source.disconnect(); if (speech === source) { speech = null; analyser?.disconnect(); analyser = null; samples = null; envelope = 0; } onEnd?.(); };
+  return true;
 }
