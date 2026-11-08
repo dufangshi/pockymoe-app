@@ -1,4 +1,3 @@
-import { RiveHitReadback } from './riveHit';
 import { RiveHitMask, type RiveHitMaskData } from './riveHitMask';
 import { RiveRestRouter, riveExitAnimations, type RiveRouting } from './riveRouting';
 import type { LinearAnimationInstance } from '@rive-app/webgl2-advanced';
@@ -107,18 +106,17 @@ export class RiveDrawer {
     return active || !!this.router;
   }
   private disposed = false;
-  private hitReadback: RiveHitReadback;
   alphaAt(pointer: { x: number; y: number }, suspended = false): number {
-    return this.hitReadback.alphaAt(pointer.x, pointer.y, this.canvas.width, this.canvas.height, suspended);
+    return !suspended && this.contains(pointer.x / this.canvas.width, pointer.y / this.canvas.height) ? 255 : 0;
   }
   get needsHitDraw(): boolean {
-    return this.hitReadback.needsDraw;
+    return false;
   }
   pollHit(): boolean {
-    return this.hitReadback.poll(this.canvas.width, this.canvas.height);
+    return false;
   }
   suspendHit(): void {
-    this.hitReadback.suspend();
+    // CPU masks have no queued GPU probe to cancel.
   }
   private constructor(
     readonly runtime: RiveCanvas,
@@ -129,7 +127,6 @@ export class RiveDrawer {
     readonly canvas: HTMLCanvasElement,
     readonly gl: WebGL2RenderingContext,
   ) {
-    this.hitReadback = new RiveHitReadback(gl);
   }
   static async load(
     canvas: HTMLCanvasElement,
@@ -278,14 +275,12 @@ export class RiveDrawer {
     r.flush();
     this.runtime.resolveAnimationFrame();
     if (pointer) this.alphaAt(pointer);
-    this.hitReadback.issue();
     return { active, alpha: pointer ? this.alphaAt(pointer) : 0 };
   }
 
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
-    this.hitReadback.dispose();
     for (const a of this.animations.values()) a.delete();
     this.animations.clear();
     this.machine.delete();

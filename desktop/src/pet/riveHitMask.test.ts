@@ -50,6 +50,19 @@ describe('baked Rive grab masks', () => {
       { x: 25, y: 51, width: 51, height: 27 },
     ]);
   });
+
+  it('keeps existing cadence settings and supplies legacy defaults only when omitted', () => {
+    const manifest = (procedural: object) => Buffer.from(JSON.stringify({
+      id: 'mask-defaults', displayName: 'Mask', description: '', spritesheetPath: 'spritesheet.png',
+      remoteCodex: { rive: { path: 'pet.riv', artboard: 'Pet', stateMachine: 'Pet', procedural } },
+    }));
+    expect(parseManifest(manifest({ bodyBone: 'body' })).remoteCodex?.rive?.procedural)
+      .toEqual({ bodyBone: 'body', idleFps: 24, activeFps: 60 });
+    expect(parseManifest(manifest({ bodyBone: 'body', idleFps: 30, activeFps: 30 }))
+      .remoteCodex?.rive?.procedural)
+      .toEqual({ bodyBone: 'body', idleFps: 30, activeFps: 30 });
+    expect(() => parseManifest(manifest({ bodyBone: 'body', idleFps: null }))).toThrow();
+  });
 });
 
 function parse(hitMask: unknown) {

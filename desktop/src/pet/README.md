@@ -319,12 +319,10 @@ Rive Scripting is **not filtered out**; imported scripts execute in the runtime'
 sandbox. Script authoring is outside the writer's subset.
 
 `@rive-app/webgl2-advanced` is pinned to **2.49.4**, with bundled local primary and
-fallback WASM. The drawer owns advancement, clearing and transparent WebGL2 rendering.
-Its optional one-pixel alpha probe uses pixel-pack buffers and fences, returning
-results on a later frame without waiting for GPU completion. Pet grabbing uses
-conservative bounds instead, so it queues no GPU probes and cannot depend on a
-stale alpha result. Canvas backing size follows full devicePixelRatio unless the
-pack opts into the native texture-size cap below. Existing docked geometry/masks apply. Tucked
+fallback WASM. The drawer owns advancement, clearing, transparent WebGL2 rendering
+and synchronous CPU silhouette lookup. Grabbing never queues GPU alpha probes;
+older packs without baked masks use a conservative artboard rectangle. Canvas
+backing size follows full devicePixelRatio. Docked geometry still applies. Tucked
 pets stop time advancement; settled machines stop drawing until inputs or size
 change. Runtime failure keeps the atlas visible.
 
@@ -405,7 +403,7 @@ procedural layers. Such files must not also animate the body from their machine.
 
 `rive.backing: {width, height, scale}` caps the backing store to native source
 resolution × scale (1–1.25), preserving aspect ratio. CSS controls visual size;
-alpha hit coordinates use the actual backing store. Opted-in bitmap drawing packs
+hit masks use normalized artboard coordinates. Opted-in bitmap drawing packs
 use the pinned runtime's inkbleed renderer option to avoid native MSAA; ordinary
 packs retain the existing renderer and full DPR. The native-size cap has no effect
 when the pet's CSS size × DPR is already below it. The prototype binary limit is
@@ -478,22 +476,6 @@ Record reactions at their actual display size with
 The final arguments specify CSS size and DPR (1 or 2); recordings include those
 values in their metadata and preserve the corresponding backing-store pixels.
 
-Rive authors can supply `hitMask: {width, height, clips, extra?}` alongside `motions`.
-Each `clips` key is a motion number; its value is a base64 bit plane in row-major
-order, least-significant bit first, with no padding between rows. Dimensions are
-4–64 cells per axis. Bake each plane from the union of every rendered pose in that
-clip, including procedural extensions, with a small dilation for grabbing. A
-16×18 plane with a one-cell halo fits a compact manifest. Every routed motion must
-have a plane. During exits and reactions the renderer uses the union of all
-planes, including the optional `extra` plane for reaction/transition extensions.
-The CPU lookup is synchronous on the first pointer event and has no GPU readback
-or sample age. Windows/Linux also install those cells as native window regions,
-so the OS delivers the first press and passes transparent cells to the desktop.
-macOS uses the CPU mask on forwarded pointer events; its native API does not
-support shaped input regions. Docking keeps its existing clip/peek geometry.
-Older Rive packs without masks retain conservative
-artboard bounds; raster alpha hit testing is unchanged.
-
 An optional routed clip `exits` declaration supplies fitted forward exits:
 `{everyMs:500,durationMs:1250,animationPrefix:"work-exit-",end:"rest"}`.
 Author animations numbered from zero through `ceil(durationMs/everyMs)`, with the
@@ -511,19 +493,6 @@ keep its layer separate from breathing and planted leg controls. It neither seek
 nor speeds up the source animation. `idleFps`, `activeFps`, `sourceFps` and
 `maxExitMs` are legacy import metadata; new display-rate packs should omit them.
 
-Dragging the hover capsule background uses pointer capture and a 4 CSS-pixel
-threshold. Buttons retain their actions; a background click does nothing. The
-capsule stays visible and follows the sprite throughout the drag.
-Both macOS panels accept the first mouse press, so grabbing does not require a
-separate focus click.
-Native Linux regression: `xvfb-run -a node src/pet/tools/grab.mjs PACK OUT`.
-This uses xdotool OS pointer input, 50 opaque points in each of five motion
-contexts, then 20 capsule-background drags. Fixture IPC only prepares position
-and activity; the measured drags use native mouse presses and movement. Masked
-packs also send a native press through a transparent corner to a real underlying
-fixture window before each body grab. Use `PET_GRAB_SWIFTSHADER=1` if Chromium's
-automatic graphics initialization fails on a headless Linux host.
-
 Both benchmark commands report renderer and GPU-process working-set memory in
 MiB: OS peak (including startup), maximum sampled RSS and settled median of the
 last ten one-second samples. The self-contained built-app command prints median
@@ -536,3 +505,31 @@ Native readback counts are observed `GLES2::ReadPixels` trace events. Check
 draw events either, so the native readback count is unverified on those paths.
 The built-app table labels that missing positive control separately from the
 instrumented application alpha-probe count.
+
+Rive grabbing uses an optional baked `rive.hitMask` instead of GPU alpha probes.
+The mask has `width` and `height` (4–64), `clips` mapping motion numbers to base64
+bit planes, and optional `extra` for reaction extensions. Bits are row-major,
+least-significant bit first. Bake a slightly dilated union of every displayed
+pose per clip; transitions use the complete union. Every routed clip must have a
+mask. Transparent cells pass clicks through. An older Rive pack without a mask
+uses its whole artboard rectangle conservatively, including transparent corners.
+
+Windows/Linux install the mask as a native window shape. macOS uses forwarded
+pointer moves and the synchronous CPU lookup; drawn frames also update the hit
+answer when a pose moves under a stationary cursor. Neither path reads the GPU.
+The capsule background drags both windows after 4 px of movement; buttons and
+clicks without movement keep their existing actions. macOS pet and glass windows
+accept the first mouse press. Native macOS delivery still needs testing on a Mac.
+
+Focused native X11 grab checks accept either an installed pack folder or its ZIP:
+
+```sh
+pnpm exec electron-vite build --config src/pet/tools/electron.config.ts
+PET_GRAB_SWIFTSHADER=1 xvfb-run -a node src/pet/tools/grab.mjs PACK.zip OUT
+```
+
+The harness records 250 random body grabs across five motion categories, 20
+capsule grabs, desktop click delivery, capsule/button regressions, and app alpha
+readback counts. Separate forwarded-input policy checks cover one move followed
+by a press and motion under a stationary cursor using CDP on Linux; they do not
+claim macOS OS delivery. Atlas and video hit testing retain their raster path.

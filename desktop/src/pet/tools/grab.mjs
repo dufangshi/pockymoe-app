@@ -2,14 +2,28 @@
 import { _electron as electron, expect } from '@playwright/test';
 import electronPath from 'electron';
 import { spawn, execFileSync } from 'node:child_process';
-import { mkdir, writeFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { mkdir, writeFile, readFile } from 'node:fs/promises';
+import { resolve, extname } from 'node:path';
 import { PNG } from 'pngjs';
 import { once } from 'node:events';
-const [, , pack, output] = process.argv;
-if (!pack || !output) throw new Error('Usage: node src/pet/tools/grab.mjs PACK OUT');
+const [, , source, output] = process.argv;
+if (!source || !output) throw new Error('Usage: node src/pet/tools/grab.mjs PACK_OR_ZIP OUT');
 const out = resolve(output);
 await mkdir(out, { recursive: true });
+let pack = resolve(source);
+if (extname(pack).toLowerCase() === '.zip') {
+  pack = resolve(out, 'input-pack');
+  await mkdir(pack, { recursive: true });
+  execFileSync('python3', ['-c', [
+    'import zipfile,sys,pathlib',
+    'allowed={"pet.json","pet.riv","spritesheet.webp","spritesheet.png","peek.png","peek.webp"}',
+    'with zipfile.ZipFile(sys.argv[1]) as z:',
+    ' assert len(z.infolist())<=6 and sum(i.file_size for i in z.infolist())<=256*1024*1024',
+    ' for i in z.infolist():',
+    '  assert i.filename in allowed and not i.is_dir()',
+    '  pathlib.Path(sys.argv[2],i.filename).write_bytes(z.read(i))',
+  ].join('\n'), resolve(source), pack]);
+}
 // Optional native desktop capture uses the caller's imageio-ffmpeg binary.
 const encoder = process.env.PET_GRAB_VIDEO_ENCODER;
 const video = encoder
@@ -64,7 +78,6 @@ const rows = [];
 try {
   await app.firstWindow();
   await expect.poll(() => app.evaluate(() => !!globalThis.petHarness)).toBe(true);
-  const { readFile } = await import('node:fs/promises');
   const manifest = JSON.parse(await readFile(resolve(pack, 'pet.json'), 'utf8'));
   await app.evaluate(
     (_, id) => globalThis.petHarness.settings({ petId: id, petEdgeHide: false }),
@@ -76,6 +89,19 @@ try {
     if ((await p.locator('body').getAttribute('data-surface')) === 'sprite') sprite = p;
     else glass = p;
   }
+  await expect(sprite.locator('#character')).toHaveClass(/rive/);
+  if (extname(source).toLowerCase() === '.zip') {
+    await app.evaluate((_, source) => globalThis.petHarness.importRive(source), resolve(source));
+  }
+  await sprite.addInitScript(() => {
+    window.petGrabProbes = 0;
+    const read = WebGL2RenderingContext.prototype.readPixels;
+    WebGL2RenderingContext.prototype.readPixels = function (...args) {
+      window.petGrabProbes++;
+      return read.apply(this, args);
+    };
+  });
+  await sprite.reload();
   await expect(sprite.locator('#character')).toHaveClass(/rive/);
   // A real native window behind the pet proves delivery beyond merely observing
   // setIgnoreMouseEvents. It has no preload or application credentials.
@@ -115,14 +141,17 @@ try {
     execFileSync('xdotool', ['mousemove', '--sync', String(Math.round(x)), String(Math.round(y))]);
   let seed = 72451;
   const random = () => (seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 2 ** 32;
-  for (const mood of process.env.PET_GRAB_MODES?.split(',') ?? [
-    'idle',
-    'running',
-    'waiting',
-    'reaction',
-    'transition',
-    'capsule',
-  ]) {
+  const modes = process.env.PET_GRAB_FORWARDED_ONLY === '1'
+    ? []
+    : process.env.PET_GRAB_MODES?.split(',') ?? [
+      'idle',
+      'running',
+      'waiting',
+      'reaction',
+      'transition',
+      'capsule',
+    ];
+  for (const mood of modes) {
     for (let trial = 0; trial < (mood === 'capsule' ? 20 : 50); trial++) {
       const before = await metrics();
       // Fixture setup only: keep all native drags far from screen snap edges.
@@ -225,8 +254,8 @@ try {
       }
       const start = await metrics(),
         native = mood === 'capsule' ? start.glass : start.sprite;
-      if (manifest.remoteCodex.rive.hitMask && mood !== 'capsule') {
-        const outside = await sprite.evaluate(() => {
+      if (mood !== 'capsule') {
+        const outside = manifest.remoteCodex.rive.hitMask ? await sprite.evaluate(() => {
           const bounds = document.querySelector('#character').getBoundingClientRect();
           for (const y of [3, innerHeight - 4])
             for (const x of [3, innerWidth - 4])
@@ -238,7 +267,7 @@ try {
               )
                 return { x, y };
           throw new Error('No transparent grab-mask corner');
-        });
+        }) : { x: 30 - start.sprite.x, y: 930 - start.sprite.y };
         const old = await app.evaluate(() =>
           globalThis.petDesktopProbe.webContents.executeJavaScript('window.presses'),
         );
@@ -376,6 +405,7 @@ try {
       ),
     );
   }
+  await checkForwardedInput({ app, sprite, manifest, pointer, metrics });
 } finally {
   const desktopPresses = await app
     .evaluate(() => globalThis.petDesktopProbe?.webContents.executeJavaScript('window.presses'))
@@ -387,4 +417,98 @@ try {
     video.kill('SIGINT');
     await videoExit;
   }
+}
+
+async function checkForwardedInput({ app, sprite, manifest, pointer, metrics }) {
+  await app.evaluate((_, id) => {
+    globalThis.petHarness.inputPlatform('darwin');
+    globalThis.petHarness.settings({ petId: id });
+    globalThis.petHarness.sync({
+      version: 1, accountId: 'grab', generatedAt: new Date().toISOString(),
+      focusedThreadKey: null,
+      items: [{
+        key: 'grab:forwarded', deviceId: 'grab', deviceName: 'Fixture', workspaceId: 'w',
+        workspaceLabel: 'Fixture', threadId: 'forwarded', title: 'Forwarded', state: 'running',
+        since: new Date().toISOString(), unread: false,
+      }],
+    });
+    globalThis.petHarness.cursor({ x: -10000, y: -10000 });
+  }, manifest.id);
+  await sprite.reload();
+  await expect(sprite.locator('#character')).toHaveClass(/rive/);
+  const initial = await metrics();
+  await sprite.evaluate(async (position) => {
+    await window.rcDesktop.pet.action({ type: 'dragStart', x: 0, y: 0 });
+    await window.rcDesktop.pet.action({ type: 'dragEnd', x: 450-position.x, y: 320-position.y });
+  }, initial.sprite);
+  const clip = manifest.remoteCodex.rive.routing.clips.find((clip) => clip.value === 5);
+  const pose = (phase) => sprite.evaluate(({ phase }) => window.petRiveHarness.pose(5, phase), { phase });
+  await pose(clip.durationMs * 0.2 / 1000);
+  const before = PNG.sync.read(await sprite.screenshot({ omitBackground: true, scale: 'css' }));
+  await pose(clip.durationMs * 0.6 / 1000);
+  const after = PNG.sync.read(await sprite.screenshot({ omitBackground: true, scale: 'css' }));
+  let point;
+  for (let y = 4; y < after.height - 4 && !point; y++) {
+    for (let x = 4; x < after.width - 4; x++) {
+      const index = (y * after.width + x) * 4 + 3;
+      if (before.data[index] <= 24 && after.data[index] > 220) {
+        point = { x, y };
+        break;
+      }
+    }
+  }
+  expect(point, 'a body/prop region must move into the stationary cursor').toBeDefined();
+  await pose(clip.durationMs * 0.2 / 1000);
+  const bounds = await metrics();
+  pointer(20, 20);
+  await sprite.evaluate(() => {
+    window.petForwardedMoves = 0;
+    addEventListener('pointermove', () => window.petForwardedMoves++);
+  });
+  const globalPoint = { x: bounds.sprite.x + point.x, y: bounds.sprite.y + point.y };
+  await app.evaluate((_, p) => globalThis.petHarness.cursor(p), globalPoint);
+  // Supply one forwarded move and a press through the renderer input queue.
+  // Native Linux delivery is tested above; this verifies the macOS policy only.
+  await sprite.mouse.move(point.x, point.y);
+  expect(await sprite.evaluate(() => window.petForwardedMoves)).toBe(1);
+  expect(await app.evaluate(() => globalThis.petHarness.ignored())).toBe(false);
+  const firstMoveHit = await app.evaluate(() => globalThis.petHarness.hitMessages().at(-1));
+  expect(firstMoveHit.hit).toBe(true);
+  await forwardedPressAndDrag(point, bounds, { sprite, metrics });
+
+  // Reposition the cursor once, then let a body animation move under it without
+  // another pointer event. A baked clip union already covers the incoming pose.
+  await pose(clip.durationMs * 0.2 / 1000);
+  const nextBounds = await metrics();
+  const stationary = { x: nextBounds.sprite.x + point.x, y: nextBounds.sprite.y + point.y };
+  await app.evaluate((_, p) => globalThis.petHarness.cursor(p), stationary);
+  await sprite.mouse.move(point.x, point.y);
+  await sprite.evaluate(() => { window.petForwardedMoves = 0; });
+  const location = execFileSync('xdotool', ['getmouselocation']).toString();
+  await pose(clip.durationMs * 0.6 / 1000);
+  await sprite.evaluate(
+    () => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))),
+  );
+  expect(execFileSync('xdotool', ['getmouselocation']).toString()).toBe(location);
+  expect(await sprite.evaluate(() => window.petForwardedMoves)).toBe(0);
+  expect(await app.evaluate(() => globalThis.petHarness.ignored())).toBe(false);
+  await forwardedPressAndDrag(point, nextBounds, { sprite, metrics });
+  const probes = await sprite.evaluate(() => window.petGrabProbes);
+  expect(probes).toBe(0);
+  await writeFile(resolve(out, 'forwarded-input.json'), JSON.stringify({
+    singleMoveThenPress: 'PASS', stationaryCursorThenPress: 'PASS',
+    appGPUReadbacks: probes, macOSTested: false,
+    scope: 'darwin policy in Linux Electron; forwarded move and press delivered with CDP',
+  }, null, 2));
+  await app.evaluate(() => globalThis.petHarness.inputPlatform('native'));
+}
+
+async function forwardedPressAndDrag(point, start, { sprite, metrics }) {
+  // CDP supplies the press after policy has already accepted the forwarded move.
+  // Native Linux grabs are covered above; this is not a macOS delivery test.
+  await sprite.mouse.down();
+  await sprite.mouse.move(point.x + 5, point.y);
+  await sprite.mouse.move(point.x + 35, point.y - 15);
+  await sprite.mouse.up();
+  await expect.poll(async () => (await metrics()).sprite.x).toBeGreaterThan(start.sprite.x + 10);
 }

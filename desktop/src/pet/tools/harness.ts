@@ -1,7 +1,7 @@
 import { importPetPack } from '../packs';
 import { verifyRivePack } from '../riveValidation';
 import { petMediaResponse } from '../media';
-import { app, BrowserWindow, nativeTheme, screen, session, protocol } from 'electron';
+import { app, BrowserWindow, nativeTheme, screen, session, protocol, ipcMain } from 'electron';
 import { join } from 'node:path';
 import { cpSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -20,6 +20,11 @@ const appearanceListeners = new Set<(value: Appearance) => void>();
 let appearance: Appearance = { effective: 'light', pack: 'classic', accent: '#ad782e' };
 let cursorPoint = { x: -10000, y: -10000 };
 let replyFails = false, ignored = true, failingCommand: 'resolveRequest' | 'reply' | null = null;
+const nativePlatform = process.platform;
+const hitMessages: { hit: boolean; motion?: number | null }[] = [];
+ipcMain.on('rcDesktop:pet:hitTest', (_event, hit: boolean, motion?: number | null) => {
+  hitMessages.push({ hit, motion });
+});
 const hub: ActivityHubLike = {
   snapshot: () => snapshot,
   onSnapshot: (listener) => { snapshotListeners.add(listener); return () => snapshotListeners.delete(listener); },
@@ -47,6 +52,12 @@ void app.whenReady().then(() => {
   const setIgnored = window.setIgnoreMouseEvents.bind(window);
   window.setIgnoreMouseEvents = (value, options) => { ignored = value; setIgnored(value, options); };
   Object.assign(globalThis, { petHarness: {
+    inputPlatform(value: 'darwin' | 'native') {
+      // Exercise forwarded-hit policy on Linux; this does not emulate macOS OS delivery.
+      Object.defineProperty(process, 'platform', { value: value === 'native' ? nativePlatform : value });
+      store.set({});
+    },
+    hitMessages: () => hitMessages,
     async importRive(source: string) {
       const destination = join(app.getPath('userData'), 'verified-pets');
       const pack = await importPetPack(source, destination, undefined, [], verifyRivePack);

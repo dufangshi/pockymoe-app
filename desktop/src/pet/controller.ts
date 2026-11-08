@@ -185,8 +185,9 @@ export function createPetController(deps: PetControllerDeps, benchmark?: { quad:
   let shapeMotion: number | undefined;
   let shapeEpoch = -1;
   const updateInputShape = (): void => {
-    const data = pack?.manifest.remoteCodex?.rive?.hitMask;
-    const enabled = !!data && dockAmount === 0 && process.platform !== 'darwin';
+    const rive = pack?.manifest.remoteCodex?.rive;
+    const data = rive?.hitMask;
+    const enabled = !!rive && dockAmount === 0 && process.platform !== 'darwin';
     if (shapeEpoch !== packEpoch) {
       shapeEpoch = packEpoch;
       shapeMotion = undefined;
@@ -196,7 +197,9 @@ export function createPetController(deps: PetControllerDeps, benchmark?: { quad:
     if (key === shapeKey) return;
     shapeKey = key;
     if (enabled) {
-      window.setShape(new RiveHitMask(data!).rectangles(layout.pet, shapeMotion));
+      window.setShape(data
+        ? new RiveHitMask(data).rectangles(layout.pet, shapeMotion)
+        : [layout.pet]);
       // Native shape dispatch is synchronous, including the first mouse press.
       window.setIgnoreMouseEvents(false);
     } else if (nativeRiveShape) {
@@ -930,7 +933,8 @@ export function createPetController(deps: PetControllerDeps, benchmark?: { quad:
         shapeMotion = typeof motion === 'number' ? motion : undefined;
         updateInputShape();
       }
-      window.setIgnoreMouseEvents(!nativeRiveShape && !hit, { forward: true });
+      const conservativeRive = !!pack?.manifest.remoteCodex?.rive && !data && dockAmount === 0;
+      window.setIgnoreMouseEvents(!nativeRiveShape && !conservativeRive && !hit, { forward: true });
     }
   };
   ipcMain.on('rcDesktop:pet:ready', onReady);
