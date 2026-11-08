@@ -11,13 +11,14 @@ export function summarizeNativeTrace(events) {
   return {
     readPixels: reads.length,
     drawCommands: draws.length,
+    drawCommandCoverage: draws.length > 0,
     readPixelsDurationMs: values.reduce((a, b) => a + b, 0),
     meanReadPixelsMs: values.length ? values.reduce((a, b) => a + b, 0) / values.length : null,
     p95ReadPixelsMs: values.length
       ? values[Math.min(values.length - 1, Math.floor(values.length * 0.95))]
       : null,
     scope:
-      'All GPU service processes in the isolated pet harness, including native presentation transfers; ' +
-      'app pointer probes counted separately.',
+      'Observed GLES2 GPU-service events; app pointer probes counted separately. ' +
+      'Without traced draw commands, zero reads does not establish absence of native readbacks.',
   };
 }

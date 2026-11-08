@@ -530,3 +530,9 @@ last ten one-second samples. The self-contained built-app command prints median
 peak/settled memory alongside the three-run CPU table. The source recorder and
 benchmark accept `RIVE_RECORD_SWIFTSHADER=1` and `RIVE_BENCH_SWIFTSHADER=1`
 respectively to select SwiftShader explicitly; the production backend is unchanged.
+
+Native readback counts are observed `GLES2::ReadPixels` trace events. Check
+`drawCommandCoverage` before interpreting zero: some ANGLE paths emit no GLES2
+draw events either, so the native readback count is unverified on those paths.
+The built-app table labels that missing positive control separately from the
+instrumented application alpha-probe count.

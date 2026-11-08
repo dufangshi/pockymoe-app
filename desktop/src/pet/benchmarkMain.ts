@@ -344,7 +344,10 @@ export async function runPetBenchmark(argv: string[]): Promise<void> {
         gpu: median(rows.map((row) => row.gpuProcessCPU)),
         rendererPlusGPU: total(mode),
         ratioToWebM: total(mode) / reference,
-        nativeReadsPerSecond: median(rows.map((row) => row.nativeReadsPerSecond)),
+        observedNativeReadsPerSecond: median(rows.map((row) => row.nativeReadsPerSecond)),
+        nativeReadCoverage: rows.every((row) => row.nativeTrace.drawCommandCoverage)
+          ? 'GLES2 draw events observed'
+          : 'unverified: no GLES2 draw positive control in every run',
         appReadsPerSecond: median(rows.map((row) => row.appReadsPerSecond)),
         webglDrawFramesPerSecond: median(rows.map((row) => row.drawFrames / row.elapsed)),
         rendererPeakMiB: median(rows.map((row) => row.memory.renderer.peakMiB)),
