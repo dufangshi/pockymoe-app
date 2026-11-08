@@ -51,16 +51,28 @@ describe('baked Rive grab masks', () => {
     ]);
   });
 
-  it('keeps existing cadence settings and supplies legacy defaults only when omitted', () => {
-    const manifest = (procedural: object) => Buffer.from(JSON.stringify({
-      id: 'mask-defaults', displayName: 'Mask', description: '', spritesheetPath: 'spritesheet.png',
-      remoteCodex: { rive: { path: 'pet.riv', artboard: 'Pet', stateMachine: 'Pet', procedural } },
-    }));
-    expect(parseManifest(manifest({ bodyBone: 'body' })).remoteCodex?.rive?.procedural)
-      .toEqual({ bodyBone: 'body', idleFps: 24, activeFps: 60 });
-    expect(parseManifest(manifest({ bodyBone: 'body', idleFps: 30, activeFps: 30 }))
-      .remoteCodex?.rive?.procedural)
-      .toEqual({ bodyBone: 'body', idleFps: 30, activeFps: 30 });
+  it('preserves explicit legacy metadata without requiring obsolete cadence fields', () => {
+    const manifest = (procedural: object) =>
+      Buffer.from(
+        JSON.stringify({
+          id: 'mask-defaults',
+          displayName: 'Mask',
+          description: '',
+          spritesheetPath: 'spritesheet.png',
+          remoteCodex: {
+            rive: { path: 'pet.riv', artboard: 'Pet', stateMachine: 'Pet', procedural },
+          },
+        }),
+      );
+    expect(parseManifest(manifest({ bodyBone: 'body' })).remoteCodex?.rive?.procedural).toEqual({
+      bodyBone: 'body',
+    });
+    const explicit = manifest({ bodyBone: 'body', idleFps: 30, activeFps: 30 });
+    expect(parseManifest(explicit).remoteCodex?.rive?.procedural).toEqual({
+      bodyBone: 'body',
+      idleFps: 30,
+      activeFps: 30,
+    });
     expect(() => parseManifest(manifest({ bodyBone: 'body', idleFps: null }))).toThrow();
   });
 });

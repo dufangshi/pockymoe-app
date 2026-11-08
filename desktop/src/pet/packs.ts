@@ -161,14 +161,6 @@ export function parseManifest(data: Buffer): PetManifest {
       )
         fail('invalid Rive motions');
     }
-    // Newer mask packs may omit the old cadence fields. Keep the existing
-    // player's defaults; this compatibility does not change its motion clock.
-    if (r.procedural && typeof r.procedural === 'object') {
-      if (r.procedural.idleFps === undefined) r.procedural.idleFps = 24;
-      if (r.procedural.activeFps === undefined) r.procedural.activeFps = 60;
-    }
-    if (r.routing && typeof r.routing === 'object' && r.routing.maxExitMs === undefined)
-      r.routing.maxExitMs = 350;
     if (
       r.procedural !== undefined &&
       (!r.procedural ||
