@@ -329,7 +329,8 @@ try {
     const size = await sprite.evaluate(() => ({ w: innerWidth, h: innerHeight }));
     for (const [point, expected] of [
       [{ x: (sx / n / png.width) * size.w, y: (sy / n / png.height) * size.h }, false],
-      [{ x: 0, y: 0 }, true],
+      // Animated Rive artboards intentionally keep conservative grab bounds.
+      [{ x: 0, y: 0 }, !riveBytes],
     ]) {
       await app.evaluate((_, p) => {
         const b = globalThis.petHarness.metrics().sprite;

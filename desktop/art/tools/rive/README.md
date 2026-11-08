@@ -149,12 +149,14 @@ requires consistent dimensions. Mesh positions remain part-local; normalized
 UVs address the shared atlas. Identity opacity groups may have an earlier
 identity-group parent, useful for eyelids that mask independently aimed eyes.
 
-`record.ts PACK OUTPUT SCENARIOS [24|30]` records full-resolution 648×702 PNG
-sequences. A scenario is `{name,duration,initial,events?,frameValues?}`; initial
+`record.ts PACK OUTPUT SCENARIOS [24|30|60|120]` records full-resolution 648×702 PNG
+sequences. A scenario is `{name,duration,initial,initialTime?,events?,frameValues?}`; initial
 is a motion input, events are `{at,motion}` in seconds, and frameValues optionally
 supplies typed inputs per output frame. Synthetic dragVX/dragVY fields feed the
 same spring integrator without becoming Rive contract inputs. The authored entry
 state can condition on the initial motion to begin directly at its first frame.
+`initialTime` seeks that routed clip in seconds before the first capture, for
+checking fitted keys without playing the intro.
 With `RIVE_RECORD_RIG=/local/rig.json`, per-frame JSON also records every bone's
 world matrix for deformation analysis. Procedural recordings use the production
 spring/blink code and a deterministic RNG seed; production remains random. The
@@ -241,7 +243,7 @@ out/main/index.js` after `pnpm build`. The benchmark renderer is a separate entr
 the normal pet renderer contains neither the quad nor instrumentation wrappers.
 
 The quad control retains the same Rive source clock and procedural spring inputs
-to match its adaptive 24/60 Hz schedule, while replacing all character drawing
+at the display refresh cadence, while replacing all character drawing
 with one textured quad. Its CPU includes scene advancement; its measured GPU
 work is the quad and presentation. The per-run draw-frame and call counters
 allow checking this control rather than assuming a fixed requested fps.

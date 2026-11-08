@@ -319,12 +319,12 @@ Rive Scripting is **not filtered out**; imported scripts execute in the runtime'
 sandbox. Script authoring is outside the writer's subset.
 
 `@rive-app/webgl2-advanced` is pinned to **2.49.4**, with bundled local primary and
-fallback WASM. The drawer owns advancement, clearing, transparent WebGL2 rendering
-and sparse one-pixel alpha probes after drawing. A moved cursor inside the
-canvas queues a probe at most every 100 ms. WebGL2 pixel-pack buffers and fences
-return it on a later frame without waiting for GPU completion; a new or resized
-pixel stays click-through until its result arrives. A remote or tucked cursor
-queues no probes. Canvas backing size follows full devicePixelRatio. The existing docked geometry/masks still apply. Tucked
+fallback WASM. The drawer owns advancement, clearing and transparent WebGL2 rendering.
+Its optional one-pixel alpha probe uses pixel-pack buffers and fences, returning
+results on a later frame without waiting for GPU completion. Pet grabbing uses
+conservative bounds instead, so it queues no GPU probes and cannot depend on a
+stale alpha result. Canvas backing size follows full devicePixelRatio unless the
+pack opts into the native texture-size cap below. Existing docked geometry/masks apply. Tucked
 pets stop time advancement; settled machines stop drawing until inputs or size
 change. Runtime failure keeps the atlas visible.
 
@@ -367,19 +367,17 @@ integrated in steps of at most 1/120 s; stale drag samples expire after 120 ms.
 Random blink intervals and incommensurate breathing/shift phases continue on
 all authored poses. Closed-eye sleeping art may mask the blink layer.
 
-Only these opt-in rigs interrupt intros/outros immediately on a new mood or
-reaction; their state machine must blend the same bones to the destination
-within 300 ms. Their frame gate limits slow idle/sleep/rest draws to idleFps,
-uses activeFps for work, reactions and speech, and freezes procedural time while
-tucked or under reduced motion. Packs without procedural settings keep the
-previous choreography and drawing policy.
+Procedural rigs advance at the display's `requestAnimationFrame` cadence, including
+120 Hz displays. `idleFps`, `activeFps` and `sourceFps` remain accepted as legacy
+manifest fields but no longer cap rendering or hold body time. Bones and vertices
+interpolate continuously between authored keys; breath, weight shift and spring
+inputs are not quantized. Draws are skipped only when size, inputs and the
+artboard are unchanged, or while tucked/reduced motion holds the pose. Speech
+keeps the existing 60/120 ms envelope.
 
-Procedural rigs evaluate at the configured cadence and draw only when inputs,
-size or `artboard.didChange()` require it. Breathing is quantized to 0.1, weight
-shift to 1/12, and springs to 1/1024; author small micro-motion ranges so these
-steps remain below a visible pixel at the intended size/DPR. Speech still uses
-the existing 60/120 ms envelope. The benchmark records actual WebGL readbacks
-per second as hit-test demand; draw counts come from the separate GL profile.
+For planted poses, author breathing on spine/chest/neck or spatially weighted
+control points above the hips. Root translation, root scale and a whole-body
+weight-shift layer move the feet and must not be used for kneeling idle art.
 
 A procedural pack may additionally set `eyeOpen:true` and provide a number
 input named `eyeOpen`. The pet sets this to 1 for a cursor gaze and 0 otherwise.
@@ -395,8 +393,11 @@ Source drawing packs may additionally opt into `rive.routing` with `maxExitMs`
 paint, selectors and bone coordinates**, not just a similar pose. The loader
 checks animation references; import validation requires a connected bridge graph.
 On interruption, the pet-side router scrubs the active clip to its nearer end,
-then traverses any required bridge clips within the combined exit budget, using
-smoothstep time warping. It never blends incompatible material charts. A later
+then plays required bridge clips completely. Native legs run at source speed;
+other legs use smoothstep with a peak speed of 1.5× natural speed. `maxExitMs`
+remains accepted for old manifests but no longer truncates the route. It never
+blends incompatible material charts. Reverse legs last at least 100 ms, so a
+second event immediately after entry cannot reverse a whole clip in one sample. A later
 interrupt replans from the currently displayed position. Normal choreography and
 random resting still use `RiveMotionClock`; its beat clock pauses during exit.
 The body is applied with `LinearAnimationInstance`; the state machine owns the
@@ -410,40 +411,25 @@ packs retain the existing renderer and full DPR. The native-size cap has no effe
 when the pet's CSS size × DPR is already below it. The prototype binary limit is
 96 MiB for lossless source drawing atlases; expanded ZIPs remain capped at 256 MiB.
 
-Routed source drawings may set `procedural.sourceFps` to 24 or 30. This opt-in
-keeps work, reactions and speech at the source cadence rather than using
-`activeFps` just because the mood is active. Source animation time is sampled at
-that cadence (including float32 endpoint handling). Dragging, landing, 150 ms
-after an actual cursor change, or a spring displacement >.1 / velocity >.5 use
-60 Hz for live inputs; the source drawing itself still holds between source
-samples. These spring thresholds avoid spending a draw on imperceptible noise.
-Repeated zero-time passes do not reapply an unchanged body sample. The existing
-input/dirt check skips unchanged renders, and tucked/reduced-motion poses hold.
-Packs without this field retain their previous cadence and continuous source
-animation sampling.
+Routed source drawings now use continuous source time at every display frame.
+Material selection uses that same float32 clock. Drawing keys must still share
+matching material coordinates; higher sampling cannot repair incompatible paint.
+Authors must fit inbetweens and supply shared boundaries or dedicated transitions.
 
-
-Routed source packs may author an `exitAnimation` on each clip. This is an
-optional additive correction applied with an 80 ms ramp during accelerated exits;
-it must reset its affected bones in the normal clip and be identity at shared
-boundaries. It never blends one drawing chart into another. Optional
-`exitRestMs: {start, end}` declares source-verified corridors (0–500 ms, less than
-half the clip) in which an accelerated exit may sample the exact shared rest
-paint. Neutral playback keeps every source sample. Requests rebase to the last
-displayed source time. Accelerated exits use continuous time and 60 Hz drawing;
-neutral source playback remains quantized. Zero-time procedural/draw passes cannot consume a
-boundary hold.
+Legacy `exitAnimation` and `exitRestMs` metadata remain import-compatible but
+no longer accelerate, flatten or snap an exit to rest. Complete authored legs
+supply the transition. Zero-time procedural/draw passes retain the displayed
+sample and cannot consume a boundary hold.
 
 `procedural.transientFace:true` requires `eyeOpen:true`. Gaze activates only for
 nearby cursor movement, holds for 180 ms, then fades to source paint over 180 ms.
+The cursor target interpolates at display rate between the 100 ms IPC samples.
 The authored eyeOpen layer must expose the original source pupils through an eye
 mask, and zero input must show source paint. Blink layers should use the current
 expression's lids and return to opacity zero; mouth layers should preserve its
 lip corners and mood. Closed source eyes stay closed unless the pack explicitly
-authors a wake expression. During an accelerated rest exit, transient face
-inputs yield to source paint because global exit stabilization leaves the
-source face chart. This setting preserves existing behavior for other
-packs. Preview capture accepts explicit procedural input overrides for repeatable
+authors a wake expression. Overlay charts must remain registered throughout the
+complete authored exit. Preview capture accepts explicit procedural input overrides for repeatable
 blink, gaze and speech comparisons.
 
 Rive always uses the pinned `@rive-app/webgl2-advanced` runtime. Software WebGL
@@ -458,19 +444,18 @@ suspended pose. `drawings` is an optional, strictly time-ordered list of
 `{atMs, animation}` entries fitted to successive source drawings. The player
 selects the latest entry at the displayed body time, including while that clock
 decelerates, and advances its animation at the independent reaction time. Material
-selection happens after the source frame clock is quantized, so a 60 Hz input
-update cannot select a drawing ahead of the held 24 fps body sample. Before the
+selection uses the same continuous float32 source clock as the body sample. Before
+the
 first entry it uses `animation`. All variant names are test-loaded during isolated
 import validation. The displayed body clock decelerates over `settleMs`
 (50–400 ms), then holds while the separate
 reaction animation plays; it never selects the requested upright clip's body
 drawing. The logical target is reported in `route.value`, while
 `route.animation` and `route.time` identify the actual body sample. A subsequent
-normal motion uses the shared-boundary router. Before reversing an interrupted
-reaction, the player brakes its forward animation clock over 100 ms. It then
-returns to the nearer neutral endpoint over at most 250 ms, retaining one exact
-neutral sample before routing the queued request. This keeps a large moving arm
-from reversing in one frame; the total backward exit takes at most 350 ms.
+normal motion uses the shared-boundary router. An interrupted reaction finishes
+its authored forward gesture at natural speed,
+retains the endpoint and then routes the latest queued request. There is no
+350 ms time-warp or backward reaction reversal.
 New requests replace the queued request.
 `resumeValue` and `resumeTargets` let non-waking requests resume the held lying
 pose without seeking back to its first frame. These resume targets also apply
@@ -479,9 +464,10 @@ already lying character. Authors select which requests need an awake pose.
 A routed clip with `nativeExit:true` finishes forward at source
 speed, also when it is used as a bridge. This preserves complete bed-out and
 landing performances; these protected exits deliberately take longer than the
-normal 350 ms accelerated rest route. `nativeExit:"nearest"` instead returns a
-loop to its nearer shared boundary at source speed, avoiding both a full forward
-replay and skipped drawing keys during acceleration. Such a reaction is not a shortcut
+eased shared-rest route. `nativeExit:"nearest"` returns a loop to its nearer shared
+boundary. Forward exits keep source speed; reverse exits ease into the return
+with a peak of 1.5×, avoiding an instantaneous velocity reversal. Every drawing
+key remains on the route. Such a reaction is not a shortcut
 for a complete waking or landing bridge; authors must supply those performances
 for their desired transitions. Reaction-owned properties must have neutral reset
 keys in every body animation. Import validates references and time bounds, and
@@ -491,3 +477,20 @@ Record reactions at their actual display size with
 `node art/tools/rive/record.ts PACK OUTPUT SCENARIOS.json 24 189x205 2`.
 The final arguments specify CSS size and DPR (1 or 2); recordings include those
 values in their metadata and preserve the corresponding backing-store pixels.
+
+Rive grabbing uses a conservative artboard bounding rectangle, independent of GPU
+alpha probe results. Main keeps the undocked Rive window interactive, so a first
+press cannot pass through while an asynchronous sample is missing. Transparent
+space inside that rectangle also grabs; docking still uses the existing clipped
+peek geometry. Raster hit testing is unchanged. This deliberately favors reliable
+grabbing over pixel-perfect click-through for moving Rive art.
+
+Dragging the hover capsule background uses pointer capture and a 4 CSS-pixel
+threshold. Buttons retain their actions; a background click does nothing. The
+capsule stays visible and follows the sprite throughout the drag.
+Both macOS panels accept the first mouse press, so grabbing does not require a
+separate focus click.
+Native Linux regression: `xvfb-run -a node src/pet/tools/grab.mjs PACK OUT`.
+This uses xdotool OS pointer input, 50 opaque points in each of five motion
+contexts, then 20 capsule-background drags. Fixture IPC only prepares position
+and activity; the measured drags use native mouse presses and movement.

@@ -122,9 +122,11 @@ Mini 模式：宠物缩到 72px，其余行为不变。
 
 只内置 MOE（`moe`），它也是默认宠物；源文件和构建工具保留在 `desktop/art/moe/`，通用工具保留在 `desktop/art/tools/`。其他角色一律由用户导入。原内置 `frost` 和旧 `gpt-dragon` 的选择迁移到 `moe`；用户后来导入的 `frost` 可正常选择并跨重启保留，只有 `moe` 不能被导入覆盖。未知的用户导入 id 不受迁移影响。加载器仍支持 v2 的 8×11 图集，用户可以导入。偏好设置里选宠物的控件显示缩略图和署名。
 
-**Rive 宠物包原型（`feat/rive-pet`）**：可选 `remoteCodex.rive` 声明 `pet.riv`、artboard 和 stateMachine；保留图集作为缩略图与加载失败回退。运行时固定为 `@rive-app/webgl2-advanced@2.49.4`，自行控制推进与透明 WebGL2 绘制，缺省按完整 DPR 输出；源绘画包可用 backing 声明限制到原画分辨率的 1–1.25 倍，CSS 保持显示大小。绘制后立即读取一个 alpha 像素用于命中。收起时不推进，状态机稳定后停止绘制，输入变化再唤醒；贴边与脸框几何沿用原路径。首版使用同名状态机 inputs，不写 ViewModel：state、mouth、lookX/lookY、dragging、dock，以及 complete/fail/poke/dragStart/land/wave。Rive 文件上限 96 MiB；安装前在无 preload/host bridge 的隔离 renderer 内校验 artboard、状态机及全部输入的名称与类型，成功后才原子安装。不因包含 Rive Scripting 拒绝导入。格式、状态编号与构建/预览入口见 `desktop/src/pet/README.md`；这不是已发布的格式兼容承诺。
+**Rive 宠物包原型（`feat/rive-pet`）**：可选 `remoteCodex.rive` 声明 `pet.riv`、artboard 和 stateMachine；保留图集作为缩略图与加载失败回退。运行时固定为 `@rive-app/webgl2-advanced@2.49.4`，自行控制推进与透明 WebGL2 绘制，缺省按完整 DPR 输出；源绘画包可用 backing 声明限制到原画分辨率的 1–1.25 倍，CSS 保持显示大小。展开时使用保守几何抓取范围，避免异步 alpha 结果过期导致按下穿透。收起时不推进，状态机稳定后停止绘制，输入变化再唤醒；贴边与脸框几何沿用原路径。首版使用同名状态机 inputs，不写 ViewModel：state、mouth、lookX/lookY、dragging、dock，以及 complete/fail/poke/dragStart/land/wave。Rive 文件上限 96 MiB；安装前在无 preload/host bridge 的隔离 renderer 内校验 artboard、状态机及全部输入的名称与类型，成功后才原子安装。不因包含 Rive Scripting 拒绝导入。格式、状态编号与构建/预览入口见 `desktop/src/pet/README.md`；这不是已发布的格式兼容承诺。
 
-源绘画 Rive 包可选 `procedural.sourceFps:24|30`：工作、反应与语音也按源帧率采样和绘制；拖动、落地、光标实际变化后的 150ms，或超过亚像素噪声阈值的弹簧运动临时升到 60Hz。升频只让实时输入更平滑，源绘画仍保持到下一源帧；重复的零时间推进不重新应用相同身体样本。未声明的 Rive 包与所有栅格包保持原路径。
+Rive 按显示器 requestAnimationFrame（包括 120Hz）连续推进和绘制，不再保持 24fps 源时间或量化呼吸/重心输入。静止且无输入变化、收起或减少动态时跳过绘制。共享 rest 路由完整播放过渡：自然速度或最高 1.5 倍的缓动，不再赶到 350ms；反应被打断时先按自然速度完成，再处理最新请求。源图材质坐标不同的帧仍需拟合中间画，不用插值掩盖换图。
+
+Rive 展开窗口以保守的 artboard 矩形作为抓取范围，不依赖异步 alpha 读回；矩形内部的透明处也可拖动，贴边露头沿用裁剪几何。控制胶囊背景按下后移动至少 4 CSS px 可拖动，按钮点击含义保持不变；胶囊与角色一起移动。跪坐 idle 的呼吸和摇摆应仅作用于臀部以上，不平移或缩放全身根骨。
 
 ### 2.9 语音播报
 

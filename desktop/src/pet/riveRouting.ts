@@ -43,8 +43,6 @@ interface Reaction {
   time: number;
   exit?: {
     from: number;
-    brakeTo: number;
-    brakeMs: number;
     to: number;
     elapsed: number;
     duration: number;
@@ -61,7 +59,6 @@ export interface RoutedSample {
   reaction?: { animation: string; time: number };
 }
 const ease = (value: number) => value * value * (3 - 2 * value);
-const gentleReturn = (value: number) => value ** 3 * (10 - 15 * value + 6 * value * value);
 
 function reactionAnimation(definition: RivePoseReaction, sourceMs: number): string {
   const drawings = definition.drawings ?? [];
@@ -81,7 +78,6 @@ export class RiveRestRouter {
   private elapsed = 0;
   private target?: RoutedClip;
   private boundary = false;
-  private exitElapsed = 0;
   private reaction?: Reaction;
   private afterReaction?: { value: number; restart: boolean };
   private residency?: RivePoseReaction;
@@ -132,6 +128,9 @@ export class RiveRestRouter {
 
   request(value: number, restart = false, displayedSeconds?: number): void {
     this.find(value);
+    // Setting motion and firing motionStart in the same frame is one request.
+    // A restart before the first sample must not queue a duplicate reaction.
+    if (restart && this.reaction?.value === value && this.reaction.elapsed === 0) return;
     if (
       !restart &&
       value === (this.afterReaction?.value ?? this.reaction?.value ?? (this.target ?? this.clip).value)
@@ -145,18 +144,13 @@ export class RiveRestRouter {
       if (!this.reaction.exit) {
         const from = this.reaction.time;
         const duration = this.reaction.definition.durationMs;
-        const to = from <= duration / 2 ? 0 : duration;
-        // Keep the incoming velocity while braking before a backward exit.
-        // Reversing immediately creates a one-frame extremum on large gestures.
-        const brakeMs = to === 0 && from > 0 ? Math.min(100, 2 * (duration - from)) : 0;
-        const brakeTo = from + brakeMs / 2;
+        // Complete the authored gesture at natural speed, even on interruption.
+        const to = duration;
         this.reaction.exit = {
           from,
-          brakeTo,
-          brakeMs,
           to,
           elapsed: 0,
-          duration: Math.min(250, Math.abs(to - brakeTo)),
+          duration: Math.abs(to - from),
           done: false,
         };
       }
@@ -166,7 +160,13 @@ export class RiveRestRouter {
       (rule) => rule.clips.includes(this.clip.value) && rule.targets.includes(value),
     );
     if (definition) {
-      this.reaction = { definition, value, elapsed: 0, from: this.time, time: 0 };
+      this.reaction = {
+        definition,
+        value,
+        elapsed: 0,
+        from: this.time,
+        time: 0,
+      };
       this.residency = definition.resumeValue === undefined ? undefined : definition;
       this.legs = [];
       this.target = undefined;
@@ -191,21 +191,17 @@ export class RiveRestRouter {
       { clip: this.clip, from: this.time, to: endpoint },
       ...bridge.map((clip) => ({ clip, from: 0, to: clip.durationMs })),
     ].filter((piece) => Math.abs(piece.to - piece.from) > 1e-6);
-    const acceleratedDistance = pieces
-      .filter((piece) => !piece.clip.nativeExit)
-      .reduce((sum, piece) => sum + Math.abs(piece.to - piece.from), 0);
-    const budget = Math.min(this.config.maxExitMs, acceleratedDistance);
     this.legs = pieces.map((piece) => ({
       ...piece,
-      native: !!piece.clip.nativeExit,
-      duration: piece.clip.nativeExit
-        ? Math.abs(piece.to - piece.from)
-        : (budget * Math.abs(piece.to - piece.from)) / acceleratedDistance,
+      // A reversed loop eases into its return instead of instantly reversing
+      // velocity on the event frame. Forward authored exits keep their timing.
+      native: !!piece.clip.nativeExit && piece.to > piece.from,
+      // Smoothstep peaks at 1.5x; distance milliseconds therefore bounds speed.
+      duration: Math.max(Math.abs(piece.to - piece.from), piece.to < piece.from ? 100 : 0),
     }));
     this.elapsed = 0;
     this.target = target;
     this.boundary = false;
-    this.exitElapsed = 0;
   }
 
   private reactionStep(dt: number): RoutedSample {
@@ -219,15 +215,9 @@ export class RiveRestRouter {
     if (reaction.exit) {
       const exit = reaction.exit;
       exit.elapsed += dt;
-      if (exit.elapsed < exit.brakeMs) {
-        const progress = exit.elapsed / exit.brakeMs;
-        reaction.time = exit.from + exit.brakeMs * (progress - (progress * progress) / 2);
-      } else {
-        const progress = exit.duration ? Math.min(1, (exit.elapsed - exit.brakeMs) / exit.duration) : 1;
-        const mix = exit.brakeMs ? gentleReturn(progress) : ease(progress);
-        reaction.time = exit.brakeTo + (exit.to - exit.brakeTo) * mix;
-        exit.done = progress === 1;
-      }
+      const progress = exit.duration ? Math.min(1, exit.elapsed / exit.duration) : 1;
+      reaction.time = exit.from + (exit.to - exit.from) * progress;
+      exit.done = progress === 1;
     } else {
       reaction.time = Math.min(reaction.elapsed, reaction.definition.durationMs);
     }
@@ -263,9 +253,7 @@ export class RiveRestRouter {
       this.boundary = false;
       dt = 0;
     }
-    let nativeLeg = false;
     if (this.target) {
-      this.exitElapsed += dt;
       while (this.legs.length) {
         const leg = this.legs[0];
         const take = Math.min(dt, leg.duration - this.elapsed);
@@ -273,7 +261,6 @@ export class RiveRestRouter {
         dt -= take;
         const progress = leg.duration ? this.elapsed / leg.duration : 1;
         this.clip = leg.clip;
-        nativeLeg = leg.native;
         this.time = leg.from + (leg.to - leg.from) * (leg.native ? progress : ease(progress));
         if (this.elapsed < leg.duration - 1e-6) break;
         this.time = leg.to;
@@ -290,18 +277,14 @@ export class RiveRestRouter {
       if (this.clip.loop && this.time > this.clip.durationMs + 1e-6) this.time %= this.clip.durationMs;
       else this.time = Math.min(this.time, this.clip.durationMs);
     }
-    let sample = this.time;
-    if (this.target && !nativeLeg && this.clip.exitRestMs) {
-      if (sample <= this.clip.exitRestMs.start) sample = 0;
-      else if (sample >= this.clip.durationMs - this.clip.exitRestMs.end) sample = this.clip.durationMs;
-    }
+    const sample = this.time;
     return {
       value: this.clip.value,
       animation: this.clip.animation,
       time: sample / 1000,
       leaving: !!this.target,
       boundary: this.boundary,
-      exitMix: this.target && !nativeLeg ? Math.min(1, this.exitElapsed / 80) : 0,
+      exitMix: 0,
     };
   }
 }
@@ -316,5 +299,8 @@ export function riveBackingSize(
   const scale = native
     ? Math.min(dpr, (native.width * native.scale) / width, (native.height * native.scale) / height)
     : dpr;
-  return { width: Math.max(1, Math.round(width * scale)), height: Math.max(1, Math.round(height * scale)) };
+  return {
+    width: Math.max(1, Math.round(width * scale)),
+    height: Math.max(1, Math.round(height * scale)),
+  };
 }

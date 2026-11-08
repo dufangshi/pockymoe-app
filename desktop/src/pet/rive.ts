@@ -58,13 +58,9 @@ export class RiveDrawer {
     this.motionSelected = false;
     if (this.router) {
       this.route = this.router.step(seconds);
-      this.route.time = riveSourceTime(
-        this.route.time,
-        this.config?.procedural?.sourceFps,
-        this.route.leaving && this.route.exitMix > 0,
-      );
+      this.route.time = riveSourceTime(this.route.time);
       if (this.route.reaction) {
-        // The material must follow the same held clock as the body animation.
+        // The material must follow the same continuous clock as the body animation.
         this.route.reaction.animation = this.router.reactionAnimationAt(this.route.time)!;
       }
       if (
@@ -76,14 +72,6 @@ export class RiveDrawer {
         const animation = this.animations.get(this.route.animation)!;
         animation.time = this.route.time;
         animation.apply(1);
-        const correction = this.config?.routing?.clips.find(
-          (c) => c.value === this.route!.value,
-        )?.exitAnimation;
-        if (this.route.leaving && correction) {
-          const exit = this.animations.get(correction)!;
-          exit.time = this.route.time;
-          exit.apply(this.route.exitMix);
-        }
         this.applied = {
           animation: this.route.animation,
           time: this.route.time,
@@ -96,11 +84,6 @@ export class RiveDrawer {
         reaction.time = this.route.reaction.time;
         reaction.apply(1);
       }
-    }
-    // An accelerated exit deliberately departs from its source face chart.
-    // Transient overlays yield to source paint until the destination is safe.
-    if (this.route?.leaving && this.route.exitMix > 0 && this.config?.procedural?.transientFace) {
-      for (const name of ['blink', 'mouth', 'eyeOpen', 'lookX', 'lookY']) this.inputs.get(name)!.value = 0;
     }
     const active = this.machine.advanceAndApply(seconds);
     if (this.router) this.artboard.advance(0);

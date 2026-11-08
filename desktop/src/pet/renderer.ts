@@ -1,6 +1,6 @@
 import { riveBackingSize } from './riveRouting';
 import { RiveMotionClock } from './riveMotion';
-import { RiveDynamics, RiveFrameGate, RiveSourceCadence, RiveGazePulse } from './riveDynamics';
+import { RiveDynamics, RiveGazePulse } from './riveDynamics';
 import { RiveDrawer, RIVE_STATES } from './rive';
 import { VideoClipPlayer } from './videoPlayer';
 document.documentElement.dataset.platform = navigator.userAgent.includes('Windows') ? 'win32' : '';
@@ -33,7 +33,7 @@ let draft = '', sendState: 'idle' | 'sending' | 'sent' | 'error' = 'idle';
 let selected: string | null = null, selectedRequest: string | null = null;
 const collapsedRequests = new Set<string>();
 const failures = new Map<string, { result: HostCommandResult; key?: string }>(), pending = new Set<string>();
-let drag: { id: number; x: number; y: number; moved: boolean } | null = null;
+let drag: { id: number; x: number; y: number; moved: boolean; capsule?: boolean; started?: boolean } | null = null;
 let scrollDrag: { id: number; grab: number } | null = null;
 let animationState: SpriteState = 'idle', animationStart = performance.now(), frame = 0;
 let spriteImage: HTMLImageElement | null = null, alpha: Uint8ClampedArray | null = null, lastImage = '', hit = false;
@@ -270,14 +270,11 @@ function renderSprite(): void {
 }
 
 let riveClock: RiveMotionClock | null = null;
-let riveDynamics: RiveDynamics | null = null,
-  riveGate = new RiveFrameGate();
-let riveCadence = new RiveSourceCadence(),
-  riveGaze = new RiveGazePulse();
+let riveDynamics: RiveDynamics | null = null;
+let riveGaze = new RiveGazePulse();
 let riveDrawer: RiveDrawer | null = null,
   riveToken = 0,
   riveKey = '',
-  riveActive = true,
   riveAt = 0,
   riveEpoch = -1,
   riveDragging = false;
@@ -312,11 +309,8 @@ function syncRive(): void {
         ? new RiveMotionClock(config.motions, Math.random, !!config.procedural)
         : null;
       riveDynamics = config.procedural ? new RiveDynamics() : null;
-      riveGate = new RiveFrameGate();
-      riveCadence = new RiveSourceCadence();
       riveGaze = new RiveGazePulse();
       riveDrawer = drawer;
-      riveActive = true;
       riveAt = 0;
       riveEpoch = -1;
       riveDragging = false;
@@ -352,37 +346,16 @@ function stepRive(now: number): void {
         }
       : undefined;
   const gaze = procedural?.transientFace ? riveGaze.sample(now, gazePoint) : undefined;
-  const slow = ['idle', 'sleeping', 'resting'].includes(state.mood) && !state.dragging && !speechPlaying();
-  const fps = procedural?.sourceFps
-    ? riveCadence.fps(
-        now,
-        procedural.sourceFps,
-        gaze ? { x: gaze.x, y: gaze.y } : { x: state.cursor?.x ?? 0, y: state.cursor?.y ?? 0 },
-        !!d.route?.leaving ||
-          !!gaze?.opacity ||
-          !!state.dragging ||
-          state.mood === 'landing' ||
-          !!riveDynamics?.moving,
-      )
-    : procedural && (slow ? procedural.idleFps : procedural.activeFps);
-  const scheduled = procedural
-    ? riveGate.take(
-        now,
-        Number(fps),
-        riveEpoch !== state.moodEpoch ||
-          d.canvas.width !== w ||
-          d.canvas.height !== h ||
-          (!tucked && d.needsHitDraw),
-      )
-    : null;
-  if (procedural && scheduled === null) return;
+  // requestAnimationFrame follows the display, including 120 Hz displays.
+  // Only tucked, reduced-motion or unchanged artboards may skip work.
+  const scheduled = Math.min(0.1, riveAt ? (now - riveAt) / 1000 : 0);
   let dirty = !tucked && d.needsHitDraw;
   if (d.canvas.width !== w || d.canvas.height !== h) {
     d.canvas.width = w;
     d.canvas.height = h;
     dirty = true;
   }
-  const dt = procedural ? scheduled! : Math.min(0.1, riveAt ? (now - riveAt) / 1000 : 0);
+  const dt = scheduled;
   const beat =
     !tucked && !motion.matches
       ? riveClock?.step(
@@ -466,24 +439,26 @@ function stepRive(now: number): void {
     }
     riveEpoch = state.moodEpoch;
   }
-  if (riveDynamics && procedural && !tucked && !motion.matches) {
-    // Evaluate body motion first; springs respond to the actual animated root,
-    // plus the controller's window drag velocity. Apply their blend inputs at t=0.
-    riveActive = d.advance(dt);
-    const m = d.artboard.rootBone(procedural.bodyBone).worldTransform();
-    for (const [name, value] of Object.entries(
-      riveDynamics.step(dt, { x: m.tx, y: m.ty, angle: Math.atan2(m.xy, m.xx) }, state.dragVelocity),
-    ))
-      dirty = d.set(name, value) || dirty;
-    d.advance(0);
+  if (!tucked && !motion.matches) {
+    // Advance every display frame even if a drawing is unchanged. A held key
+    // must not prevent the clock from reaching its next moving key.
+    d.advance(dt);
+    if (riveDynamics && procedural) {
+      // Springs follow the actual animated root and the window drag velocity.
+      const m = d.artboard.rootBone(procedural.bodyBone).worldTransform();
+      for (const [name, value] of Object.entries(
+        riveDynamics.step(dt, { x: m.tx, y: m.ty, angle: Math.atan2(m.xy, m.xx) }, state.dragVelocity),
+      ))
+        dirty = d.set(name, value) || dirty;
+      d.advance(0);
+    }
   }
-  if (dirty || ((procedural ? d.artboard.didChange() : riveActive) && !tucked && !motion.matches)) {
-    riveActive = d.draw(tucked || motion.matches || riveDynamics ? 0 : dt).active;
+  if (dirty || (d.artboard.didChange() && !tucked && !motion.matches)) {
+    d.draw(0);
     updateHit();
   }
   riveAt = now;
 }
-
 // A pack's clips replace the atlas for the states they cover; any other state, or a clip that
 // fails to decode, draws from the atlas. Sheets are decoded when needed and few are kept.
 const CLIP_CACHE = 6, ONE_SHOT = ['failed', 'waving', 'jumping', 'poked', 'landing'], LEAVE_MS = 600;
@@ -665,7 +640,10 @@ function opaqueAt(point: { clientX: number; clientY: number }): boolean {
   const threshold = 24 / feather;
   if (riveDrawer) {
     const pointer = { x: (x / 192) * riveDrawer.canvas.width, y: (y / 208) * riveDrawer.canvas.height };
-    return riveDrawer.alphaAt(pointer, !!state.edge && state.dockAmount > 0) > threshold;
+    // The artboard bounds are the conservative union of all animated silhouettes.
+    // A missing/stale asynchronous GPU sample must never turn a grab into a desktop click.
+    return pointer.x >= 0 && pointer.y >= 0 &&
+      pointer.x < riveDrawer.canvas.width && pointer.y < riveDrawer.canvas.height;
   }
   const talk = root.querySelector<HTMLCanvasElement>('#talk');
   if (character.classList.contains('talking') && talk) return talk.getContext('2d')!.getImageData(Math.floor(x / 192 * talk.width), Math.floor(y / 208 * talk.height), 1, 1).data[3]! > threshold;
@@ -674,27 +652,90 @@ function opaqueAt(point: { clientX: number; clientY: number }): boolean {
   const row = state.dockAmount === 1 || animationState === 'sleeping' && state.sleeping ? 0 : ANIMATIONS[animationState].row;
   return alpha[((row * 208 + y) * (spriteImage?.width ?? 1536) + (state.dockAmount === 1 ? 0 : frame) * 192 + x) * 4 + 3] > threshold;
 }
-function updateHit(): void { const next = !!drag || !!lastPointer && opaqueAt(lastPointer); if (next !== hit) { hit = next; bridge.hitTest(hit); } }
-window.addEventListener('pointermove', event => {
-  if (scrollDrag) { scrollToPointer(event.clientY); return; }
-  if (state?.surface !== 'sprite') return;
-  lastPointer = { clientX: event.clientX, clientY: event.clientY }; updateHit();
-  if (drag) { if (Math.hypot(event.screenX - drag.x, event.screenY - drag.y) >= 4) drag.moved = true; if (drag.moved) void bridge.action({ type: 'dragMove', x: event.screenX, y: event.screenY }); }
+function updateHit(force = false): void {
+  const next = !!drag || (!!lastPointer && opaqueAt(lastPointer));
+  if (force || next !== hit) {
+    hit = next;
+    bridge.hitTest(hit);
+  }
+}
+window.addEventListener('pointermove', (event) => {
+  if (scrollDrag) {
+    scrollToPointer(event.clientY);
+    return;
+  }
+  if (state?.surface !== 'sprite' && !drag) return;
+  lastPointer = { clientX: event.clientX, clientY: event.clientY };
+  updateHit();
+  if (drag) {
+    if (Math.hypot(event.screenX - drag.x, event.screenY - drag.y) >= 4) drag.moved = true;
+    if (drag.moved) {
+      if (!drag.started) {
+        drag.started = true;
+        void bridge.action({ type: 'dragStart', x: drag.x, y: drag.y });
+      }
+      void bridge.action({ type: 'dragMove', x: event.screenX, y: event.screenY });
+    }
+  }
 });
-root.addEventListener('pointerdown', event => {
+root.addEventListener('pointerdown', (event) => {
   const track = (event.target as HTMLElement).closest<HTMLElement>('.scroll-track');
-  if (track) { const thumb = track.querySelector<HTMLElement>('.scroll-thumb')!; scrollDrag = { id: event.pointerId, grab: (event.target as HTMLElement).closest('.scroll-thumb') ? event.clientY - thumb.getBoundingClientRect().top : thumb.offsetHeight / 2 }; root.setPointerCapture(event.pointerId); event.preventDefault(); scrollToPointer(event.clientY); return; }
-  if (state?.surface !== 'sprite' || !opaqueAt(event)) return;
-  event.preventDefault(); drag = { id: event.pointerId, x: event.screenX, y: event.screenY, moved: false }; root.setPointerCapture(event.pointerId); root.querySelector('#character')?.classList.add('dragging'); void bridge.action({ type: 'dragStart', x: event.screenX, y: event.screenY });
+  if (track) {
+    const thumb = track.querySelector<HTMLElement>('.scroll-thumb')!;
+    scrollDrag = {
+      id: event.pointerId,
+      grab: (event.target as HTMLElement).closest('.scroll-thumb')
+        ? event.clientY - thumb.getBoundingClientRect().top
+        : thumb.offsetHeight / 2,
+    };
+    root.setPointerCapture(event.pointerId);
+    event.preventDefault();
+    scrollToPointer(event.clientY);
+    return;
+  }
+  const capsule =
+    state?.surface !== 'sprite' &&
+    state?.mode === 'controls' &&
+    !!(event.target as HTMLElement).closest('.controls') &&
+    !(event.target as HTMLElement).closest('button, a, input, textarea, [role="button"]');
+  if (!capsule && (state?.surface !== 'sprite' || !opaqueAt(event))) return;
+  if (event.button !== 0) return;
+  if (capsule) {
+    event.preventDefault();
+    drag = {
+      id: event.pointerId,
+      x: event.screenX,
+      y: event.screenY,
+      moved: false,
+      capsule: true,
+      started: false,
+    };
+    root.setPointerCapture(event.pointerId);
+    return;
+  }
+  event.preventDefault();
+  drag = { id: event.pointerId, x: event.screenX, y: event.screenY, moved: false, started: true };
+  root.setPointerCapture(event.pointerId);
+  root.querySelector('#character')?.classList.add('dragging');
+  void bridge.action({ type: 'dragStart', x: event.screenX, y: event.screenY });
 });
 function release(event: PointerEvent, cancelled = false): void {
   if (scrollDrag) { if (root.hasPointerCapture(scrollDrag.id)) root.releasePointerCapture(scrollDrag.id); scrollDrag = null; return; }
   if (!drag) return;
-  const clicked = !drag.moved && !cancelled; if (root.hasPointerCapture(drag.id)) root.releasePointerCapture(drag.id); drag = null; root.querySelector('#character')?.classList.remove('dragging');
-  void bridge.action({ type: 'dragEnd', x: event.screenX, y: event.screenY }); if (clicked) void bridge.action({ type: 'click' });
+  const clicked = !drag.moved && !cancelled && !drag.capsule;
+  const started = drag.started;
+  if (root.hasPointerCapture(drag.id)) root.releasePointerCapture(drag.id);
+  drag = null;
+  root.querySelector('#character')?.classList.remove('dragging');
+  if (started) void bridge.action({ type: 'dragEnd', x: event.screenX, y: event.screenY });
+  if (clicked) void bridge.action({ type: 'click' });
 }
-root.addEventListener('pointerup', event => release(event)); root.addEventListener('pointercancel', event => release(event, true));
-window.addEventListener('pointerleave', () => { lastPointer = null; updateHit(); });
+root.addEventListener('pointerup', (event) => release(event));
+root.addEventListener('pointercancel', (event) => release(event, true));
+window.addEventListener('pointerleave', () => {
+  lastPointer = null;
+  updateHit();
+});
 window.addEventListener('keydown', event => {
   if (event.key === 'Escape') { event.preventDefault(); void bridge.action({ type: 'close' }); return; }
   if (!state) return;
@@ -730,6 +771,7 @@ bridge.onState(next => {
   if (next.surface === 'sprite') {
     // Another pack's sheets share nothing with this one's.
     const packKey = `${next.packName}#${next.rive?.epoch ?? next.clips?.epoch ?? 0}`;
+    const packChanged = packKey !== clipPack;
     if (packKey !== clipPack) {
       riveToken++;
       riveKey = '';
@@ -745,7 +787,11 @@ bridge.onState(next => {
           ? { clientX: next.cursor.x, clientY: next.cursor.y }
           : null;
     }
-    renderSprite(); updateHit(); return;
+    renderSprite();
+    // Main's conservative Rive policy can differ from the last alpha answer.
+    // Re-emit it when changing packs or entering/leaving the docked hit area.
+    updateHit(packChanged || (old?.dockAmount === 0) !== (next.dockAmount === 0));
+    return;
   }
   if (old?.detailOpen && !next.detailOpen) root.querySelector<HTMLButtonElement>('.error-mark[aria-expanded="true"]')?.click();
   if (changedMode && next.mode === 'panel') { selected = next.targetKey; selectedRequest = null; collapsedRequests.clear(); }

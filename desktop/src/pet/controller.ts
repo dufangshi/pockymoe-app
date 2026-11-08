@@ -165,7 +165,7 @@ export function createPetController(deps: PetControllerDeps, benchmark?: { quad:
     resizable: false,
     maximizable: false,
     minimizable: false,
-    ...(process.platform === 'darwin' ? { type: 'panel' as const } : {}),
+    ...(process.platform === 'darwin' ? { type: 'panel' as const, acceptFirstMouse: true } : {}),
     webPreferences: security,
   });
   const glass = new BrowserWindow({
@@ -831,7 +831,8 @@ export function createPetController(deps: PetControllerDeps, benchmark?: { quad:
           drag = { x: action.x, y: action.y, origin: { ...position }, moved: false };
           dragSample = { x: action.x, y: action.y, at: Date.now() };
           dragVelocity = { x: 0, y: 0 };
-          closeSurface();
+          if (panel || menu) closeSurface();
+          else glassDismissed = false;
         } else if (drag) {
           const at = Date.now(),
             seconds = Math.max(0.008, (at - dragSample.at) / 1000);
@@ -892,8 +893,12 @@ export function createPetController(deps: PetControllerDeps, benchmark?: { quad:
     emit();
   };
   const onHitTest = (event: Electron.IpcMainEvent, hit: unknown): void => {
-    if (trusted(event) === window && typeof hit === 'boolean')
-      window.setIgnoreMouseEvents(!hit, { forward: true });
+    if (trusted(event) === window && typeof hit === 'boolean') {
+      // Rive's animated bounds are conservatively grabbable. GPU probe latency
+      // must not make a first press pass through on macOS.
+      const riveBody = !!pack?.manifest.remoteCodex?.rive && dockAmount === 0;
+      window.setIgnoreMouseEvents(!riveBody && !hit, { forward: true });
+    }
   };
   ipcMain.on('rcDesktop:pet:ready', onReady);
   ipcMain.on('rcDesktop:pet:hitTest', onHitTest);
@@ -1054,6 +1059,8 @@ export function createPetController(deps: PetControllerDeps, benchmark?: { quad:
       cursor.x <= r.x + r.width + margin &&
       cursor.y >= r.y - margin &&
       cursor.y <= r.y + r.height + margin;
+    if (pack?.manifest.remoteCodex?.rive && dockAmount === 0)
+      window.setIgnoreMouseEvents(false);
     const tucked = position.edge && settings.petEdgeHide !== false && dockAmount > 0;
     const close =
       (tucked ? within(visiblePetRect(), 0) : within(bounds, 60)) || (glass.isVisible() && within(child, 8));
