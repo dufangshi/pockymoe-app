@@ -639,11 +639,7 @@ function opaqueAt(point: { clientX: number; clientY: number }): boolean {
   if (feather === 0) return false;
   const threshold = 24 / feather;
   if (riveDrawer) {
-    const pointer = { x: (x / 192) * riveDrawer.canvas.width, y: (y / 208) * riveDrawer.canvas.height };
-    // The artboard bounds are the conservative union of all animated silhouettes.
-    // A missing/stale asynchronous GPU sample must never turn a grab into a desktop click.
-    return pointer.x >= 0 && pointer.y >= 0 &&
-      pointer.x < riveDrawer.canvas.width && pointer.y < riveDrawer.canvas.height;
+    return riveDrawer.contains(x / 192, y / 208);
   }
   const talk = root.querySelector<HTMLCanvasElement>('#talk');
   if (character.classList.contains('talking') && talk) return talk.getContext('2d')!.getImageData(Math.floor(x / 192 * talk.width), Math.floor(y / 208 * talk.height), 1, 1).data[3]! > threshold;
@@ -652,11 +648,14 @@ function opaqueAt(point: { clientX: number; clientY: number }): boolean {
   const row = state.dockAmount === 1 || animationState === 'sleeping' && state.sleeping ? 0 : ANIMATIONS[animationState].row;
   return alpha[((row * 208 + y) * (spriteImage?.width ?? 1536) + (state.dockAmount === 1 ? 0 : frame) * 192 + x) * 4 + 3] > threshold;
 }
+let hitMotion: number | null | undefined;
 function updateHit(force = false): void {
   const next = !!drag || (!!lastPointer && opaqueAt(lastPointer));
-  if (force || next !== hit) {
+  const nextMotion = riveDrawer?.hitMotion;
+  if (force || next !== hit || nextMotion !== hitMotion) {
     hit = next;
-    bridge.hitTest(hit);
+    hitMotion = nextMotion;
+    bridge.hitTest(hit, hitMotion);
   }
 }
 window.addEventListener('pointermove', (event) => {

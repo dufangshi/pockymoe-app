@@ -20,6 +20,7 @@ export const RiveDrawer = {
           drawer.draw(0);
         },
         snapshot: () => drawer.route,
+        hit: (x: number, y: number) => drawer.contains(x, y),
       },
     });
     return new URLSearchParams(location.search).get('riveControl') === 'quad'

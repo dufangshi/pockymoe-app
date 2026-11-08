@@ -9,6 +9,13 @@ export interface RoutedClip {
   exitRestMs?: { start: number; end: number };
   /** Source-speed exit: forward by default, or toward the nearer shared boundary. */
   nativeExit?: boolean | 'nearest';
+  /** Natural-speed exits fitted to successive source poses, including frame zero. */
+  exits?: {
+    everyMs: number;
+    durationMs: number;
+    animationPrefix: string;
+    end: string;
+  };
 }
 export interface RivePoseReaction {
   clips: number[];
@@ -23,7 +30,8 @@ export interface RivePoseReaction {
   drawings?: { atMs: number; animation: string }[];
 }
 export interface RiveRouting {
-  maxExitMs: number;
+  /** Legacy metadata, retained only for importing older packs. */
+  maxExitMs?: number;
   clips: RoutedClip[];
   bridges: number[];
   reactions?: RivePoseReaction[];
@@ -34,6 +42,13 @@ interface Leg {
   to: number;
   duration: number;
   native: boolean;
+}
+
+/** Compact pack metadata names exit animations without listing hundreds of keys. */
+export function riveExitAnimations(clip: RoutedClip): string[] {
+  if (!clip.exits) return [];
+  const count = Math.ceil(clip.durationMs / clip.exits.everyMs) + 1;
+  return Array.from({ length: count }, (_, i) => `${clip.exits!.animationPrefix}${i}`);
 }
 interface Reaction {
   definition: RivePoseReaction;
@@ -183,25 +198,47 @@ export class RiveRestRouter {
       this.residency = undefined;
     }
     const target = this.find(value);
-    const endpoint =
-      this.clip.nativeExit === true || this.time > this.clip.durationMs / 2 ? this.clip.durationMs : 0;
-    const family = endpoint === 0 ? this.clip.start : this.clip.end;
-    const bridge = this.path(family, target.start);
-    const pieces = [
-      { clip: this.clip, from: this.time, to: endpoint },
-      ...bridge.map((clip) => ({ clip, from: 0, to: clip.durationMs })),
-    ].filter((piece) => Math.abs(piece.to - piece.from) > 1e-6);
-    this.legs = pieces.map((piece) => ({
-      ...piece,
-      // A reversed loop eases into its return instead of instantly reversing
-      // velocity on the event frame. Forward authored exits keep their timing.
-      native: !!piece.clip.nativeExit && piece.to > piece.from,
-      // Smoothstep peaks at 1.5x; distance milliseconds therefore bounds speed.
-      duration: Math.max(Math.abs(piece.to - piece.from), piece.to < piece.from ? 100 : 0),
-    }));
+    this.legs = this.exitLegs(target);
     this.elapsed = 0;
     this.target = target;
     this.boundary = false;
+  }
+
+  private exitLegs(target: RoutedClip): Leg[] {
+    const exit = this.clip.exits;
+    const exitIndex = exit ? Math.ceil(this.time / exit.everyMs) : 0;
+    const endpoint = exit
+      ? Math.min(this.clip.durationMs, exitIndex * exit.everyMs)
+      : this.clip.nativeExit === true || this.time > this.clip.durationMs / 2
+        ? this.clip.durationMs
+        : 0;
+    const family = exit ? exit.end : endpoint === 0 ? this.clip.start : this.clip.end;
+    const bridge = this.path(family, target.start);
+    const authoredExit: RoutedClip | undefined = exit
+      ? {
+          value: this.clip.value,
+          animation: `${exit.animationPrefix}${exitIndex}`,
+          durationMs: exit.durationMs,
+          // The start is a fitted source pose. Future interrupts finish this
+          // exit forward; they must never reverse into that unrelated pose.
+          start: exit.end,
+          end: exit.end,
+          nativeExit: true,
+        }
+      : undefined;
+    const pieces = [
+      { clip: this.clip, from: this.time, to: endpoint },
+      ...(authoredExit ? [{ clip: authoredExit, from: 0, to: authoredExit.durationMs }] : []),
+      ...bridge.map((clip) => ({ clip, from: 0, to: clip.durationMs })),
+    ].filter((piece) => Math.abs(piece.to - piece.from) > 1e-6);
+    return pieces.map((piece) => ({
+      ...piece,
+      // A reversed loop eases into its return instead of instantly reversing
+      // velocity on the event frame. Forward authored exits keep their timing.
+      native: (!!piece.clip.nativeExit || !!piece.clip.exits) && piece.to > piece.from,
+      // Smoothstep peaks at 1.5x; distance milliseconds therefore bounds speed.
+      duration: Math.max(Math.abs(piece.to - piece.from), piece.to < piece.from ? 100 : 0),
+    }));
   }
 
   private reactionStep(dt: number): RoutedSample {

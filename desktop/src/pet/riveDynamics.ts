@@ -10,12 +10,26 @@ export const RIVE_DYNAMIC_INPUTS = [
 export interface RiveProcedural {
   bodyBone: string;
   /** Legacy pack metadata; animation now follows the display's requestAnimationFrame. */
-  idleFps: 15 | 24 | 30;
-  activeFps: 30 | 60;
+  idleFps?: 15 | 24 | 30;
+  activeFps?: 30 | 60;
   eyeOpen?: boolean;
   /** Legacy source sampling metadata, never a runtime clock quantizer. */
   sourceFps?: 24 | 30;
   transientFace?: boolean;
+  /** An authored upper-body acknowledgment while a longer exit is running. */
+  response?: boolean;
+}
+
+/** An event cue, separate from source playback and never time-warping its clock. */
+export class RiveResponse {
+  private age = Infinity;
+  request(): void {
+    this.age = 0;
+  }
+  step(seconds: number): number {
+    this.age += Math.max(0, seconds);
+    return this.age < 0.48 ? Math.sin(Math.PI * this.age / 0.48) : 0;
+  }
 }
 export interface BodySample {
   x: number;

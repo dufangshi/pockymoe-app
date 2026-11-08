@@ -49,6 +49,7 @@ const app = await electron.launch({
   args: [
     '--no-sandbox',
     '--enable-unsafe-swiftshader',
+    ...(process.env.PET_GRAB_SWIFTSHADER === '1' ? ['--use-angle=swiftshader'] : []),
     '--ozone-platform=x11',
     resolve('.local/desktop-evidence/pet/qa1/harness/main/index.js'),
   ],
@@ -76,6 +77,38 @@ try {
     else glass = p;
   }
   await expect(sprite.locator('#character')).toHaveClass(/rive/);
+  // A real native window behind the pet proves delivery beyond merely observing
+  // setIgnoreMouseEvents. It has no preload or application credentials.
+  await app.evaluate(async ({ BrowserWindow }) => {
+    const probe = new BrowserWindow({
+      x: 0,
+      y: 0,
+      width: 1280,
+      height: 1000,
+      frame: false,
+      backgroundColor: '#e5e9ed',
+      skipTaskbar: true,
+      webPreferences: { contextIsolation: true, sandbox: true },
+    });
+    await probe.loadURL(
+      'data:text/html,' +
+        encodeURIComponent(
+          '<body style="margin:0;background:#e5e9ed"><script>' +
+            'window.presses=0;addEventListener("pointerdown",()=>window.presses++);</script>',
+        ),
+    );
+    probe.showInactive();
+    globalThis.petDesktopProbe = probe;
+  });
+  const petWindowIds = await app.evaluate(({ BrowserWindow }) =>
+    BrowserWindow.getAllWindows()
+      .filter((window) => window !== globalThis.petDesktopProbe)
+      .sort((a, b) => Number(!!a.getParentWindow()) - Number(!!b.getParentWindow()))
+      .map((window) => window.getNativeWindowHandle().readUInt32LE(0)),
+  );
+  // xvfb-run has no window manager to honor always-on-top hints. Explicitly
+  // place only our own desktop fixture behind the two pet windows.
+  for (const id of petWindowIds) execFileSync('xdotool', ['windowraise', String(id)]);
   const action = (v) => sprite.evaluate((v) => window.rcDesktop.pet.action(v), v);
   const metrics = () => app.evaluate(() => globalThis.petHarness.metrics());
   const pointer = (x, y) =>
@@ -192,6 +225,34 @@ try {
       }
       const start = await metrics(),
         native = mood === 'capsule' ? start.glass : start.sprite;
+      if (manifest.remoteCodex.rive.hitMask && mood !== 'capsule') {
+        const outside = await sprite.evaluate(() => {
+          const bounds = document.querySelector('#character').getBoundingClientRect();
+          for (const y of [3, innerHeight - 4])
+            for (const x of [3, innerWidth - 4])
+              if (
+                !window.petRiveHarness.hit(
+                  (x - bounds.x) / bounds.width,
+                  (y - bounds.y) / bounds.height,
+                )
+              )
+                return { x, y };
+          throw new Error('No transparent grab-mask corner');
+        });
+        const old = await app.evaluate(() =>
+          globalThis.petDesktopProbe.webContents.executeJavaScript('window.presses'),
+        );
+        pointer(start.sprite.x + outside.x, start.sprite.y + outside.y);
+        execFileSync('xdotool', ['mousedown', '1']);
+        execFileSync('xdotool', ['mouseup', '1']);
+        await expect
+          .poll(() =>
+            app.evaluate(() =>
+              globalThis.petDesktopProbe.webContents.executeJavaScript('window.presses'),
+            ),
+          )
+          .toBe(old + 1);
+      }
       const route = await sprite.evaluate(() => window.petRiveHarness.snapshot());
       if (value !== undefined) expect(route.value).toBe(value);
       if (mood === 'transition') expect(route.leaving).toBe(true);
@@ -200,9 +261,22 @@ try {
       pointer(native.x + x + 5, native.y + y);
       pointer(native.x + x + 35, native.y + y - 15);
       execFileSync('xdotool', ['mouseup', '1']);
-      await expect
-        .poll(async () => (await metrics()).sprite.x)
-        .toBeGreaterThan(start.sprite.x + 10);
+      try {
+        await expect
+          .poll(async () => (await metrics()).sprite.x)
+          .toBeGreaterThan(start.sprite.x + 10);
+      } catch (error) {
+        rows.push({
+          mood,
+          trial,
+          opaquePoint: { x, y },
+          route,
+          pass: false,
+          nativePointer: execFileSync('xdotool', ['getmouselocation']).toString().trim(),
+          ignored: await app.evaluate(() => globalThis.petHarness.ignored()),
+        });
+        throw error;
+      }
       const after = await metrics();
       if (mood === 'capsule') {
         expect(after.glass.x - start.glass.x).toBe(after.sprite.x - start.sprite.x);
@@ -303,6 +377,10 @@ try {
     );
   }
 } finally {
+  const desktopPresses = await app
+    .evaluate(() => globalThis.petDesktopProbe?.webContents.executeJavaScript('window.presses'))
+    .catch(() => null);
+  await writeFile(resolve(out, 'click-through.json'), JSON.stringify({ desktopPresses }, null, 2));
   await writeFile(resolve(out, 'results.json'), JSON.stringify(rows, null, 2));
   await app.close();
   if (video) {

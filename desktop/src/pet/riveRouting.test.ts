@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { RiveRestRouter, riveBackingSize, type RiveRouting } from './riveRouting';
+import { RiveRestRouter, riveBackingSize, riveExitAnimations, type RiveRouting } from './riveRouting';
 const config: RiveRouting = {
   maxExitMs: 350,
   bridges: [2, 3],
@@ -44,6 +44,50 @@ const config: RiveRouting = {
   ],
 };
 describe('material-safe routing', () => {
+  it('takes fitted forward exits at every loop phase instead of reversing long gestures', () => {
+    const fixture = structuredClone(config);
+    const work = fixture.clips[1];
+    work.durationMs = 11500;
+    work.loop = true;
+    work.exits = { everyMs: 500, durationMs: 1250, animationPrefix: 'work-exit-', end: 'rest' };
+    expect(riveExitAnimations(work)).toHaveLength(24);
+    for (const phase of [0.25, 0.5, 0.75]) {
+      const router = new RiveRestRouter(fixture, 1);
+      router.seek(1, work.durationMs * phase / 1000);
+      router.request(0);
+      let previous = router.step(0), elapsed = 0, entered = false;
+      for (let i = 0; i < 240; i++) {
+        const next = router.step(1 / 120);
+        elapsed += 1 / 120;
+        if (next.animation === previous.animation)
+          expect(next.time).toBeGreaterThanOrEqual(previous.time - 1e-6);
+        if (next.animation.startsWith('work-exit-')) entered = true;
+        if (!next.leaving) break;
+        previous = next;
+      }
+      expect(entered).toBe(true);
+      expect(elapsed).toBeLessThan(1.8);
+      expect(router.step(0).value).toBe(0);
+    }
+  });
+
+  it('finishes an authored exit forward when a second event interrupts it', () => {
+    const fixture = structuredClone(config);
+    fixture.clips[1].exits = {
+      everyMs: 500, durationMs: 1250, animationPrefix: 'work-exit-', end: 'rest',
+    };
+    const router = new RiveRestRouter(fixture, 1);
+    router.seek(1, 0.5);
+    router.request(0);
+    const before = router.step(0.2);
+    expect(before.animation).toBe('work-exit-1');
+    router.request(2);
+    const after = router.step(0.1);
+    expect(after.animation).toBe(before.animation);
+    expect(after.time).toBeCloseTo(0.3);
+    router.step(1);
+    expect(router.step(0.1).animation).toBe('bed-in');
+  });
   it('routes every pair through shared boundaries without exceeding 1.5x natural speed', () => {
     for (const from of config.clips)
       for (const target of config.clips)

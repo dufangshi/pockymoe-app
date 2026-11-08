@@ -1,4 +1,5 @@
 import type { RivePack } from './rive';
+import { RiveHitMask } from './riveHitMask';
 import { inspectWebM } from './webm';
 import type { PeekArt } from './geometry';
 import type { FaceBox } from './geometry';
@@ -166,12 +167,14 @@ export function parseManifest(data: Buffer): PetManifest {
         typeof r.procedural.bodyBone !== 'string' ||
         !r.procedural.bodyBone.length ||
         r.procedural.bodyBone.length > 100 ||
-        ![15, 24, 30].includes(r.procedural.idleFps) ||
-        ![30, 60].includes(r.procedural.activeFps))
+        (r.procedural.idleFps !== undefined && ![15, 24, 30].includes(r.procedural.idleFps)) ||
+        (r.procedural.activeFps !== undefined && ![30, 60].includes(r.procedural.activeFps)))
     )
       fail('invalid Rive procedural settings');
     if (r.procedural?.eyeOpen !== undefined && typeof r.procedural.eyeOpen !== 'boolean')
       fail('invalid Rive eyeOpen setting');
+    if (r.procedural?.response !== undefined && typeof r.procedural.response !== 'boolean')
+      fail('invalid Rive response setting');
     if (
       r.procedural?.transientFace !== undefined &&
       (typeof r.procedural.transientFace !== 'boolean' ||
@@ -194,9 +197,8 @@ export function parseManifest(data: Buffer): PetManifest {
       if (
         !q ||
         !r.motions ||
-        !Number.isFinite(q.maxExitMs) ||
-        q.maxExitMs < 100 ||
-        q.maxExitMs > 400 ||
+        (q.maxExitMs !== undefined &&
+          (!Number.isFinite(q.maxExitMs) || q.maxExitMs < 100 || q.maxExitMs > 400)) ||
         !Array.isArray(q.clips) ||
         !q.clips.length ||
         q.clips.length > 128 ||
@@ -230,6 +232,21 @@ export function parseManifest(data: Buffer): PetManifest {
         )
       )
         fail('invalid Rive exit animation');
+      if (
+        q.clips.some((c) => {
+          const e = c.exits;
+          return (
+            e !== undefined &&
+            (!e ||
+              !Number.isFinite(e.everyMs) || e.everyMs < 100 || e.everyMs > 1000 ||
+              !Number.isFinite(e.durationMs) || e.durationMs < 250 || e.durationMs > 2500 ||
+              typeof e.animationPrefix !== 'string' || !e.animationPrefix.length ||
+              e.animationPrefix.length > 90 ||
+              !q.clips.some((other) => other.start === e.end || other.end === e.end))
+          );
+        })
+      )
+        fail('invalid Rive authored exits');
       if (
         q.clips.some(
           (c) =>
@@ -315,6 +332,15 @@ export function parseManifest(data: Buffer): PetManifest {
         if (families.some((n) => !seen.has(n))) fail('Rive routing has disconnected boundaries');
       }
     }
+    if (r.hitMask !== undefined) {
+      try {
+        new RiveHitMask(r.hitMask);
+        if (r.routing?.clips.some((c) => !(c.value in r.hitMask!.clips)))
+          fail('Rive hit mask misses a motion');
+      } catch {
+        fail('invalid Rive hit mask');
+      }
+    }
     remoteCodex.rive = {
       path: 'pet.riv',
       artboard: r.artboard,
@@ -323,6 +349,7 @@ export function parseManifest(data: Buffer): PetManifest {
       ...(r.procedural ? { procedural: r.procedural } : {}),
       ...(r.routing ? { routing: r.routing } : {}),
       ...(r.backing ? { backing: r.backing } : {}),
+      ...(r.hitMask ? { hitMask: r.hitMask } : {}),
     };
   }
   const extension = extensions?.sleeping as SleepingStrip | undefined;

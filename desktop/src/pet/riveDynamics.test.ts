@@ -1,5 +1,18 @@
 import { describe, it, expect } from 'vitest';
-import { RiveDynamics, RiveGazePulse, riveSourceTime } from './riveDynamics';
+import { RiveDynamics, RiveGazePulse, RiveResponse, riveSourceTime } from './riveDynamics';
+describe('event acknowledgment', () => {
+  it('responds on the next display frame and settles without altering the source clock', () => {
+    const response = new RiveResponse();
+    expect(response.step(1)).toBe(0);
+    response.request();
+    expect(response.step(0)).toBe(0);
+    expect(response.step(1 / 120)).toBeGreaterThan(0);
+    expect(response.step(0.1)).toBeGreaterThan(0.6);
+    response.request();
+    expect(response.step(0.1)).toBeGreaterThan(0.6);
+    expect(response.step(0.5)).toBe(0);
+  });
+});
 describe('Rive procedural motion', () => {
   it('reacts to movement and drag, then damps to rest at different frame cadences', () => {
     for (const hz of [30, 60, 120]) {

@@ -1,8 +1,9 @@
 import { RiveHitReadback } from './riveHit';
-import { RiveRestRouter, type RiveRouting } from './riveRouting';
+import { RiveHitMask, type RiveHitMaskData } from './riveHitMask';
+import { RiveRestRouter, riveExitAnimations, type RiveRouting } from './riveRouting';
 import type { LinearAnimationInstance } from '@rive-app/webgl2-advanced';
 import type { RiveMotions } from './riveMotion';
-import { RIVE_DYNAMIC_INPUTS, riveSourceTime, type RiveProcedural } from './riveDynamics';
+import { RIVE_DYNAMIC_INPUTS, RiveResponse, riveSourceTime, type RiveProcedural } from './riveDynamics';
 import Rive, {
   type RiveCanvas,
   type File,
@@ -33,6 +34,7 @@ export interface RivePack {
   procedural?: RiveProcedural;
   routing?: RiveRouting;
   backing?: { width: number; height: number; scale: number };
+  hitMask?: RiveHitMaskData;
 }
 let runtime: Promise<RiveCanvas> | undefined;
 export function riveRuntime(): Promise<RiveCanvas> {
@@ -47,7 +49,20 @@ export class RiveDrawer {
   private router?: RiveRestRouter;
   private animations = new Map<string, LinearAnimationInstance>();
   private config?: RivePack;
+  private hitMask?: RiveHitMask;
+  get hitMotion(): number | null | undefined {
+    if (!this.hitMask) return undefined;
+    return this.route?.leaving || this.route?.reaction ? null : (this.route?.value ?? null);
+  }
+  /** Synchronous CPU lookup, independent of GPU readback and animation clocks. */
+  contains(x: number, y: number): boolean {
+    return this.hitMask
+      ? this.hitMask.contains(x, y, this.hitMotion ?? undefined)
+      : x >= 0 && y >= 0 && x < 1 && y < 1;
+  }
   private motionSelected = false;
+  private ready = false;
+  private response = new RiveResponse();
   private applied?: { animation: string; time: number; exitMix: number; reaction?: string };
   route?: ReturnType<RiveRestRouter['step']>;
   seekMotion(value: number, seconds: number): void {
@@ -85,6 +100,8 @@ export class RiveDrawer {
         reaction.apply(1);
       }
     }
+    if (this.config?.procedural?.response)
+      this.inputs.get('response')!.value = this.response.step(seconds);
     const active = this.machine.advanceAndApply(seconds);
     if (this.router) this.artboard.advance(0);
     return active || !!this.router;
@@ -155,6 +172,7 @@ export class RiveDrawer {
         ...(config.motions ? { motion: 'number', motionStart: 'trigger' } : {}),
         ...(config.procedural ? Object.fromEntries(RIVE_DYNAMIC_INPUTS.map((n) => [n, 'number'])) : {}),
         ...(config.procedural?.eyeOpen ? { eyeOpen: 'number' } : {}),
+        ...(config.procedural?.response ? { response: 'number' } : {}),
       })) {
         const input = drawer.inputs.get(name);
         if (!input || input.type !== r.SMIInput[type as 'number' | 'bool' | 'trigger'])
@@ -163,11 +181,13 @@ export class RiveDrawer {
       if (config.procedural && !artboard.rootBone(config.procedural.bodyBone))
         throw new Error(`Missing procedural body bone: ${config.procedural.bodyBone}`);
       drawer.config = config;
+      drawer.hitMask = config.hitMask ? new RiveHitMask(config.hitMask) : undefined;
       if (config.routing) {
         for (const name of new Set([
           ...config.routing.clips.flatMap((clip) => [
             clip.animation,
             ...(clip.exitAnimation ? [clip.exitAnimation] : []),
+            ...riveExitAnimations(clip),
           ]),
           ...(config.routing.reactions?.flatMap((r) => [
             r.animation,
@@ -186,6 +206,7 @@ export class RiveDrawer {
       }
       for (const [name, value] of Object.entries(initial)) drawer.set(name, value);
       drawer.draw(0);
+      drawer.ready = true;
       return drawer;
     } catch (error) {
       if (drawer) drawer.dispose();
@@ -205,6 +226,7 @@ export class RiveDrawer {
     if (typeof value === 'number') value = Math.fround(value);
     if (input.value === value) return false;
     input.value = value;
+    if (this.ready && (name === 'motion' || name === 'state')) this.response.request();
     if (this.router && name === 'motion') this.router.request(Number(value), false, this.route?.time);
     if (this.router && name === 'state') {
       const motion = this.config?.motions?.[RIVE_STATES[Number(value)]]?.[0];
@@ -216,6 +238,8 @@ export class RiveDrawer {
     const input = this.inputs.get(name);
     if (!input) throw new Error(`Missing trigger ${name}`);
     input.fire();
+    if (this.ready && (name === 'motionStart' || (RIVE_TRIGGERS as readonly string[]).includes(name)))
+      this.response.request();
     if (this.router && name === 'motionStart')
       this.router.request(Number(this.inputs.get('motion')?.value), true, this.route?.time);
     const mood = (

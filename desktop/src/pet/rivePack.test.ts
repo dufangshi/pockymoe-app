@@ -11,6 +11,22 @@ const manifest = {
   remoteCodex: { rive: { path: 'pet.riv', artboard: 'Pet', stateMachine: 'Pet' } },
 };
 describe('Rive pack import', () => {
+  it('does not require obsolete frame-rate or exit-speed settings', () => {
+    const rive = {
+      ...manifest.remoteCodex.rive,
+      procedural: { bodyBone: 'body' },
+      motions: { idle: [{ value: 0, durationMs: 1000 }] },
+      routing: {
+        bridges: [],
+        clips: [{ value: 0, animation: 'idle', durationMs: 1000, start: 'rest', end: 'rest' }],
+      },
+    };
+    const parse = (config: unknown) =>
+      parseManifest(Buffer.from(JSON.stringify({ ...manifest, remoteCodex: { rive: config } })));
+    expect(parse(rive).remoteCodex?.rive).toEqual(rive);
+    expect(() => parse({ ...rive, procedural: { bodyBone: 'body', idleFps: 0 } })).toThrow();
+    expect(() => parse({ ...rive, routing: { ...rive.routing, maxExitMs: 0 } })).toThrow();
+  });
   it('rejects unsafe paths, missing selectors and unsupported ViewModel declarations', () => {
     for (const rive of [
       { ...manifest.remoteCodex.rive, path: '../pet.riv' },

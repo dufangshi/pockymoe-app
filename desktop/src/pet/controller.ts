@@ -1,4 +1,5 @@
 import { verifyRivePack } from './riveValidation';
+import { RiveHitMask } from './riveHitMask';
 import { petMedia } from './media';
 import { app, BrowserWindow, dialog, ipcMain, nativeImage, nativeTheme, screen } from 'electron';
 import { release } from 'node:os';
@@ -179,6 +180,31 @@ export function createPetController(deps: PetControllerDeps, benchmark?: { quad:
   configureOverlay(window);
   configureOverlay(glass);
   window.setIgnoreMouseEvents(true, { forward: true });
+  let nativeRiveShape = false;
+  let shapeKey = '';
+  let shapeMotion: number | undefined;
+  let shapeEpoch = -1;
+  const updateInputShape = (): void => {
+    const data = pack?.manifest.remoteCodex?.rive?.hitMask;
+    const enabled = !!data && dockAmount === 0 && process.platform !== 'darwin';
+    if (shapeEpoch !== packEpoch) {
+      shapeEpoch = packEpoch;
+      shapeMotion = undefined;
+    }
+    const layout = petLayout(position, display().workArea, petHeight(settings));
+    const key = enabled ? `${packEpoch}:${layout.pet.width}:${layout.pet.height}:${shapeMotion}` : '';
+    if (key === shapeKey) return;
+    shapeKey = key;
+    if (enabled) {
+      window.setShape(new RiveHitMask(data!).rectangles(layout.pet, shapeMotion));
+      // Native shape dispatch is synchronous, including the first mouse press.
+      window.setIgnoreMouseEvents(false);
+    } else if (nativeRiveShape) {
+      window.setShape([]);
+      window.setIgnoreMouseEvents(true, { forward: true });
+    }
+    nativeRiveShape = enabled;
+  };
   for (const view of [window, glass]) {
     view.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
     view.webContents.on('will-navigate', (event) => event.preventDefault());
@@ -406,6 +432,7 @@ export function createPetController(deps: PetControllerDeps, benchmark?: { quad:
     const bubble = snoozed ? null : bubbles.current;
     mode = panel ? 'panel' : menu ? 'menu' : bubble && !controlsPinned ? 'bubble' : 'controls';
     const controlsShown = near || controlsPinned;
+    updateInputShape();
     const layout = petLayout(position, display().workArea, petHeight(settings), {
       dockAmount,
       faceBox: pack?.manifest.remoteCodex?.faceBox,
@@ -892,12 +919,18 @@ export function createPetController(deps: PetControllerDeps, benchmark?: { quad:
     }
     emit();
   };
-  const onHitTest = (event: Electron.IpcMainEvent, hit: unknown): void => {
+  const onHitTest = (event: Electron.IpcMainEvent, hit: unknown, motion?: unknown): void => {
     if (trusted(event) === window && typeof hit === 'boolean') {
-      // Rive's animated bounds are conservatively grabbable. GPU probe latency
-      // must not make a first press pass through on macOS.
-      const riveBody = !!pack?.manifest.remoteCodex?.rive && dockAmount === 0;
-      window.setIgnoreMouseEvents(!riveBody && !hit, { forward: true });
+      const data = pack?.manifest.remoteCodex?.rive?.hitMask;
+      if (
+        data &&
+        (motion === null ||
+          typeof motion === 'number' && Number.isInteger(motion) && motion in data.clips)
+      ) {
+        shapeMotion = typeof motion === 'number' ? motion : undefined;
+        updateInputShape();
+      }
+      window.setIgnoreMouseEvents(!nativeRiveShape && !hit, { forward: true });
     }
   };
   ipcMain.on('rcDesktop:pet:ready', onReady);
@@ -1059,8 +1092,6 @@ export function createPetController(deps: PetControllerDeps, benchmark?: { quad:
       cursor.x <= r.x + r.width + margin &&
       cursor.y >= r.y - margin &&
       cursor.y <= r.y + r.height + margin;
-    if (pack?.manifest.remoteCodex?.rive && dockAmount === 0)
-      window.setIgnoreMouseEvents(false);
     const tucked = position.edge && settings.petEdgeHide !== false && dockAmount > 0;
     const close =
       (tucked ? within(visiblePetRect(), 0) : within(bounds, 60)) || (glass.isVisible() && within(child, 8));
