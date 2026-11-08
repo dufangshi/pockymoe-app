@@ -30,6 +30,8 @@ describe('baked Rive grab masks', () => {
       { ...mask, clips: { 0: '@@' } },
       { ...mask, clips: { 0: 'YA==' } },
       { ...mask, clips: { 0: 'AAA=' } },
+      // A bit outside the grid must not make an empty native region look nonempty.
+      { width: 5, height: 5, clips: { 0: 'AAAAgA==' } },
     ];
     for (const invalid of invalidMasks) {
       expect(() => new RiveHitMask(invalid)).toThrow();

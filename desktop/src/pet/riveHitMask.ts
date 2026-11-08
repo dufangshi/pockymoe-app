@@ -22,6 +22,9 @@ export class RiveHitMask {
         throw new Error('Invalid Rive hit-mask encoding');
       const bytes = Uint8Array.from(atob(encoded), (c) => c.charCodeAt(0));
       if (bytes.length !== length) throw new Error('Invalid Rive hit-mask length');
+      const finalBits = (width * height) % 8;
+      if (finalBits && bytes[length - 1] >>> finalBits)
+        throw new Error('Invalid Rive hit-mask padding');
       return bytes;
     };
     this.union = data.extra === undefined ? new Uint8Array(length) : decode(data.extra);
