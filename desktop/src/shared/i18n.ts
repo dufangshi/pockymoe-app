@@ -30,6 +30,7 @@ export const english = {
   "正在读取…": "Reading…",
   "恢复播报此对话": "Announce this conversation again",
   "不再播报此对话": "Stop announcing this conversation",
+  "正在播报": "Announcing",
   "{upstream}：这台设备的 Supervisor 要更新到 0.13.43 或更新版本才能总结。可以更新它，或换一台已更新设备上的上游。": "{upstream}: this device's Supervisor needs 0.13.43 or newer for summaries. Update it, or choose an upstream on an updated device.",
   "{device} 的 Supervisor 是 {version}，要更新到 0.13.43 或更新版本才能总结。": "{device} runs Supervisor {version}. Summaries need 0.13.43 or newer.",
   "需更新": "needs update",

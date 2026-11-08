@@ -43,6 +43,9 @@ expands multiple pending requests; approval actions retain each actual request
 identity. Replies target the root until a request is explicitly selected. Inactive
 roots get a valid derived route even when only a child is active. Metadata stays
 in tooltips or the right-aligned device; no role prefix is added to panel/pill copy.
+The speech bubble follows the audio, not the alert (`speechBubble.ts`): the renderer reports
+when a line starts and ends, because synthesis takes seconds and only the newest of a backlog is read.
+
 Bubbles coalesce mixed event kinds by conversation and preserve per-request
 acknowledgements. Opening a conversation bubble acknowledges its actual alerts.
 
