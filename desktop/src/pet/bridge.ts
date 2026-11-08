@@ -8,6 +8,7 @@ import type {
 } from '../shared/contract';
 import type { SpriteState } from './animation';
 import type { PetBubble } from './bubbles';
+import type { PetSpeech } from './speechBubble';
 import type { DockEdge, FaceBox, Rect, PeekArt } from './geometry';
 import type { ClipFormat, PetClip } from './packs';
 export interface PetViewState {
@@ -43,6 +44,9 @@ export interface PetViewState {
     urls?: Record<string, string>;
   } | null;
   bubble: PetBubble | null;
+  speech: PetSpeech | null;
+  /** Where the glass window sits; null until it has been placed. */
+  surfaceSide: 'above' | 'below' | null;
   settings: Pick<DesktopSettings, 'petSize' | 'petMini' | 'petSound' | 'petVoice' | 'petId' | 'petMutes'>;
   imageUrl: string;
   sleeping?: { imageUrl: string; frames: number; durationsMs: number[] };
@@ -69,6 +73,7 @@ export type PetAction =
   | { type: 'target' | 'showConversation'; key: string }
   | { type: 'dismiss' | 'close' | 'openMap' }
   | { type: 'detail'; value: boolean }
+  | { type: 'speechState'; id: number; playing: boolean }
   | { type: 'surfaceMeasure'; width: number; height: number }
   | { type: 'setEdgeHide'; value: boolean }
   | {
@@ -83,7 +88,7 @@ export type PetAction =
 export interface PetBridge {
   onState(listener: (state: PetViewState) => void): () => void;
   onCue(listener: (cue: PetCue) => void): () => void;
-  onSpeech(listener: (audio: Uint8Array) => void): () => void;
+  onSpeech(listener: (audio: Uint8Array, id: number) => void): () => void;
   clip(path: string): Promise<Uint8Array | null>;
   ready(): void;
   hitTest(interactive: boolean, motion?: number | null): void;

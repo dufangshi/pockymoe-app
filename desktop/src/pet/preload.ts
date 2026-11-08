@@ -11,7 +11,8 @@ const pet: PetBridge = {
   },
   clip: (path) => ipcRenderer.invoke('rcDesktop:pet:clip', path),
   onSpeech: (listener) => {
-    const wrapped = (_event: Electron.IpcRendererEvent, audio: Uint8Array): void => listener(audio);
+    const wrapped = (_event: Electron.IpcRendererEvent, audio: Uint8Array, id: number): void =>
+      listener(audio, id);
     ipcRenderer.on('rcDesktop:pet:speech', wrapped);
     return () => ipcRenderer.removeListener('rcDesktop:pet:speech', wrapped);
   },

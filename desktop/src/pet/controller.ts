@@ -22,6 +22,7 @@ import { conversationKey, conversationTitle, spokenActivityTitle } from '../shar
 import { isMuted, type MuteRule } from '../shared/mutes';
 import { ANIMATIONS } from './animation';
 import { BUBBLE_MS, BubbleQueue } from './bubbles';
+import { SpeechTracker } from './speechBubble';
 import {
   dockPosition,
   HEAD_PEEK,
@@ -30,6 +31,7 @@ import {
   petLayout,
   restorePosition,
   surfaceLayout,
+  speechSurfaceSide,
   surfaceSide,
   type PetPosition,
   type SurfaceSide,
@@ -74,7 +76,8 @@ export function createPetController(deps: PetControllerDeps, benchmark?: { quad:
   let uiLocale = resolveLocale(appearance.locale || app.getLocale());
   setLocale(uiLocale);
   const moods = new StableMood(Date.now()),
-    bubbles = new BubbleQueue();
+    bubbles = new BubbleQueue(),
+    speech = new SpeechTracker();
   let items: ActivityItem[] = [],
     recent: ActivityRecent[] = [],
     accountId: string | null = null,
@@ -286,7 +289,9 @@ export function createPetController(deps: PetControllerDeps, benchmark?: { quad:
         ? 'below'
         : edge === 'bottom'
           ? 'above'
-          : surfaceSide(anchor, display().workArea, glassSize.height);
+          : mode === 'bubble' && speech.current
+            ? speechSurfaceSide(anchor, display().workArea, glassSize.height)
+            : surfaceSide(anchor, display().workArea, glassSize.height);
     const bounds = surfaceLayout(
       anchor,
       display().workArea,
@@ -322,21 +327,23 @@ export function createPetController(deps: PetControllerDeps, benchmark?: { quad:
     glassDismissed = true;
     emit();
   }
-  function play(audio: Uint8Array): void {
-    if (readySprite && !window.isDestroyed()) window.webContents.send('rcDesktop:pet:speech', audio);
+  function play(audio: Uint8Array, id: number): void {
+    if (readySprite && !window.isDestroyed()) window.webContents.send('rcDesktop:pet:speech', audio, id);
   }
   // Synthesis takes seconds: read one at a time, and only the newest of whatever piled up meanwhile.
   let synthesizing = false,
-    nextSpeech: string | (() => Promise<string>) | null = null;
-  async function say(text: string | (() => Promise<string>)): Promise<void> {
+    nextSpeech: { text: string | (() => Promise<string>); item?: ActivityItem } | null = null;
+  async function say(text: string | (() => Promise<string>), item?: ActivityItem): Promise<void> {
     if (synthesizing) {
-      nextSpeech = text;
+      nextSpeech = { text, item };
       return;
     }
     synthesizing = true;
     try {
-      const audio = await deps.speak(typeof text === 'string' ? text : await text());
-      if (audio && !disposed) play(audio);
+      const line = typeof text === 'string' ? text : await text();
+      const audio = await deps.speak(line);
+      // Lines without a thread (the sample when voice is turned on) have no bubble to show.
+      if (audio && !disposed) play(audio, item ? speech.prepare(item, line) : 0);
     } catch {
       /* The chime already told them; the voice service records why. */
     }
@@ -344,18 +351,22 @@ export function createPetController(deps: PetControllerDeps, benchmark?: { quad:
     if (nextSpeech) {
       const next = nextSpeech;
       nextSpeech = null;
-      void say(next);
+      void say(next.text, next.item);
     }
   }
-  function cue(sound: PetCue['sound'] | undefined, speech?: string | (() => Promise<string>)): void {
+  function cue(
+    sound: PetCue['sound'] | undefined,
+    line?: string | (() => Promise<string>),
+    item?: ActivityItem,
+  ): void {
     const now = Date.now();
     if (sound && settings.petSound && now - lastCue >= 800 && readySprite && !window.isDestroyed()) {
       lastCue = now;
       window.webContents.send('rcDesktop:pet:cue', { sound });
     }
-    if (speech && settings.petVoice && now - lastSpeech >= 2500) {
+    if (line && settings.petVoice && now - lastSpeech >= 2500) {
       lastSpeech = now;
-      void say(speech);
+      void say(line, item);
     }
   }
   // macOS can deliver the prior panel's blur after a rapid close/reopen. Verify
@@ -433,7 +444,8 @@ export function createPetController(deps: PetControllerDeps, benchmark?: { quad:
     for (const event of expiring) deps.hub.acknowledge(event.alertId, 'pet');
     const snoozed = !!settings.snoozeUntil && Date.parse(settings.snoozeUntil) > now;
     const bubble = snoozed ? null : bubbles.current;
-    mode = panel ? 'panel' : menu ? 'menu' : bubble && !controlsPinned ? 'bubble' : 'controls';
+    const spoken = snoozed ? null : speech.current;
+    mode = panel ? 'panel' : menu ? 'menu' : (bubble || spoken) && !controlsPinned ? 'bubble' : 'controls';
     const controlsShown = near || controlsPinned;
     updateInputShape();
     const layout = petLayout(position, display().workArea, petHeight(settings), {
@@ -510,6 +522,8 @@ export function createPetController(deps: PetControllerDeps, benchmark?: { quad:
           : null,
       // Timing stays here: while the pointer holds a bubble, its restart must not reach the renderer as a change.
       bubble: bubble && { ...bubble, createdAt: 0, shownAt: null },
+      speech: spoken,
+      surfaceSide: glassSide,
       settings: {
         petSize: settings.petSize,
         petMini: settings.petMini,
@@ -568,6 +582,7 @@ export function createPetController(deps: PetControllerDeps, benchmark?: { quad:
       (panel ||
         menu ||
         !!bubble ||
+        !!spoken ||
         controlsPinned ||
         (!glassDismissed && (near || (awaySince > 0 && now - awaySince < 220))));
     glass.setIgnoreMouseEvents(mode === 'controls' && !controlsShown, { forward: true });
@@ -655,6 +670,7 @@ export function createPetController(deps: PetControllerDeps, benchmark?: { quad:
         if (result.ok) {
           acknowledgeKey(item.key, 'state' in item ? (item as ActivityItem) : undefined);
           await dispatch({ type: 'markRead', key: item.key });
+          speech.dismiss(item);
           closeSurface();
         }
         return result;
@@ -734,6 +750,20 @@ export function createPetController(deps: PetControllerDeps, benchmark?: { quad:
       case 'close':
         dismissSurface();
         break;
+      case 'speechState':
+        if (Number.isInteger(action.id) && typeof action.playing === 'boolean') {
+          if (!action.playing) speech.ended(action.id, Date.now());
+          else if (speech.started(action.id, Date.now())) {
+            // Its open and mute buttons must still resolve once the thread leaves the activity list.
+            const spoken = speech.current!.item;
+            targets.set(spoken.key, spoken);
+            while (targets.size > 20) targets.delete(targets.keys().next().value!);
+            glassDismissed = false;
+            // Over her head, unless a request's buttons or the control bar are already in use.
+            if (!near && !bubbles.current?.sticky) glassSide = null;
+          }
+        }
+        break;
       case 'detail':
         detailOpen = action.value === true;
         if (detailOpen) {
@@ -811,7 +841,8 @@ export function createPetController(deps: PetControllerDeps, benchmark?: { quad:
           const content = `${mode}:${controlsPinned}`;
           if (content !== glassContent) {
             glassContent = content;
-            glassSide = null;
+            // The speech bubble must not pull the control bar away from the pointer.
+            if (!(near && speech.current)) glassSide = null;
           }
           placeGlass();
         }
@@ -959,6 +990,7 @@ export function createPetController(deps: PetControllerDeps, benchmark?: { quad:
     deps.hub.onSnapshot((snapshot) => {
       if (accountId !== snapshot.accountId) {
         bubbles.clear();
+        speech.clear();
         targets.clear();
         completedConversations.clear();
         moods.reset(Date.now());
@@ -1002,13 +1034,15 @@ export function createPetController(deps: PetControllerDeps, benchmark?: { quad:
         // The summary runs only when its turn comes up to be read, so a burst costs one model call.
         const line = (fallback: string) => async (): Promise<string> =>
           (await deps.summarize(event)) ?? fallback;
-        if (event.type === 'needsInput') cue('needsInput', t('{title} 需要你处理', { title }, uiLocale));
+        if (event.type === 'needsInput')
+          cue('needsInput', t('{title} 需要你处理', { title }, uiLocale), event.item);
         else if (event.type === 'completed')
           cue(
             'completed',
             !agentAlertPolicy(event, settings).voice || isMuted(event.item, settings.petMutes)
               ? undefined
               : line(t('{title} 完成了', { title }, uiLocale)),
+            event.item,
           );
         else if (event.type === 'failed')
           cue(
@@ -1016,6 +1050,7 @@ export function createPetController(deps: PetControllerDeps, benchmark?: { quad:
             agentAlertPolicy(event, settings).voice
               ? line(t('{title} 失败了', { title }, uiLocale))
               : undefined,
+            event.item,
           );
       }
       moods.onEvent(
@@ -1057,6 +1092,7 @@ export function createPetController(deps: PetControllerDeps, benchmark?: { quad:
         window.hide();
         glass.hide();
         bubbles.clear();
+        speech.clear();
         panel = false;
         menu = false;
       }
@@ -1101,6 +1137,7 @@ export function createPetController(deps: PetControllerDeps, benchmark?: { quad:
       (tucked ? within(visiblePetRect(), 0) : within(bounds, 60)) || (glass.isVisible() && within(child, 8));
     if (controlsPinned && !close && now - awaySince >= 4000) controlsPinned = false;
     if (close) bubbles.hold(now); // Reading it keeps it there.
+    speech.tick(now, close);
     if (close) {
       if (!near) glassDismissed = false;
       near = true;
@@ -1207,7 +1244,7 @@ export function createPetController(deps: PetControllerDeps, benchmark?: { quad:
     },
     isVisible: () => visible && !disposed,
     isAvailable: live,
-    play,
+    play: (audio) => play(audio, 0),
     say(text) {
       cue(undefined, text);
     },
