@@ -6,7 +6,13 @@ describe('overlay native options', () => {
     expect(window.setVisibleOnAllWorkspaces).toHaveBeenCalledWith(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
   });
   it('uses actual native glass and an interactive separate child', () => {
-    expect(glassOptions('darwin')).toMatchObject({ vibrancy: 'hud', visualEffectState: 'active', focusable: true, frame: false });
+    expect(glassOptions('darwin')).toMatchObject({
+      vibrancy: 'hud',
+      visualEffectState: 'active',
+      focusable: true,
+      frame: false,
+      acceptFirstMouse: true,
+    });
     expect(glassOptions('win32')).toMatchObject({ transparent: true, frame: false, hasShadow: false });
     expect(glassOptions('win32', '10.0.22621')).toMatchObject({ transparent: false, backgroundMaterial: 'acrylic' });
     expect(glassOptions('win32', '10.0.22621', true).backgroundMaterial).toBeUndefined();

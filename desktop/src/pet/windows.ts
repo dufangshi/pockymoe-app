@@ -9,7 +9,9 @@ export function glassOptions(platform: string, release = '', forceSolid = false)
   const acrylic = platform === 'win32' && windowsGlassMaterial(release, forceSolid) === 'acrylic';
   return { frame: false, transparent: !acrylic, hasShadow: true, roundedCorners: true, focusable: true,
     skipTaskbar: true, resizable: false, minimizable: false, maximizable: false, backgroundColor: '#00000000',
-    ...(platform === 'darwin' ? { type: 'panel', vibrancy: 'hud', visualEffectState: 'active' } : {}),
+    ...(platform === 'darwin'
+      ? { type: 'panel', vibrancy: 'hud', visualEffectState: 'active', acceptFirstMouse: true }
+      : {}),
     ...(platform === 'win32' ? acrylic ? { backgroundMaterial: 'acrylic' } : { hasShadow: false } : {}) };
 }
 

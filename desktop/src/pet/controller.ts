@@ -1,4 +1,5 @@
 import { verifyRivePack } from './riveValidation';
+import { RiveHitMask } from './riveHitMask';
 import { petMedia } from './media';
 import { app, BrowserWindow, dialog, ipcMain, nativeImage, nativeTheme, screen } from 'electron';
 import { release } from 'node:os';
@@ -165,7 +166,7 @@ export function createPetController(deps: PetControllerDeps, benchmark?: { quad:
     resizable: false,
     maximizable: false,
     minimizable: false,
-    ...(process.platform === 'darwin' ? { type: 'panel' as const } : {}),
+    ...(process.platform === 'darwin' ? { type: 'panel' as const, acceptFirstMouse: true } : {}),
     webPreferences: security,
   });
   const glass = new BrowserWindow({
@@ -179,6 +180,34 @@ export function createPetController(deps: PetControllerDeps, benchmark?: { quad:
   configureOverlay(window);
   configureOverlay(glass);
   window.setIgnoreMouseEvents(true, { forward: true });
+  let nativeRiveShape = false;
+  let shapeKey = '';
+  let shapeMotion: number | undefined;
+  let shapeEpoch = -1;
+  const updateInputShape = (): void => {
+    const rive = pack?.manifest.remoteCodex?.rive;
+    const data = rive?.hitMask;
+    const enabled = !!rive && dockAmount === 0 && process.platform !== 'darwin';
+    if (shapeEpoch !== packEpoch) {
+      shapeEpoch = packEpoch;
+      shapeMotion = undefined;
+    }
+    const layout = petLayout(position, display().workArea, petHeight(settings));
+    const key = enabled ? `${packEpoch}:${layout.pet.width}:${layout.pet.height}:${shapeMotion}` : '';
+    if (key === shapeKey) return;
+    shapeKey = key;
+    if (enabled) {
+      window.setShape(data
+        ? new RiveHitMask(data).rectangles(layout.pet, shapeMotion)
+        : [layout.pet]);
+      // Native shape dispatch is synchronous, including the first mouse press.
+      window.setIgnoreMouseEvents(false);
+    } else if (nativeRiveShape) {
+      window.setShape([]);
+      window.setIgnoreMouseEvents(true, { forward: true });
+    }
+    nativeRiveShape = enabled;
+  };
   for (const view of [window, glass]) {
     view.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
     view.webContents.on('will-navigate', (event) => event.preventDefault());
@@ -406,6 +435,7 @@ export function createPetController(deps: PetControllerDeps, benchmark?: { quad:
     const bubble = snoozed ? null : bubbles.current;
     mode = panel ? 'panel' : menu ? 'menu' : bubble && !controlsPinned ? 'bubble' : 'controls';
     const controlsShown = near || controlsPinned;
+    updateInputShape();
     const layout = petLayout(position, display().workArea, petHeight(settings), {
       dockAmount,
       faceBox: pack?.manifest.remoteCodex?.faceBox,
@@ -831,7 +861,8 @@ export function createPetController(deps: PetControllerDeps, benchmark?: { quad:
           drag = { x: action.x, y: action.y, origin: { ...position }, moved: false };
           dragSample = { x: action.x, y: action.y, at: Date.now() };
           dragVelocity = { x: 0, y: 0 };
-          closeSurface();
+          if (panel || menu) closeSurface();
+          else glassDismissed = false;
         } else if (drag) {
           const at = Date.now(),
             seconds = Math.max(0.008, (at - dragSample.at) / 1000);
@@ -891,9 +922,20 @@ export function createPetController(deps: PetControllerDeps, benchmark?: { quad:
     }
     emit();
   };
-  const onHitTest = (event: Electron.IpcMainEvent, hit: unknown): void => {
-    if (trusted(event) === window && typeof hit === 'boolean')
-      window.setIgnoreMouseEvents(!hit, { forward: true });
+  const onHitTest = (event: Electron.IpcMainEvent, hit: unknown, motion?: unknown): void => {
+    if (trusted(event) === window && typeof hit === 'boolean') {
+      const data = pack?.manifest.remoteCodex?.rive?.hitMask;
+      if (
+        data &&
+        (motion === null ||
+          typeof motion === 'number' && Number.isInteger(motion) && motion in data.clips)
+      ) {
+        shapeMotion = typeof motion === 'number' ? motion : undefined;
+        updateInputShape();
+      }
+      const conservativeRive = !!pack?.manifest.remoteCodex?.rive && !data && dockAmount === 0;
+      window.setIgnoreMouseEvents(!nativeRiveShape && !conservativeRive && !hit, { forward: true });
+    }
   };
   ipcMain.on('rcDesktop:pet:ready', onReady);
   ipcMain.on('rcDesktop:pet:hitTest', onHitTest);

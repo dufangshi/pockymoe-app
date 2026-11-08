@@ -86,6 +86,6 @@ export interface PetBridge {
   onSpeech(listener: (audio: Uint8Array) => void): () => void;
   clip(path: string): Promise<Uint8Array | null>;
   ready(): void;
-  hitTest(interactive: boolean): void;
+  hitTest(interactive: boolean, motion?: number | null): void;
   action(action: PetAction): Promise<HostCommandResult>;
 }

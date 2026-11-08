@@ -1,4 +1,4 @@
-import { RiveHitReadback } from './riveHit';
+import { RiveHitMask, type RiveHitMaskData } from './riveHitMask';
 import { RiveRestRouter, type RiveRouting } from './riveRouting';
 import type { LinearAnimationInstance } from '@rive-app/webgl2-advanced';
 import type { RiveMotions } from './riveMotion';
@@ -33,6 +33,7 @@ export interface RivePack {
   procedural?: RiveProcedural;
   routing?: RiveRouting;
   backing?: { width: number; height: number; scale: number };
+  hitMask?: RiveHitMaskData;
 }
 let runtime: Promise<RiveCanvas> | undefined;
 export function riveRuntime(): Promise<RiveCanvas> {
@@ -47,6 +48,17 @@ export class RiveDrawer {
   private router?: RiveRestRouter;
   private animations = new Map<string, LinearAnimationInstance>();
   private config?: RivePack;
+  private hitMask?: RiveHitMask;
+  get hitMotion(): number | null | undefined {
+    if (!this.hitMask) return undefined;
+    return this.route?.leaving || this.route?.reaction ? null : (this.route?.value ?? null);
+  }
+  /** Synchronous CPU lookup; older packs conservatively accept the artboard. */
+  contains(x: number, y: number): boolean {
+    return this.hitMask
+      ? this.hitMask.contains(x, y, this.hitMotion ?? undefined)
+      : x >= 0 && y >= 0 && x < 1 && y < 1;
+  }
   private motionSelected = false;
   private applied?: { animation: string; time: number; exitMix: number; reaction?: string };
   route?: ReturnType<RiveRestRouter['step']>;
@@ -107,18 +119,17 @@ export class RiveDrawer {
     return active || !!this.router;
   }
   private disposed = false;
-  private hitReadback: RiveHitReadback;
   alphaAt(pointer: { x: number; y: number }, suspended = false): number {
-    return this.hitReadback.alphaAt(pointer.x, pointer.y, this.canvas.width, this.canvas.height, suspended);
+    return !suspended && this.contains(pointer.x / this.canvas.width, pointer.y / this.canvas.height) ? 255 : 0;
   }
   get needsHitDraw(): boolean {
-    return this.hitReadback.needsDraw;
+    return false;
   }
   pollHit(): boolean {
-    return this.hitReadback.poll(this.canvas.width, this.canvas.height);
+    return false;
   }
   suspendHit(): void {
-    this.hitReadback.suspend();
+    // CPU masks have no queued GPU probe to cancel.
   }
   private constructor(
     readonly runtime: RiveCanvas,
@@ -128,9 +139,7 @@ export class RiveDrawer {
     readonly renderer: WrappedRenderer,
     readonly canvas: HTMLCanvasElement,
     readonly gl: WebGL2RenderingContext,
-  ) {
-    this.hitReadback = new RiveHitReadback(gl);
-  }
+  ) {}
   static async load(
     canvas: HTMLCanvasElement,
     bytes: Uint8Array,
@@ -180,6 +189,7 @@ export class RiveDrawer {
       if (config.procedural && !artboard.rootBone(config.procedural.bodyBone))
         throw new Error(`Missing procedural body bone: ${config.procedural.bodyBone}`);
       drawer.config = config;
+      drawer.hitMask = config.hitMask ? new RiveHitMask(config.hitMask) : undefined;
       if (config.routing) {
         for (const name of new Set([
           ...config.routing.clips.flatMap((clip) => [
@@ -271,14 +281,12 @@ export class RiveDrawer {
     r.flush();
     this.runtime.resolveAnimationFrame();
     if (pointer) this.alphaAt(pointer);
-    this.hitReadback.issue();
     return { active, alpha: pointer ? this.alphaAt(pointer) : 0 };
   }
 
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
-    this.hitReadback.dispose();
     for (const a of this.animations.values()) a.delete();
     this.animations.clear();
     this.machine.delete();
