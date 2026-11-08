@@ -72,8 +72,16 @@ app.whenReady().then(() => {
 );
 const app = await electron.launch({
   executablePath: resolve('node_modules/electron/dist/electron'),
-  args: ['--no-sandbox', '--ozone-platform=x11', main, resolve(output, 'app/index.html')],
+  args: [
+    '--no-sandbox',
+    '--ozone-platform=x11',
+    ...(process.env.RIVE_RECORD_SWIFTSHADER === '1' ? ['--use-angle=swiftshader'] : []),
+    main,
+    resolve(output, 'app/index.html'),
+  ],
 });
+if (process.env.RIVE_RECORD_DEBUG === '1')
+  app.process().stderr?.on('data', (data) => process.stderr.write(data));
 const bytes = await readFile(resolve(pack, config.path)),
   riveSha256 = createHash('sha256').update(bytes).digest('hex');
 const binary = await serveRiveBytes(bytes);

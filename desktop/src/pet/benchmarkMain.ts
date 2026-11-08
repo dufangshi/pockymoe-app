@@ -12,6 +12,7 @@ import { petMediaResponse } from './media';
 import { SettingsStore } from '../main/store';
 import { summarizeNativeTrace, type GPUTraceEvent } from './benchmarkTrace';
 import type { ActivityHubLike } from '../shared/contract';
+import { summarizeMemory, type ProcessMemorySample } from './benchmarkMemory';
 
 type Mode = 'webm' | 'quad' | 'rive';
 interface Options {
@@ -27,6 +28,7 @@ interface Sample {
   gpu: number;
   rendererPid: number;
   gpuPids: number[];
+  memory: ProcessMemorySample;
 }
 interface Run {
   mode: Mode;
@@ -44,6 +46,7 @@ interface Run {
   nativeTrace: ReturnType<typeof summarizeNativeTrace>;
   mediaStart: unknown;
   mediaEnd: unknown;
+  memory: ReturnType<typeof summarizeMemory>;
 }
 
 function options(argv: string[]): Options {
@@ -190,12 +193,19 @@ async function measure(config: Options): Promise<Run> {
     const metrics = app.getAppMetrics();
     const rendererPid = contents.getOSProcessId();
     const gpu = metrics.filter((row) => row.type === 'GPU');
+    const renderer = metrics.find((row) => row.pid === rendererPid);
     return {
       time: performance.now(),
       rendererPid,
       gpuPids: gpu.map((row) => row.pid),
-      renderer: metrics.find((row) => row.pid === rendererPid)?.cpu.cumulativeCPUUsage ?? 0,
+      renderer: renderer?.cpu.cumulativeCPUUsage ?? 0,
       gpu: gpu.reduce((sum, row) => sum + (row.cpu.cumulativeCPUUsage ?? 0), 0),
+      memory: {
+        rendererWorkingSetKiB: renderer?.memory.workingSetSize ?? 0,
+        rendererHighWaterKiB: renderer?.memory.peakWorkingSetSize ?? 0,
+        gpuWorkingSetKiB: gpu.reduce((sum, row) => sum + row.memory.workingSetSize, 0),
+        gpuHighWaterKiB: gpu.reduce((sum, row) => sum + row.memory.peakWorkingSetSize, 0),
+      },
     };
   };
   const samples = [sample()];
@@ -250,6 +260,7 @@ async function measure(config: Options): Promise<Run> {
     nativeTrace,
     mediaStart,
     mediaEnd,
+    memory: summarizeMemory(samples.map((row) => row.memory)),
   };
   await writeFile(join(config.out, 'native-trace.json'), JSON.stringify({ traceEvents: trace }));
   await writeFile(join(config.out, 'metrics.json'), JSON.stringify(result, null, 2));
@@ -336,6 +347,10 @@ export async function runPetBenchmark(argv: string[]): Promise<void> {
         nativeReadsPerSecond: median(rows.map((row) => row.nativeReadsPerSecond)),
         appReadsPerSecond: median(rows.map((row) => row.appReadsPerSecond)),
         webglDrawFramesPerSecond: median(rows.map((row) => row.drawFrames / row.elapsed)),
+        rendererPeakMiB: median(rows.map((row) => row.memory.renderer.peakMiB)),
+        rendererSettledMiB: median(rows.map((row) => row.memory.renderer.settledMiB)),
+        gpuPeakMiB: median(rows.map((row) => row.memory.gpu.peakMiB)),
+        gpuSettledMiB: median(rows.map((row) => row.memory.gpu.settledMiB)),
       };
     });
     const packs = {} as Record<string, string>;

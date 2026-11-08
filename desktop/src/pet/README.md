@@ -353,11 +353,11 @@ motion plans; raster packs retain their previous sequencing.
 Rive packs with a shared skeleton may opt into pet-side dynamics:
 
 ```json
-{"procedural":{"bodyBone":"body","idleFps":24,"activeFps":60}}
+{"procedural":{"bodyBone":"body"}}
 ```
 
-This lives inside `remoteCodex.rive`. `bodyBone` must name a root bone. Idle FPS
-accepts 15/24/30, active FPS 30/60. Installation additionally requires number
+This lives inside `remoteCodex.rive`. `bodyBone` must name a root bone.
+Installation additionally requires number
 inputs `blink`, `breath`, `weightShift`, `swayHair`, `swayGown`, `swayWings`, and
 `dragLean`. Author their blend layers on separate child bones so they combine
 with the pose rather than replacing it. Hair/gown/wing values are −1…1; blink
@@ -387,8 +387,8 @@ closed-eye bed pose. Blink can close the same eye overlay above this channel.
 This lets one shared eye drawing respond to both gaze axes without submitting
 two overlapping eye images. Explicit preview gaze values open this channel.
 
-Source drawing packs may additionally opt into `rive.routing` with `maxExitMs`
-(100–400), `clips` (`value`, `animation`, `durationMs`, `start`, `end`, optional
+Source drawing packs may additionally opt into `rive.routing` with
+`clips` (`value`, `animation`, `durationMs`, `start`, `end`, optional
 `loop`) and `bridges` (motion values). Boundary names describe **identical shared
 paint, selectors and bone coordinates**, not just a similar pose. The loader
 checks animation references; import validation requires a connected bridge graph.
@@ -478,12 +478,38 @@ Record reactions at their actual display size with
 The final arguments specify CSS size and DPR (1 or 2); recordings include those
 values in their metadata and preserve the corresponding backing-store pixels.
 
-Rive grabbing uses a conservative artboard bounding rectangle, independent of GPU
-alpha probe results. Main keeps the undocked Rive window interactive, so a first
-press cannot pass through while an asynchronous sample is missing. Transparent
-space inside that rectangle also grabs; docking still uses the existing clipped
-peek geometry. Raster hit testing is unchanged. This deliberately favors reliable
-grabbing over pixel-perfect click-through for moving Rive art.
+Rive authors can supply `hitMask: {width, height, clips, extra?}` alongside `motions`.
+Each `clips` key is a motion number; its value is a base64 bit plane in row-major
+order, least-significant bit first, with no padding between rows. Dimensions are
+4–64 cells per axis. Bake each plane from the union of every rendered pose in that
+clip, including procedural extensions, with a small dilation for grabbing. A
+16×18 plane with a one-cell halo fits a compact manifest. Every routed motion must
+have a plane. During exits and reactions the renderer uses the union of all
+planes, including the optional `extra` plane for reaction/transition extensions.
+The CPU lookup is synchronous on the first pointer event and has no GPU readback
+or sample age. Windows/Linux also install those cells as native window regions,
+so the OS delivers the first press and passes transparent cells to the desktop.
+macOS uses the CPU mask on forwarded pointer events; its native API does not
+support shaped input regions. Docking keeps its existing clip/peek geometry.
+Older Rive packs without masks retain conservative
+artboard bounds; raster alpha hit testing is unchanged.
+
+An optional routed clip `exits` declaration supplies fitted forward exits:
+`{everyMs:500,durationMs:1250,animationPrefix:"work-exit-",end:"rest"}`.
+Author animations numbered from zero through `ceil(durationMs/everyMs)`, with the
+last starting at the clip's exact endpoint. Each must start with the exact source
+material and pose at that time and finish at the named shared boundary. An event
+continues forward to the next exit, then plays it at natural speed. Another event
+finishes that exit forward before entering its new destination. Import test-loads
+every named animation. Timing metadata alone does not establish visual continuity;
+authors must verify every exit and entry at multiple source phases.
+
+`procedural.response:true` declares an additional numeric `response` input. The
+drawer raises a smooth 480ms acknowledgment pulse on motion/state events and pet
+triggers. Bind it to a small head/upper-body gesture while a longer route runs;
+keep its layer separate from breathing and planted leg controls. It neither seeks
+nor speeds up the source animation. `idleFps`, `activeFps`, `sourceFps` and
+`maxExitMs` are legacy import metadata; new display-rate packs should omit them.
 
 Dragging the hover capsule background uses pointer capture and a 4 CSS-pixel
 threshold. Buttons retain their actions; a background click does nothing. The
@@ -493,4 +519,14 @@ separate focus click.
 Native Linux regression: `xvfb-run -a node src/pet/tools/grab.mjs PACK OUT`.
 This uses xdotool OS pointer input, 50 opaque points in each of five motion
 contexts, then 20 capsule-background drags. Fixture IPC only prepares position
-and activity; the measured drags use native mouse presses and movement.
+and activity; the measured drags use native mouse presses and movement. Masked
+packs also send a native press through a transparent corner to a real underlying
+fixture window before each body grab. Use `PET_GRAB_SWIFTSHADER=1` if Chromium's
+automatic graphics initialization fails on a headless Linux host.
+
+Both benchmark commands report renderer and GPU-process working-set memory in
+MiB: OS peak (including startup), maximum sampled RSS and settled median of the
+last ten one-second samples. The self-contained built-app command prints median
+peak/settled memory alongside the three-run CPU table. The source recorder and
+benchmark accept `RIVE_RECORD_SWIFTSHADER=1` and `RIVE_BENCH_SWIFTSHADER=1`
+respectively to select SwiftShader explicitly; the production backend is unchanged.
