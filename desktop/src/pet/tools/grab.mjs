@@ -131,16 +131,20 @@ try {
         reaction: 13,
         transition: 5,
       }[mood];
-      if (value !== undefined)
+      if (value !== undefined) {
+        const clip = manifest.remoteCodex.rive.routing.clips.find((clip) => clip.value === value);
+        if (!clip) throw new Error(`Missing routed grab fixture motion ${value}`);
         await sprite.evaluate(
           ({ value, phase, transition }) =>
             window.petRiveHarness.pose(value, phase, transition ? 9 : undefined),
           {
             value,
-            phase: 0.2 + random() * 0.8,
+            // Sample the performance, including its large poses, not just the intro.
+            phase: (clip.durationMs / 1000) * (0.15 + random() * 0.7),
             transition: mood === 'transition',
           },
         );
+      }
       const body = await sprite.locator('#character').boundingBox();
       const bounds = await metrics();
       let x,
