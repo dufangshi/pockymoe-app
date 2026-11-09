@@ -23,6 +23,7 @@ export const RiveDrawer = {
         inputs: () => ({
           motion: drawer.inputs.get('motion')?.value,
           dragging: drawer.inputs.get('dragging')?.value,
+          response: drawer.inputs.get('response')?.value,
         }),
         hit: (x: number, y: number) => drawer.contains(x, y),
       },

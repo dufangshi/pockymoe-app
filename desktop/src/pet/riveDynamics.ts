@@ -16,15 +16,19 @@ export interface RiveProcedural {
   /** Legacy source sampling metadata, never a runtime clock quantizer. */
   sourceFps?: 24 | 30;
   transientFace?: boolean;
-  /** An authored upper-body acknowledgment while a longer exit is running. */
+  /** An authored acknowledgment on the displayed pose, independent of routing. */
   response?: boolean;
 }
 
 /** An event cue, separate from source playback and never time-warping its clock. */
 export class RiveResponse {
   private age = Infinity;
+  reset(): void {
+    this.age = Infinity;
+  }
   request(): void {
-    this.age = 0;
+    // Repeated pointer/IPC acknowledgements must not reset an active lift.
+    if (this.age >= 0.48) this.age = 0;
   }
   step(seconds: number): number {
     this.age += Math.max(0, seconds);

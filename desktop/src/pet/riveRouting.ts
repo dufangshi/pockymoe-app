@@ -16,6 +16,8 @@ export interface RoutedClip {
     animationPrefix: string;
     /** Reapply the held source pose before the exit's drawing/control tracks. */
     sourcePose?: boolean;
+    /** Hold the actual displayed pose before the first authored exit drawing. */
+    entryMs?: number;
     /** Optional event-specific acting at the same fitted checkpoints. */
     responses?: { targets: number[]; animationPrefix: string }[];
     end: string;
@@ -27,6 +29,8 @@ export interface RivePoseReaction {
   animation: string;
   durationMs: number;
   settleMs: number;
+  /** Preserve the displayed pose while an additive acknowledgment begins. */
+  entryMs?: number;
   /** Non-waking requests return to this pose after the reaction. */
   resumeValue?: number;
   resumeTargets?: number[];
@@ -49,6 +53,7 @@ interface Leg {
   duration: number;
   native: boolean;
   sourcePose?: { animation: string; time: number };
+  sourceHoldMs?: number;
 }
 
 /** Compact pack metadata names exit animations without listing hundreds of keys. */
@@ -84,6 +89,7 @@ export interface RoutedSample {
   exitMix: number;
   reaction?: { animation: string; time: number };
   sourcePose?: { animation: string; time: number };
+  sourceHoldMs?: number;
 }
 const ease = (value: number) => value * value * (3 - 2 * value);
 
@@ -109,6 +115,7 @@ export class RiveRestRouter {
   private afterReaction?: { value: number; restart: boolean };
   private residency?: RivePoseReaction;
   private sourcePose?: RoutedSample['sourcePose'];
+  private sourceHoldMs?: number;
   private fittedExit = false;
   private targetAtEnd = false;
 
@@ -149,6 +156,7 @@ export class RiveRestRouter {
     this.fittedExit = false;
     this.targetAtEnd = false;
     this.sourcePose = undefined;
+    this.sourceHoldMs = undefined;
     this.clip = this.find(value);
     this.time = Math.max(0, Math.min(this.clip.durationMs, seconds * 1000));
     this.legs = [];
@@ -255,15 +263,24 @@ export class RiveRestRouter {
         }
       : undefined;
     const pieces = [
-      { clip: this.clip, from: this.time, to: endpoint, sourcePose: this.sourcePose },
+      ...(!exit?.entryMs
+        ? [{
+            clip: this.clip,
+            from: this.time,
+            to: endpoint,
+            sourcePose: this.sourcePose,
+            sourceHoldMs: this.sourceHoldMs,
+          }]
+        : []),
       ...(authoredExit
         ? [{
             clip: authoredExit,
             from: 0,
             to: authoredExit.durationMs,
             sourcePose: exit?.sourcePose
-              ? { animation: this.clip.animation, time: endpoint / 1000 }
+              ? { animation: this.clip.animation, time: (exit.entryMs ? this.time : endpoint) / 1000 }
               : undefined,
+            sourceHoldMs: exit?.entryMs,
           }]
         : []),
       ...bridge.map((clip) => ({ clip, from: 0, to: clip.durationMs })),
@@ -306,6 +323,10 @@ export class RiveRestRouter {
         animation: reactionAnimation(reaction.definition, this.time),
         time: reaction.time / 1000,
       },
+      ...(reaction.definition.entryMs ? {
+        sourcePose: { animation: this.clip.animation, time: reaction.from / 1000 },
+        sourceHoldMs: reaction.definition.entryMs,
+      } : {}),
     };
   }
 
@@ -326,6 +347,7 @@ export class RiveRestRouter {
       this.target = undefined;
       this.boundary = false;
       this.sourcePose = undefined;
+      this.sourceHoldMs = undefined;
       dt = 0;
     }
     if (this.target) {
@@ -337,6 +359,7 @@ export class RiveRestRouter {
         const progress = leg.duration ? this.elapsed / leg.duration : 1;
         this.clip = leg.clip;
         this.sourcePose = leg.sourcePose;
+        this.sourceHoldMs = leg.sourceHoldMs;
         this.time = leg.from + (leg.to - leg.from) * (leg.native ? progress : ease(progress));
         if (this.elapsed < leg.duration - 1e-6) break;
         this.time = leg.to;
@@ -351,6 +374,7 @@ export class RiveRestRouter {
             this.time = this.targetAtEnd ? this.target.durationMs : 0;
             this.target = undefined;
             this.sourcePose = undefined;
+            this.sourceHoldMs = undefined;
             this.fittedExit = false;
           } else this.boundary = true;
           break;
@@ -371,6 +395,7 @@ export class RiveRestRouter {
       boundary: this.boundary,
       exitMix: 0,
       ...(this.sourcePose ? { sourcePose: this.sourcePose } : {}),
+      ...(this.sourceHoldMs ? { sourceHoldMs: this.sourceHoldMs } : {}),
     };
   }
 }

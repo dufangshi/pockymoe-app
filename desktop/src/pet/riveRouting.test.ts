@@ -44,6 +44,26 @@ const config: RiveRouting = {
   ],
 };
 describe('material-safe routing', () => {
+  it('starts an on-screen entry from the displayed phase, without advancing to a donor checkpoint', () => {
+    const fixture = structuredClone(config);
+    fixture.clips[1].exits = {
+      everyMs: 100, durationMs: 800, animationPrefix: 'exit-', sourcePose: true,
+      entryMs: 150, end: 'rest',
+    };
+    const router = new RiveRestRouter(fixture, 1);
+    router.seek(1, 0.347);
+    router.request(0);
+    const sample = router.step(0);
+    expect(sample.animation).toBe('exit-4');
+    expect(sample.time).toBe(0);
+    expect(sample.sourcePose).toEqual({ animation: 'work', time: 0.347 });
+    expect(sample.sourceHoldMs).toBe(150);
+    router.request(4);
+    expect(router.step(0.1).sourcePose).toEqual(sample.sourcePose);
+    router.step(4);
+    expect(router.step(0).sourceHoldMs).toBeUndefined();
+  });
+
   it('holds a shared source pose through checkpoint exits and interruptions', () => {
     const fixture = structuredClone(config);
     fixture.clips[1].exits = {

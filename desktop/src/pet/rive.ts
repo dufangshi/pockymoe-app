@@ -75,6 +75,7 @@ export class RiveDrawer {
   private motionSelected = false;
   private ready = false;
   private response = new RiveResponse();
+  private entryInputs?: Map<string, number>;
   private applied?: {
     animation: string;
     time: number;
@@ -84,6 +85,8 @@ export class RiveDrawer {
   };
   route?: ReturnType<RiveRestRouter['step']>;
   seekMotion(value: number, seconds: number): void {
+    this.response.reset();
+    this.entryInputs = undefined;
     if (this.dissolveClock) {
       this.dissolveClock.seek(value, seconds);
       return;
@@ -107,7 +110,20 @@ export class RiveDrawer {
         // The material must follow the same continuous clock as the body animation.
         this.route.reaction.animation = this.router.reactionAnimationAt(this.route.time)!;
       }
-      if (
+      const holdingSource = this.route.sourcePose &&
+        (this.route.reaction?.time ?? this.route.time) * 1000 < (this.route.sourceHoldMs ?? 0);
+      if (holdingSource) {
+        // Cue the pose that was actually displayed, including its material chart.
+        // A checkpoint's donor painting can have different knees, hem and scale.
+        this.entryInputs ??= new Map(
+          RIVE_DYNAMIC_INPUTS.filter((name) => name !== 'blink')
+            .map((name) => [name, Number(this.inputs.get(name)?.value ?? 0)]),
+        );
+        const pose = this.animations.get(this.route.sourcePose!.animation)!;
+        pose.time = this.route.sourcePose!.time;
+        pose.apply(1);
+        this.applied = undefined;
+      } else if (
         this.applied?.animation !== this.route.animation ||
         this.applied.time !== this.route.time ||
         this.applied.exitMix !== this.route.exitMix ||
@@ -115,6 +131,7 @@ export class RiveDrawer {
         this.applied.sourcePose?.animation !== this.route.sourcePose?.animation ||
         this.applied.sourcePose?.time !== this.route.sourcePose?.time
       ) {
+        this.entryInputs = undefined;
         if (this.applied?.animation !== this.route.animation && this.config?.routing?.resetAnimation) {
           const reset = this.animations.get(this.config.routing.resetAnimation)!;
           reset.time = 0;
@@ -136,7 +153,7 @@ export class RiveDrawer {
           sourcePose: this.route.sourcePose,
         };
       }
-      if (this.route.reaction) {
+      if (this.route.reaction && !holdingSource) {
         const reaction = this.animations.get(this.route.reaction.animation)!;
         reaction.time = this.route.reaction.time;
         reaction.apply(1);
@@ -144,8 +161,16 @@ export class RiveDrawer {
     }
     if (this.config?.procedural?.response)
       this.inputs.get('response')!.value = this.response.step(seconds);
+    const savedInputs = new Map<string, number>();
+    for (const [name, value] of this.entryInputs ?? []) {
+      const input = this.inputs.get(name);
+      if (!input) continue;
+      savedInputs.set(name, Number(input.value));
+      input.value = value;
+    }
     const active = this.machine.advanceAndApply(seconds);
     if (this.router || this.dissolveClock) this.artboard.advance(0);
+    for (const [name, value] of savedInputs) this.inputs.get(name)!.value = value;
     return active || !!this.router || !!this.dissolveClock;
   }
   private disposed = false;
@@ -278,7 +303,6 @@ export class RiveDrawer {
     if (typeof value === 'number') value = Math.fround(value);
     if (input.value === value) return false;
     input.value = value;
-    if (this.ready && (name === 'motion' || name === 'state')) this.response.request();
     if (this.router && name === 'motion') this.router.request(Number(value), false, this.route?.time);
     if (this.dissolveClock && name === 'motion') this.requestDissolve(Number(value));
     if (this.router && name === 'state' && !this.motionSelected) {
@@ -295,7 +319,9 @@ export class RiveDrawer {
     const input = this.inputs.get(name);
     if (!input) throw new Error(`Missing trigger ${name}`);
     input.fire();
-    if (this.ready && (name === 'motionStart' || (RIVE_TRIGGERS as readonly string[]).includes(name)))
+    // A second press must act on the current bank pose, without replaying its
+    // response painting from an earlier source checkpoint.
+    if (this.ready && (name === 'poke' || name === 'dragStart'))
       this.response.request();
     if (this.router && name === 'motionStart')
       this.router.request(Number(this.inputs.get('motion')?.value), true, this.route?.time);

@@ -137,8 +137,17 @@ try {
   for (const id of petWindowIds) execFileSync('xdotool', ['windowraise', String(id)]);
   const action = (v) => sprite.evaluate((v) => window.rcDesktop.pet.action(v), v);
   const metrics = () => app.evaluate(() => globalThis.petHarness.metrics());
-  const pointer = (x, y) =>
-    execFileSync('xdotool', ['mousemove', '--sync', String(Math.round(x)), String(Math.round(y))]);
+  const pointer = (x, y) => {
+    const target = { x: Math.round(x), y: Math.round(y) };
+    const position = execFileSync('xdotool', ['getmouselocation', '--shell']).toString();
+    const currentX = Number(position.match(/^X=(.*)$/m)?.[1]);
+    const currentY = Number(position.match(/^Y=(.*)$/m)?.[1]);
+    // --sync waits for movement when the cursor is already at the target.
+    if (target.x === currentX && target.y === currentY) return;
+    execFileSync('xdotool', ['mousemove', '--sync', String(target.x), String(target.y)], {
+      timeout: 5000,
+    });
+  };
   let seed = 72451;
   const random = () => (seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 2 ** 32;
   const modes = process.env.PET_GRAB_FORWARDED_ONLY === '1'

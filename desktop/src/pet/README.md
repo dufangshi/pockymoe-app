@@ -547,10 +547,18 @@ before applying the exit animation. This shares the fitted bone pose instead of
 copying it into every exit. Exit drawing and guard tracks then override the source;
 an interrupted exit retains that same held pose until its forward path finishes.
 
+An exit with `sourcePose:true` may add `entryMs` (positive and shorter than its
+duration). It starts immediately from the last displayed source time, preserving
+that drawing and the current continuous body inputs during this initial interval.
+Author its first moving drawing at `entryMs`; an additive cue can then acknowledge
+the event without borrowing another checkpoint's painting. Local reactions accept
+the same setting. Older packs without it retain their checkpoint routing.
+
 `procedural.response:true` declares an additional numeric `response` input. The
-drawer raises a smooth 480ms acknowledgment pulse on motion/state events and pet
-triggers. Bind it to a small head/upper-body gesture while a longer route runs;
-keep its layer separate from breathing and planted leg controls. It neither seeks
+drawer raises a smooth 480ms acknowledgment pulse on a press or poke, including
+while an exit is running. Bind it to a small head gesture with independent controls
+for the lower body. Long hair bones may also influence legs: validate the affected
+vertices rather than assuming a head ancestor is isolated. It neither seeks
 nor speeds up the source animation. `idleFps`, `activeFps`, `sourceFps` and
 `maxExitMs` are legacy import metadata; new display-rate packs should omit them.
 
@@ -584,6 +592,9 @@ accept the first mouse press. Native macOS delivery still needs testing on a Mac
 Rive receives a body press immediately, before that movement threshold. A local
 click intent stays active until the controller acknowledges the poke (at most
 300 ms), so an IPC gap cannot start a normal work exit between release and poke.
+Repeated acknowledgements preserve an active additive cue. Without that optional
+input, old packs keep their authored response banks. Disabling edge hide restores
+the undocked transform immediately, avoiding hem clipping during a stale dock tween.
 
 Focused native X11 grab checks accept either an installed pack folder or its ZIP:
 
