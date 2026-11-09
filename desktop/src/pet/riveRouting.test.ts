@@ -44,6 +44,38 @@ const config: RiveRouting = {
   ],
 };
 describe('material-safe routing', () => {
+  it('holds a shared source pose through checkpoint exits and interruptions', () => {
+    const fixture = structuredClone(config);
+    fixture.clips[1].exits = {
+      everyMs: 500,
+      durationMs: 650,
+      animationPrefix: 'unused-',
+      sourcePose: true,
+      responses: [{
+        targets: [2],
+        animationPrefix: 'unused-response-',
+      }],
+      end: 'rest',
+    };
+    for (const target of [0, 2]) {
+      for (const seconds of [0.2, 0.7]) {
+        const router = new RiveRestRouter(fixture, 1);
+        router.seek(1, seconds);
+        router.request(target);
+        const sample = router.step(0.31);
+        expect(sample.animation).toBe(`${target === 2 ? 'unused-response-' : 'unused-'}${seconds < 0.5 ? 1 : 2}`);
+        expect(sample.time).toBeCloseTo(0.01);
+        expect(sample.sourcePose).toEqual({ animation: 'work', time: seconds < 0.5 ? 0.5 : 1 });
+        router.request(4);
+        expect(router.step(0.01).sourcePose).toEqual(sample.sourcePose);
+        router.step(4);
+        expect(router.step(0).sourcePose).toBeUndefined();
+        router.seek(1, 0.5);
+        expect(router.step(0).sourcePose).toBeUndefined();
+      }
+    }
+  });
+
   it('selects event-specific acting without changing exit timing or reversing the source', () => {
     const fixture = structuredClone(config);
     fixture.clips[1].exits = {

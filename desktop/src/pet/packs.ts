@@ -243,6 +243,7 @@ export function parseManifest(data: Buffer): PetManifest {
               !Number.isFinite(e.durationMs) || e.durationMs < 250 || e.durationMs > 2500 ||
               typeof e.animationPrefix !== 'string' || !e.animationPrefix.length ||
               e.animationPrefix.length > 90 ||
+              (e.sourcePose !== undefined && typeof e.sourcePose !== 'boolean') ||
               (e.responses !== undefined &&
                 (!Array.isArray(e.responses) ||
                   e.responses.length > 8 ||

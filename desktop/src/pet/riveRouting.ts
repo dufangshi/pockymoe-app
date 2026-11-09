@@ -14,6 +14,8 @@ export interface RoutedClip {
     everyMs: number;
     durationMs: number;
     animationPrefix: string;
+    /** Reapply the held source pose before the exit's drawing/control tracks. */
+    sourcePose?: boolean;
     /** Optional event-specific acting at the same fitted checkpoints. */
     responses?: { targets: number[]; animationPrefix: string }[];
     end: string;
@@ -44,6 +46,7 @@ interface Leg {
   to: number;
   duration: number;
   native: boolean;
+  sourcePose?: { animation: string; time: number };
 }
 
 /** Compact pack metadata names exit animations without listing hundreds of keys. */
@@ -78,6 +81,7 @@ export interface RoutedSample {
   boundary: boolean;
   exitMix: number;
   reaction?: { animation: string; time: number };
+  sourcePose?: { animation: string; time: number };
 }
 const ease = (value: number) => value * value * (3 - 2 * value);
 
@@ -102,6 +106,7 @@ export class RiveRestRouter {
   private reaction?: Reaction;
   private afterReaction?: { value: number; restart: boolean };
   private residency?: RivePoseReaction;
+  private sourcePose?: RoutedSample['sourcePose'];
 
   constructor(
     private readonly config: RiveRouting,
@@ -137,6 +142,7 @@ export class RiveRestRouter {
   }
 
   seek(value: number, seconds: number): void {
+    this.sourcePose = undefined;
     this.clip = this.find(value);
     this.time = Math.max(0, Math.min(this.clip.durationMs, seconds * 1000));
     this.legs = [];
@@ -235,8 +241,17 @@ export class RiveRestRouter {
         }
       : undefined;
     const pieces = [
-      { clip: this.clip, from: this.time, to: endpoint },
-      ...(authoredExit ? [{ clip: authoredExit, from: 0, to: authoredExit.durationMs }] : []),
+      { clip: this.clip, from: this.time, to: endpoint, sourcePose: this.sourcePose },
+      ...(authoredExit
+        ? [{
+            clip: authoredExit,
+            from: 0,
+            to: authoredExit.durationMs,
+            sourcePose: exit?.sourcePose
+              ? { animation: this.clip.animation, time: endpoint / 1000 }
+              : undefined,
+          }]
+        : []),
       ...bridge.map((clip) => ({ clip, from: 0, to: clip.durationMs })),
     ].filter((piece) => Math.abs(piece.to - piece.from) > 1e-6);
     return pieces.map((piece) => ({
@@ -296,6 +311,7 @@ export class RiveRestRouter {
       this.time = 0;
       this.target = undefined;
       this.boundary = false;
+      this.sourcePose = undefined;
       dt = 0;
     }
     if (this.target) {
@@ -306,6 +322,7 @@ export class RiveRestRouter {
         dt -= take;
         const progress = leg.duration ? this.elapsed / leg.duration : 1;
         this.clip = leg.clip;
+        this.sourcePose = leg.sourcePose;
         this.time = leg.from + (leg.to - leg.from) * (leg.native ? progress : ease(progress));
         if (this.elapsed < leg.duration - 1e-6) break;
         this.time = leg.to;
@@ -330,6 +347,7 @@ export class RiveRestRouter {
       leaving: !!this.target,
       boundary: this.boundary,
       exitMix: 0,
+      ...(this.sourcePose ? { sourcePose: this.sourcePose } : {}),
     };
   }
 }

@@ -31,6 +31,9 @@ describe('Rive pack import', () => {
       } },
     })));
     expect(parse(exits).remoteCodex?.rive?.routing?.clips[0].exits).toEqual(exits);
+    expect(parse({ ...exits, sourcePose: true }).remoteCodex?.rive?.routing?.clips[0].exits?.sourcePose)
+      .toBe(true);
+    expect(() => parse({ ...exits, sourcePose: 1 })).toThrow('authored exits');
     for (const responses of [
       {},
       [null],

@@ -523,6 +523,11 @@ exit bank, with the same checkpoint times, duration and final boundary. This let
 a poke start with visible acting while an ordinary departure lowers its prop.
 Import test-loads both banks; a missing response animation rejects the pack.
 
+With `sourcePose:true`, the drawer applies the source clip at the checkpoint time
+before applying the exit animation. This shares the fitted bone pose instead of
+copying it into every exit. Exit drawing and guard tracks then override the source;
+an interrupted exit retains that same held pose until its forward path finishes.
+
 `procedural.response:true` declares an additional numeric `response` input. The
 drawer raises a smooth 480ms acknowledgment pulse on motion/state events and pet
 triggers. Bind it to a small head/upper-body gesture while a longer route runs;

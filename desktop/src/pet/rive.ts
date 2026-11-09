@@ -75,7 +75,13 @@ export class RiveDrawer {
   private motionSelected = false;
   private ready = false;
   private response = new RiveResponse();
-  private applied?: { animation: string; time: number; exitMix: number; reaction?: string };
+  private applied?: {
+    animation: string;
+    time: number;
+    exitMix: number;
+    reaction?: string;
+    sourcePose?: { animation: string; time: number };
+  };
   route?: ReturnType<RiveRestRouter['step']>;
   seekMotion(value: number, seconds: number): void {
     if (this.dissolveClock) {
@@ -105,8 +111,15 @@ export class RiveDrawer {
         this.applied?.animation !== this.route.animation ||
         this.applied.time !== this.route.time ||
         this.applied.exitMix !== this.route.exitMix ||
-        this.applied.reaction !== this.route.reaction?.animation
+        this.applied.reaction !== this.route.reaction?.animation ||
+        this.applied.sourcePose?.animation !== this.route.sourcePose?.animation ||
+        this.applied.sourcePose?.time !== this.route.sourcePose?.time
       ) {
+        if (this.route.sourcePose) {
+          const pose = this.animations.get(this.route.sourcePose.animation)!;
+          pose.time = this.route.sourcePose.time;
+          pose.apply(1);
+        }
         const animation = this.animations.get(this.route.animation)!;
         animation.time = this.route.time;
         animation.apply(1);
@@ -115,6 +128,7 @@ export class RiveDrawer {
           time: this.route.time,
           exitMix: this.route.exitMix,
           reaction: this.route.reaction?.animation,
+          sourcePose: this.route.sourcePose,
         };
       }
       if (this.route.reaction) {
