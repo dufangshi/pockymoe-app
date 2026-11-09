@@ -581,6 +581,9 @@ answer when a pose moves under a stationary cursor. Neither path reads the GPU.
 The capsule background drags both windows after 4 px of movement; buttons and
 clicks without movement keep their existing actions. macOS pet and glass windows
 accept the first mouse press. Native macOS delivery still needs testing on a Mac.
+Rive receives a body press immediately, before that movement threshold. A local
+click intent stays active until the controller acknowledges the poke (at most
+300 ms), so an IPC gap cannot start a normal work exit between release and poke.
 
 Focused native X11 grab checks accept either an installed pack folder or its ZIP:
 

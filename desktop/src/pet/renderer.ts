@@ -298,7 +298,8 @@ let riveDrawer: RiveDrawer | null = null,
   riveKey = '',
   riveAt = 0,
   riveEpoch = -1,
-  riveDragging = false;
+  riveDragging = false,
+  rivePokeUntil = 0;
 function syncRive(): void {
   const config = state?.rive;
   if (!config || state?.surface !== 'sprite') return;
@@ -335,6 +336,7 @@ function syncRive(): void {
       riveAt = 0;
       riveEpoch = -1;
       riveDragging = false;
+      rivePokeUntil = 0;
       root.querySelector('#character')?.classList.add('rive');
     })
     .catch((error) => {
@@ -354,6 +356,12 @@ function stepRive(now: number): void {
     state.rive?.backing,
   );
   const procedural = state.rive?.procedural;
+  // React to a body press before the controller's 4 px movement threshold.
+  // Capsule presses set started only after that threshold, preserving clicks.
+  const held = !!state.dragging || !!drag?.started;
+  const pendingPoke = now < rivePokeUntil;
+  const pokeAcknowledged = pendingPoke && state.mood === 'poked';
+  if (pokeAcknowledged) rivePokeUntil = 0;
   const gazePoint =
     state.cursor &&
     !tucked &&
@@ -377,13 +385,20 @@ function stepRive(now: number): void {
     dirty = true;
   }
   const dt = scheduled;
+  const riveMood = held
+    ? 'dragging'
+    : pendingPoke
+      ? 'poked'
+      : state.mood.startsWith('running-')
+        ? 'running'
+        : state.mood;
   const beat =
     !tucked && !motion.matches
       ? riveClock?.step(
-          state.dragging ? 'dragging' : state.mood.startsWith('running-') ? 'running' : state.mood,
+          riveMood,
           d.route?.leaving ? 0 : dt,
           now,
-          riveEpoch !== state.moodEpoch,
+          riveEpoch !== state.moodEpoch && !pokeAcknowledged,
         )
       : null;
   if (beat) {
@@ -442,7 +457,7 @@ function stepRive(now: number): void {
     ) || dirty;
   if (procedural?.eyeOpen)
     dirty = d.set('eyeOpen', gaze ? gaze.opacity : !!cursor && !tucked ? 1 : 0) || dirty;
-  const dragging = !!state.dragging;
+  const dragging = held;
   if (dragging !== riveDragging) {
     d.fire(dragging ? 'dragStart' : 'land');
     riveDragging = dragging;
@@ -737,6 +752,7 @@ root.addEventListener('pointerdown', (event) => {
   drag = { id: event.pointerId, x: event.screenX, y: event.screenY, moved: false, started: true };
   root.setPointerCapture(event.pointerId);
   root.querySelector('#character')?.classList.add('dragging');
+  if (riveDrawer) stepRive(performance.now());
   void bridge.action({ type: 'dragStart', x: event.screenX, y: event.screenY });
 });
 function release(event: PointerEvent, cancelled = false): void {
@@ -748,7 +764,16 @@ function release(event: PointerEvent, cancelled = false): void {
   drag = null;
   root.querySelector('#character')?.classList.remove('dragging');
   if (started) void bridge.action({ type: 'dragEnd', x: event.screenX, y: event.screenY });
-  if (clicked) void bridge.action({ type: 'click' });
+  if (clicked) {
+    if (riveDrawer) {
+      // Keep the click intent through the IPC round trip. Otherwise a frame
+      // between release and acknowledgement can select the old work exit.
+      const now = performance.now();
+      rivePokeUntil = now + 300;
+      stepRive(now);
+    }
+    void bridge.action({ type: 'click' });
+  }
 }
 root.addEventListener('pointerup', (event) => release(event));
 root.addEventListener('pointercancel', (event) => release(event, true));

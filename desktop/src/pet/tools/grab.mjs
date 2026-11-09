@@ -287,6 +287,12 @@ try {
       if (mood === 'transition') expect(route.leaving).toBe(true);
       pointer(native.x + x, native.y + y);
       execFileSync('xdotool', ['mousedown', '1']);
+      if (mood !== 'capsule') {
+        await sprite.evaluate(() => new Promise((done) =>
+          requestAnimationFrame(() => requestAnimationFrame(done)),
+        ));
+        expect(await sprite.evaluate(() => window.petRiveHarness.inputs().dragging)).toBe(true);
+      }
       pointer(native.x + x + 5, native.y + y);
       pointer(native.x + x + 35, native.y + y - 15);
       execFileSync('xdotool', ['mouseup', '1']);
