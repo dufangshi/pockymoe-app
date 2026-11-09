@@ -81,6 +81,13 @@ POCKYMOE_DESKTOP_EVIDENCE=<evidence-root> node src/pet/tools/round3.mjs
 POCKYMOE_DESKTOP_EVIDENCE=<evidence-root> node src/pet/tools/round3-real.mjs
 ```
 
+After building the isolated harness, `node src/pet/tools/pack-switch.mjs PACK_FOLDER OUT`
+checks ten real `setPack` action cycles from an imported pack to bundled MOE, including
+the atlas image payload, deletion of the disposable pack after selecting MOE, and both
+processes' errors. Set `PET_SWITCH_HARNESS` to use a
+build outside the default evidence directory. Run it on older Rive packs without exit
+banks as well as current Rive and raster/WebM packs when changing playback or pack switching.
+
 `round3.mjs` uses an isolated mock hub and checks Classic/Plum Pocket/Terminal ×
 light/dark × 1440/900 work areas, all four dock edges at S/M/L, fixed bounds,
 Dock visibility, blur/Esc, request errors and drafts. `--smoke` limits the visual
@@ -509,6 +516,8 @@ values in their metadata and preserve the corresponding backing-store pixels.
 
 An optional routed clip `exits` declaration supplies fitted forward exits:
 `{everyMs:500,durationMs:1250,animationPrefix:"work-exit-",end:"rest"}`.
+Checkpoint spacing can range from 50 to 1000 ms; a denser bank reduces the wait
+before a fitted exit begins without speeding up that exit's animation.
 Author animations numbered from zero through `ceil(durationMs/everyMs)`, with the
 last starting at the clip's exact endpoint. Each must start with the exact source
 material and pose at that time and finish at the named shared boundary. An event

@@ -31,6 +31,11 @@ describe('Rive pack import', () => {
       } },
     })));
     expect(parse(exits).remoteCodex?.rive?.routing?.clips[0].exits).toEqual(exits);
+    expect(parse({ ...exits, everyMs: 50 }).remoteCodex?.rive?.routing?.clips[0].exits?.everyMs)
+      .toBe(50);
+    for (const everyMs of [0, 25, 49, 1001, null]) {
+      expect(() => parse({ ...exits, everyMs })).toThrow('authored exits');
+    }
     expect(parse({ ...exits, sourcePose: true }).remoteCodex?.rive?.routing?.clips[0].exits?.sourcePose)
       .toBe(true);
     expect(() => parse({ ...exits, sourcePose: 1 })).toThrow('authored exits');

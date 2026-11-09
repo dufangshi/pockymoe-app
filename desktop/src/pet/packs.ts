@@ -239,7 +239,7 @@ export function parseManifest(data: Buffer): PetManifest {
           return (
             e !== undefined &&
             (!e ||
-              !Number.isFinite(e.everyMs) || e.everyMs < 100 || e.everyMs > 1000 ||
+              !Number.isFinite(e.everyMs) || e.everyMs < 50 || e.everyMs > 1000 ||
               !Number.isFinite(e.durationMs) || e.durationMs < 250 || e.durationMs > 2500 ||
               typeof e.animationPrefix !== 'string' || !e.animationPrefix.length ||
               e.animationPrefix.length > 90 ||
