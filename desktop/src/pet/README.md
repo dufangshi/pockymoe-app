@@ -548,8 +548,8 @@ copying it into every exit. Exit drawing and guard tracks then override the sour
 an interrupted exit retains that same held pose until its forward path finishes.
 
 `procedural.response:true` declares an additional numeric `response` input. The
-drawer raises a smooth 480ms acknowledgment pulse on motion/state events and pet
-triggers. Bind it to a small head/upper-body gesture while a longer route runs;
+drawer raises a smooth 480ms acknowledgment pulse on a press or poke during an
+existing exit. Bind it to a small head/upper-body gesture while that route runs;
 keep its layer separate from breathing and planted leg controls. It neither seeks
 nor speeds up the source animation. `idleFps`, `activeFps`, `sourceFps` and
 `maxExitMs` are legacy import metadata; new display-rate packs should omit them.
@@ -584,12 +584,9 @@ accept the first mouse press. Native macOS delivery still needs testing on a Mac
 Rive receives a body press immediately, before that movement threshold. A local
 click intent stays active until the controller acknowledges the poke (at most
 300 ms), so an IPC gap cannot start a normal work exit between release and poke.
-Packs opting into `procedural.response` receive a continuous `response` number
-on a press or poke during an existing exit. Author an additive upper-body skin
-lift for this input; it does not restart the exit or replace its current paint.
-Repeated acknowledgements preserve the active lift. Without that optional input,
-old packs keep their authored response banks. Disabling edge hide restores the
-undocked transform immediately, avoiding hem clipping during a stale dock tween.
+Repeated acknowledgements preserve an active additive lift. Without that optional
+input, old packs keep their authored response banks. Disabling edge hide restores
+the undocked transform immediately, avoiding hem clipping during a stale dock tween.
 
 Focused native X11 grab checks accept either an installed pack folder or its ZIP:
 
