@@ -6,7 +6,10 @@ const fixture = vi.hoisted(() => {
   const noop = () => {};
   const types = { number: 1, bool: 2, trigger: 3 };
   const names = {
-    number: ['state', 'mouth', 'lookX', 'lookY', 'dock', 'motion'],
+    number: [
+      'state', 'mouth', 'lookX', 'lookY', 'dock', 'motion', 'response',
+      'blink', 'breath', 'weightShift', 'swayHair', 'swayGown', 'swayWings', 'dragLean',
+    ],
     bool: ['dragging'],
     trigger: ['complete', 'fail', 'poke', 'dragStart', 'land', 'wave', 'motionStart'],
   };
@@ -48,6 +51,7 @@ const fixture = vi.hoisted(() => {
     draw: noop,
     delete: noop,
     bounds: {},
+    rootBone: () => ({}),
   };
   const runtime = {
     SMIInput: types,
@@ -96,6 +100,31 @@ async function workDrawer() {
 }
 
 describe('routed Rive application', () => {
+  it('adds a press cue to an in-flight bank without restarting its drawing sequence', async () => {
+    const pack = structuredClone(config);
+    pack.procedural = { bodyBone: 'body', response: true };
+    pack.routing!.clips[1].exits = {
+      everyMs: 100, durationMs: 650, animationPrefix: 'exit-', sourcePose: true, end: 'rest',
+    };
+    const canvas = { width: 100, height: 100, getContext: () => ({}) } as unknown as HTMLCanvasElement;
+    const drawer = await RiveDrawer.load(canvas, new Uint8Array(), pack, { motion: 1 });
+    drawer.seekMotion(1, 0.3);
+    drawer.advance(0);
+    drawer.set('motion', 0);
+    drawer.advance(0.2);
+    expect(drawer.inputs.get('response')!.value).toBe(0);
+    const bank = drawer.route!.animation;
+    const time = drawer.route!.time;
+    drawer.fire('dragStart');
+    drawer.advance(1 / 60);
+    expect(drawer.route!.animation).toBe(bank);
+    expect(drawer.route!.time).toBeGreaterThan(time);
+    expect(drawer.inputs.get('response')!.value).toBeGreaterThan(0);
+    drawer.seekMotion(1, 0.3);
+    drawer.advance(0);
+    expect(drawer.inputs.get('response')!.value).toBe(0);
+    drawer.dispose();
+  });
   beforeEach(() => {
     fixture.applied.length = 0;
   });

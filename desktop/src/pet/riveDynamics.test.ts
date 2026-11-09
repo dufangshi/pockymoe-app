@@ -1,6 +1,17 @@
 import { describe, it, expect } from 'vitest';
 import { RiveDynamics, RiveGazePulse, RiveResponse, riveSourceTime } from './riveDynamics';
 describe('event acknowledgment', () => {
+  it('keeps an active lift continuous across duplicate press acknowledgements', () => {
+    const response = new RiveResponse();
+    response.request();
+    const before = response.step(0.12);
+    response.request();
+    expect(response.step(0)).toBe(before);
+    expect(response.step(0.12)).toBeCloseTo(1);
+    response.step(1);
+    response.request();
+    expect(response.step(0.12)).toBeCloseTo(before);
+  });
   it('responds on the next display frame and settles without altering the source clock', () => {
     const response = new RiveResponse();
     expect(response.step(1)).toBe(0);

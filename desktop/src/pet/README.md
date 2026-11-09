@@ -584,6 +584,12 @@ accept the first mouse press. Native macOS delivery still needs testing on a Mac
 Rive receives a body press immediately, before that movement threshold. A local
 click intent stays active until the controller acknowledges the poke (at most
 300 ms), so an IPC gap cannot start a normal work exit between release and poke.
+Packs opting into `procedural.response` receive a continuous `response` number
+on a press or poke during an existing exit. Author an additive upper-body skin
+lift for this input; it does not restart the exit or replace its current paint.
+Repeated acknowledgements preserve the active lift. Without that optional input,
+old packs keep their authored response banks. Disabling edge hide restores the
+undocked transform immediately, avoiding hem clipping during a stale dock tween.
 
 Focused native X11 grab checks accept either an installed pack folder or its ZIP:
 

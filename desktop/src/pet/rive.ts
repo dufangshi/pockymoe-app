@@ -84,6 +84,7 @@ export class RiveDrawer {
   };
   route?: ReturnType<RiveRestRouter['step']>;
   seekMotion(value: number, seconds: number): void {
+    this.response.reset();
     if (this.dissolveClock) {
       this.dissolveClock.seek(value, seconds);
       return;
@@ -278,7 +279,6 @@ export class RiveDrawer {
     if (typeof value === 'number') value = Math.fround(value);
     if (input.value === value) return false;
     input.value = value;
-    if (this.ready && (name === 'motion' || name === 'state')) this.response.request();
     if (this.router && name === 'motion') this.router.request(Number(value), false, this.route?.time);
     if (this.dissolveClock && name === 'motion') this.requestDissolve(Number(value));
     if (this.router && name === 'state' && !this.motionSelected) {
@@ -295,7 +295,9 @@ export class RiveDrawer {
     const input = this.inputs.get(name);
     if (!input) throw new Error(`Missing trigger ${name}`);
     input.fire();
-    if (this.ready && (name === 'motionStart' || (RIVE_TRIGGERS as readonly string[]).includes(name)))
+    // A second press must act on the current bank pose, without replaying its
+    // response painting from an earlier source checkpoint.
+    if (this.ready && this.route?.leaving && (name === 'poke' || name === 'dragStart'))
       this.response.request();
     if (this.router && name === 'motionStart')
       this.router.request(Number(this.inputs.get('motion')?.value), true, this.route?.time);
