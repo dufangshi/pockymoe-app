@@ -566,6 +566,27 @@ async function bootstrap(): Promise<void> {
                 broadcast();
                 break;
               }
+              case 'deletePet': {
+                const target = petCatalog.list().find((entry) => entry.id === action.id && entry.imported);
+                if (!target) throw new Error(t('操作无效'));
+                const { response } = await showMessageBox({
+                  type: 'warning',
+                  title: 'Pockymoe',
+                  message: t('删除桌宠「{name}」？', { name: target.name }),
+                  detail: t('会从这台设备上移除这个导入的桌宠，之后可以重新导入。'),
+                  buttons: [t('取消'), t('删除')],
+                  defaultId: 0,
+                  cancelId: 0,
+                });
+                if (response !== 1) break;
+                // Stop using its files first, so that removal cannot pull them from under the pet.
+                if (settings.get().petId === target.id) settings.set({ petId: 'moe' });
+                await pet?.reloadPacks();
+                await petCatalog.remove(target.id);
+                await pet?.reloadPacks();
+                broadcast();
+                break;
+              }
               case 'external': {
                 const safe = externalUrl(action.url);
                 if (!safe) throw new Error(t('操作无效'));

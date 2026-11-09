@@ -2,7 +2,7 @@ import { openPetPanel } from './petPanel';
 import { PNG } from 'pngjs';
 import { recordLifecycle } from './lifecycle';
 import { test, expect, _electron as electron, type ElectronApplication, type Page } from '@playwright/test';
-import { cpSync, writeFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { cpSync, existsSync, writeFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -46,6 +46,11 @@ test.beforeAll(async () => {
 test.afterAll(async () => { await new Promise<void>(done => server.close(() => done())); });
 test.beforeEach(async () => {
   speech = []; speechSamples = 480; profile = mkdtempSync(join(tmpdir(), 'pockymoe-pet-work-'));
+  if (test.info().title.startsWith('imported pet')) {
+    const pack = join(profile, 'pets', 'delete-me'); cpSync(resolve('assets/pets/moe'), pack, { recursive: true });
+    const manifest = JSON.parse(readFileSync(join(pack, 'pet.json'), 'utf8')) as Record<string, unknown>;
+    writeFileSync(join(pack, 'pet.json'), JSON.stringify({ ...manifest, id: 'delete-me', displayName: 'Delete me' }));
+  }
   if (clipPack && test.info().title.startsWith('clips')) { mkdirSync(join(profile, 'pets')); cpSync(clipPack, join(profile, 'pets', clipPackId()), { recursive: true }); }
   const env: Record<string, string> = {};
   for (const key of ['PATH', 'HOME', 'TMPDIR', 'USER', 'LOGNAME', 'DISPLAY', 'XAUTHORITY', 'SystemRoot', 'WINDIR', 'TEMP', 'TMP', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'ComSpec', 'PATHEXT']) if (process.env[key]) env[key] = process.env[key]!;
@@ -206,6 +211,31 @@ test('speech bubble: names the thread above the pet while it is read, and opens 
   await bubble.locator('.speech-foot button[data-action="open"]').click();
   await expect.poll(() => page.evaluate(() => window.commands.map(command => JSON.stringify(command)).join())).toContain(`/devices/${item().deviceId}/threads/${item().threadId}`);
   await expect(bubble).toHaveCount(0);
+});
+test('imported pet: can be deleted where packs are imported, after confirming, and a bundled pet cannot', async () => {
+  await settings({ petId: 'delete-me' });
+  await app.evaluate(({ dialog }) => { const g = globalThis as unknown as { dialogs: Electron.MessageBoxOptions[]; dialogResponse: number }; g.dialogs = []; g.dialogResponse = 0; dialog.showMessageBox = (async (options: Electron.MessageBoxOptions) => { g.dialogs.push(options); return { response: g.dialogResponse, checkboxChecked: false }; }) as typeof dialog.showMessageBox; });
+  const preferences = await openPreferences(), remove = preferences.locator('#delete-pet');
+  await expect(remove).toBeVisible();
+  for (const pack of ['classic', 'plum-pocket', 'terminal'] as const) for (const effective of ['light', 'dark'] as const) {
+    await app.evaluate((_e, value) => globalThis.__pockymoeDesktopTest.appearance.sync(value), { pack, effective, accent: '#8f5a9e', locale: 'zh-CN' });
+    await preferences.locator('.pet-picker-row').screenshot({ path: join(evidence, `delete-pet-${pack}-${effective}.png`), animations: 'disabled' });
+  }
+  const packFile = join(profile, 'pets', 'delete-me', 'pet.json');
+  // Cancel keeps everything.
+  await remove.click();
+  await expect.poll(() => app.evaluate(() => (globalThis as unknown as { dialogs: Electron.MessageBoxOptions[] }).dialogs.length)).toBe(1);
+  expect(await app.evaluate(() => (globalThis as unknown as { dialogs: Electron.MessageBoxOptions[] }).dialogs[0]!.message)).toContain('Delete me');
+  await preferences.waitForTimeout(300);
+  expect(existsSync(packFile)).toBe(true);
+  expect(await app.evaluate(() => globalThis.__pockymoeDesktopTest.settings.get().petId)).toBe('delete-me');
+  // Confirming removes it, and the pet falls back to the bundled one.
+  await app.evaluate(() => { (globalThis as unknown as { dialogResponse: number }).dialogResponse = 1; });
+  await remove.click();
+  await expect.poll(() => existsSync(packFile)).toBe(false);
+  await expect.poll(() => app.evaluate(() => globalThis.__pockymoeDesktopTest.settings.get().petId)).toBe('moe');
+  await expect(preferences.locator('#delete-pet')).toHaveCount(0);
+  await expect((await pet('sprite')).locator('#character')).toBeVisible();
 });
 test('speech bubble: a request stays where it is while another thread is read', async () => {
   speechSamples = 24000 * 60;
