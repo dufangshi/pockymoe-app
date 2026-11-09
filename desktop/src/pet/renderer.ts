@@ -497,6 +497,7 @@ function stepRive(now: number): void {
 }
 // A pack's clips replace the atlas for the states they cover; any other state, or a clip that
 // fails to decode, draws from the atlas. Sheets are decoded when needed and few are kept.
+let videoState: SpriteState | null = null;
 const CLIP_CACHE = 6, ONE_SHOT = ['failed', 'waving', 'jumping', 'poked', 'landing'], LEAVE_MS = 600;
 const clipCache = new Map<string, Promise<ImageBitmap | null>>();
 let clipSequence: ClipSequencer | null = null;
@@ -536,7 +537,10 @@ function playClips(): void {
   const clip = docked ?? (!clipSequence ? null : motion.matches ? clipSequence.still(animationState) : clipSequence.next(animationState, Date.now()));
   if (!clip) { videoPlayer?.dispose(); clipPlayer = null; root.querySelector('#character')?.classList.remove('clips'); return; }
   if (state?.clips?.format.mediaType === 'webm-vp9-alpha') {
-    videoPlayer ??= new VideoClipPlayer(path => state?.clips?.urls?.[path] ?? '', video => { root.querySelector('#character')?.classList.add('clips'); videoCanvas(video); }, () => { if (!ONE_SHOT.includes(animationState) || videoPlayer?.role) playClips(); }, () => { root.querySelector('#character')?.classList.remove('clips'); paintSprite(); });
+    videoPlayer ??= new VideoClipPlayer(path => state?.clips?.urls?.[path] ?? '', video => { root.querySelector('#character')?.classList.add('clips'); videoCanvas(video); }, () => { if (videoState !== animationState || !ONE_SHOT.includes(animationState) || videoPlayer?.role) playClips(); }, () => { root.querySelector('#character')?.classList.remove('clips'); paintSprite(); });
+    // A one-shot holds its last frame only when it is the clip of the current state. The clip
+    // that was hurried to its end to make way for a one-shot must still hand over to it.
+    videoState = animationState;
     void videoPlayer.play(clip, state.clips.format.fps, motion.matches || !!docked).then(() => {
       if (token !== clipToken) return;
       const next = docked ? null : clipSequence?.upcoming(animationState); videoPlayer?.preload(next ?? null);
@@ -559,7 +563,7 @@ function playClips(): void {
 function leaveClip(): void {
   if (dockRestClip()) { playClips(); return; }
   const format = state?.clips?.format;
-  if (format?.mediaType && videoPlayer?.playing && !motion.matches) { videoPlayer.leave(); return; }
+  if (format?.mediaType && videoPlayer?.playing && !motion.matches) { if (!videoPlayer.leave()) playClips(); return; }
   if (!clipPlayer || !format || motion.matches || !state?.clips?.states[animationState]) { playClips(); return; }
   const { clip, drawn } = clipPlayer;
   if (clip.role === 'outro' || clipPlayer.leaving) return;

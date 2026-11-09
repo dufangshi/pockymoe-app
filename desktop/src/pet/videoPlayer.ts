@@ -75,11 +75,14 @@ export class VideoClipPlayer {
   }
   /** State changes preserve the current image, hurry toward the shared rest endpoint,
    * then hand off. An intro/outro always reaches its last pose. */
-  leave(): void {
-    if (!this.active || this.completed) return;
+  leave(): boolean {
+    // A finished one-shot is holding its last frame: there is nothing left to hurry, so the
+    // caller must start the next clip itself.
+    if (!this.active || this.completed) return false;
     const v = this.active.video;
     v.playbackRate = 3;
     this.start = performance.now() - (this.active.clip.frames / Number(v.dataset.fps || 24) * 1000 - Math.min(600, Math.max(0, v.duration - v.currentTime) / 3 * 1000));
+    return true;
   }
   invalidate(): void { this.changed = true; }
   get path(): string | null { return this.active?.clip.path ?? null; }
