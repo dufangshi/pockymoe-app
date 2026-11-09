@@ -439,6 +439,14 @@ random resting still use `RiveMotionClock`; its beat clock pauses during exit.
 The body is applied with `LinearAnimationInstance`; the state machine owns the
 procedural layers. Such files must not also animate the body from their machine.
 
+An optional `routing.resetAnimation` names a neutral-property animation. The drawer
+applies it at time zero before each new routed animation, then reapplies any held
+source pose and the selected animation, all before drawing. This initializes sparse
+tracks without displaying a reset pose. Fitted exit banks hand off directly to the
+destination's first sample; packs without banks retain their legacy boundary sample.
+An explicit `motion` selected in a frame takes priority over the coarse `state`
+input, including a poke or drag reported as idle by the controller.
+
 `rive.backing: {width, height, scale}` caps the backing store to native source
 resolution × scale (1–1.25), preserving aspect ratio. CSS controls visual size;
 hit masks use normalized artboard coordinates. Opted-in bitmap drawing packs

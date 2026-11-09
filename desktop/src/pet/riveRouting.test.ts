@@ -96,10 +96,32 @@ describe('material-safe routing', () => {
         expect(router.step(0.1).animation).toBe(`${target === 2 ? 'startle' : 'lower'}-${phase * 20 + 1}`);
         expect(router.step(0.1).time).toBeCloseTo(0.11);
         const boundary = router.step(0.7);
-        expect(boundary.boundary).toBe(true);
+        expect(boundary).toMatchObject({
+          animation: target === 0 ? 'idle' : 'bed-in',
+          time: 0,
+          boundary: false,
+          leaving: false,
+        });
         expect(router.step(1 / 60).animation).toBe(target === 0 ? 'idle' : 'bed-in');
       }
     }
+  });
+
+  it.each([60, 120])('hands fitted banks to the destination atomically at %i Hz', (fps) => {
+    const fixture = structuredClone(config);
+    fixture.clips[1].exits = {
+      everyMs: 100, durationMs: 650, animationPrefix: 'lower-', sourcePose: true, end: 'rest',
+    };
+    const router = new RiveRestRouter(fixture, 1);
+    router.seek(1, 0.35);
+    router.request(0);
+    const samples = Array.from({ length: fps }, () => router.step(1 / fps));
+    const bank = samples.filter((sample) => sample.animation.startsWith('lower-'));
+    expect(bank.length).toBeGreaterThan(0);
+    expect(bank.every((sample) => sample.time < 0.65 && !sample.boundary)).toBe(true);
+    expect(samples.find((sample) => sample.animation === 'idle')).toMatchObject({
+      time: 0, leaving: false, boundary: false,
+    });
   });
 
   it('takes fitted forward exits at every loop phase instead of reversing long gestures', () => {

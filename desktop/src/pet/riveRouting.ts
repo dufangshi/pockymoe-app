@@ -34,6 +34,8 @@ export interface RivePoseReaction {
   drawings?: { atMs: number; animation: string }[];
 }
 export interface RiveRouting {
+  /** Restore neutral properties before applying the next routed animation, without drawing a frame. */
+  resetAnimation?: string;
   /** Legacy metadata, retained only for importing older packs. */
   maxExitMs?: number;
   clips: RoutedClip[];
@@ -107,6 +109,7 @@ export class RiveRestRouter {
   private afterReaction?: { value: number; restart: boolean };
   private residency?: RivePoseReaction;
   private sourcePose?: RoutedSample['sourcePose'];
+  private fittedExit = false;
 
   constructor(
     private readonly config: RiveRouting,
@@ -142,6 +145,7 @@ export class RiveRestRouter {
   }
 
   seek(value: number, seconds: number): void {
+    this.fittedExit = false;
     this.sourcePose = undefined;
     this.clip = this.find(value);
     this.time = Math.max(0, Math.min(this.clip.durationMs, seconds * 1000));
@@ -210,6 +214,7 @@ export class RiveRestRouter {
       this.residency = undefined;
     }
     const target = this.find(value);
+    this.fittedExit = !!this.clip.exits || !!this.sourcePose;
     this.legs = this.exitLegs(target);
     this.elapsed = 0;
     this.target = target;
@@ -329,11 +334,20 @@ export class RiveRestRouter {
         this.legs.shift();
         this.elapsed = 0;
         if (!this.legs.length) {
-          this.boundary = true;
+          if (this.fittedExit) {
+            // A bank's endpoint is a pose handoff, not an extra display frame.
+            // Apply the destination in this same sample so a terminal rest key
+            // cannot flash between the last fitted drawing and its destination.
+            this.clip = this.target;
+            this.time = 0;
+            this.target = undefined;
+            this.sourcePose = undefined;
+            this.fittedExit = false;
+          } else this.boundary = true;
           break;
         }
       }
-      if (!this.legs.length && !this.boundary) this.boundary = true;
+      if (this.target && !this.legs.length && !this.boundary) this.boundary = true;
     } else {
       this.time += dt;
       if (this.clip.loop && this.time > this.clip.durationMs + 1e-6) this.time %= this.clip.durationMs;

@@ -11,6 +11,24 @@ const manifest = {
   remoteCodex: { rive: { path: 'pet.riv', artboard: 'Pet', stateMachine: 'Pet' } },
 };
 describe('Rive pack import', () => {
+  it('validates an optional pose initializer without requiring a visible reset bridge', () => {
+    const parse = (resetAnimation: unknown) => parseManifest(Buffer.from(JSON.stringify({
+      ...manifest,
+      remoteCodex: { rive: {
+        ...manifest.remoteCodex.rive,
+        motions: { idle: [{ value: 0, durationMs: 1000 }] },
+        routing: {
+          resetAnimation,
+          bridges: [],
+          clips: [{ value: 0, animation: 'idle', durationMs: 1000, start: 'rest', end: 'rest' }],
+        },
+      } },
+    })));
+    expect(parse('neutral-properties').remoteCodex?.rive?.routing?.resetAnimation).toBe('neutral-properties');
+    expect(parse(undefined).remoteCodex?.rive?.routing?.resetAnimation).toBeUndefined();
+    for (const invalid of ['', 7, {}, 'a'.repeat(101)]) expect(() => parse(invalid)).toThrow('routing');
+  });
+
   it('validates event-specific exit banks against routed destinations', () => {
     const exits = {
       everyMs: 100,

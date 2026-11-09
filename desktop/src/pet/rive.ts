@@ -115,6 +115,11 @@ export class RiveDrawer {
         this.applied.sourcePose?.animation !== this.route.sourcePose?.animation ||
         this.applied.sourcePose?.time !== this.route.sourcePose?.time
       ) {
+        if (this.applied?.animation !== this.route.animation && this.config?.routing?.resetAnimation) {
+          const reset = this.animations.get(this.config.routing.resetAnimation)!;
+          reset.time = 0;
+          reset.apply(1);
+        }
         if (this.route.sourcePose) {
           const pose = this.animations.get(this.route.sourcePose.animation)!;
           pose.time = this.route.sourcePose.time;
@@ -228,6 +233,7 @@ export class RiveDrawer {
       drawer.hitMask = config.hitMask ? new RiveHitMask(config.hitMask) : undefined;
       if (config.routing) {
         for (const name of new Set([
+          ...(config.routing.resetAnimation ? [config.routing.resetAnimation] : []),
           ...config.routing.clips.flatMap((clip) => [
             clip.animation,
             ...(clip.exitAnimation ? [clip.exitAnimation] : []),
@@ -275,11 +281,11 @@ export class RiveDrawer {
     if (this.ready && (name === 'motion' || name === 'state')) this.response.request();
     if (this.router && name === 'motion') this.router.request(Number(value), false, this.route?.time);
     if (this.dissolveClock && name === 'motion') this.requestDissolve(Number(value));
-    if (this.router && name === 'state') {
+    if (this.router && name === 'state' && !this.motionSelected) {
       const motion = this.config?.motions?.[RIVE_STATES[Number(value)]]?.[0];
       if (motion) this.router.request(motion.value, false, this.route?.time);
     }
-    if (this.dissolveClock && name === 'state') {
+    if (this.dissolveClock && name === 'state' && !this.motionSelected) {
       const motion = this.config?.motions?.[RIVE_STATES[Number(value)]]?.[0];
       if (motion) this.requestDissolve(motion.value);
     }

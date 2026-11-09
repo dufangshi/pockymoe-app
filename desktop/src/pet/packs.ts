@@ -198,6 +198,8 @@ export function parseManifest(data: Buffer): PetManifest {
       if (
         !q ||
         !r.motions ||
+        (q.resetAnimation !== undefined &&
+          (typeof q.resetAnimation !== 'string' || !q.resetAnimation.length || q.resetAnimation.length > 100)) ||
         (q.maxExitMs !== undefined &&
           (!Number.isFinite(q.maxExitMs) || q.maxExitMs < 100 || q.maxExitMs > 400)) ||
         !Array.isArray(q.clips) ||
