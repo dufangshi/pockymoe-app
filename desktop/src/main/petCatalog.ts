@@ -1,6 +1,8 @@
 import { petMediaResponse } from '../pet/media';
 import { lstatSync, readFileSync, readdirSync } from 'node:fs';
+import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
+import { t } from '../shared/i18n';
 import type { LocalState } from '../shared/local';
 
 /** What a pack says about itself. A license link is required to show a license name. */
@@ -32,13 +34,20 @@ export class PetCatalog {
           if (!imageStat.isFile() || imageStat.isSymbolicLink() || imageStat.size > 8 * 1024 * 1024) continue;
           const name = typeof manifest.displayName === 'string' ? manifest.displayName.slice(0, 100) : id;
           this.assets.set(id, { path: image, type: image.endsWith('.png') ? 'image/png' : 'image/webp' });
-          this.entries.push({ id, name, thumbnail: `pockymoe-pet://atlas/${encodeURIComponent(id)}`, rows: manifest.spriteVersionNumber === 2 ? 11 : 9,
+          this.entries.push({ id, name, thumbnail: `pockymoe-pet://atlas/${encodeURIComponent(id)}`, ...(directory !== this.directories[0] ? { imported: true } : {}), rows: manifest.spriteVersionNumber === 2 ? 11 : 9,
             ...(id === 'moe' && directory === this.directories[0] ? { author: 'Pockymoe' } : credit(manifest)) });
         } catch { /* Incomplete/custom packs must not break Preferences. */ }
       }
     }
   }
   list(): LocalState['petPacks'] { return this.entries.map(entry => ({ ...entry })); }
+  /** Only a pack in the last directory, the user's own, can be removed. Bundled packs stay. */
+  async remove(id: string): Promise<void> {
+    if (!this.entries.some(entry => entry.id === id && entry.imported)) throw new Error(t('操作无效'));
+    // Windows can still hold a media file for a moment after the pack stops playing.
+    await rm(join(this.directories[this.directories.length - 1], id), { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    this.refresh();
+  }
   async asset(request: Request | string): Promise<Response> {
     const req = typeof request === 'string' ? new Request(request) : request;
     const media = await petMediaResponse(req); if (media) return media;
