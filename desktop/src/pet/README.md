@@ -444,6 +444,8 @@ applies it at time zero before each new routed animation, then reapplies any hel
 source pose and the selected animation, all before drawing. This initializes sparse
 tracks without displaying a reset pose. Fitted exit banks hand off directly to the
 destination's first sample; packs without banks retain their legacy boundary sample.
+When the fitted exit already reaches an outro's ending boundary, it completes that
+outro at its last sample instead of replaying an entrance to its starting boundary.
 An explicit `motion` selected in a frame takes priority over the coarse `state`
 input, including a poke or drag reported as idle by the controller.
 

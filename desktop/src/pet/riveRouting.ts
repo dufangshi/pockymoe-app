@@ -110,6 +110,7 @@ export class RiveRestRouter {
   private residency?: RivePoseReaction;
   private sourcePose?: RoutedSample['sourcePose'];
   private fittedExit = false;
+  private targetAtEnd = false;
 
   constructor(
     private readonly config: RiveRouting,
@@ -146,6 +147,7 @@ export class RiveRestRouter {
 
   seek(value: number, seconds: number): void {
     this.fittedExit = false;
+    this.targetAtEnd = false;
     this.sourcePose = undefined;
     this.clip = this.find(value);
     this.time = Math.max(0, Math.min(this.clip.durationMs, seconds * 1000));
@@ -230,7 +232,14 @@ export class RiveRestRouter {
         ? this.clip.durationMs
         : 0;
     const family = exit ? exit.end : endpoint === 0 ? this.clip.start : this.clip.end;
-    const bridge = this.path(family, target.start);
+    // A fitted wake/return already completes an outro ending at this rest.
+    // Re-entering that outro's starting family would replay the entire entrance.
+    this.targetAtEnd =
+      this.fittedExit &&
+      this.config.bridges.includes(target.value) &&
+      family === target.end &&
+      family !== target.start;
+    const bridge = this.targetAtEnd ? [] : this.path(family, target.start);
     const responsePrefix = exit?.responses?.find((response) => response.targets.includes(target.value))
       ?.animationPrefix;
     const authoredExit: RoutedClip | undefined = exit
@@ -339,7 +348,7 @@ export class RiveRestRouter {
             // Apply the destination in this same sample so a terminal rest key
             // cannot flash between the last fitted drawing and its destination.
             this.clip = this.target;
-            this.time = 0;
+            this.time = this.targetAtEnd ? this.target.durationMs : 0;
             this.target = undefined;
             this.sourcePose = undefined;
             this.fittedExit = false;

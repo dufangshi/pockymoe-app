@@ -407,6 +407,13 @@ try {
         }
     }
     await app.evaluate(() => globalThis.petHarness.settings({ petEdgeHide: false }));
+    // The 100 ms pointer poll starts a 220 ms undock transition. A screenshot
+    // after only 120 ms captures its intentional clipping, not the final theme.
+    await sprite.waitForFunction(() => {
+      const character = document.querySelector('#character');
+      return character && !character.classList.contains('docked-rest') &&
+        !character.getAnimations().some((animation) => animation.playState === 'running');
+    });
   }
   // Appearance/width inspection runs after the idle measurement.
   if (id === 'mint-courier' || process.env.RIVE_BENCH_CAPTURE === '1')

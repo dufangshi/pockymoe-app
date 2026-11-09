@@ -124,6 +124,25 @@ describe('material-safe routing', () => {
     });
   });
 
+  it('uses a fitted wake as the bed outro instead of entering bed again', () => {
+    const fixture = structuredClone(config);
+    fixture.clips[4].exits = {
+      everyMs: 100,
+      durationMs: 650,
+      animationPrefix: 'wake-',
+      sourcePose: true,
+      end: 'rest',
+    };
+    const router = new RiveRestRouter(fixture, 4);
+    router.seek(4, 0.5);
+    router.request(3);
+    const samples = Array.from({ length: 60 }, () => router.step(1 / 60));
+    expect(samples.some((sample) => sample.animation === 'bed-in')).toBe(false);
+    expect(samples.find((sample) => !sample.leaving)).toMatchObject({
+      animation: 'bed-out', time: 1, boundary: false,
+    });
+  });
+
   it('takes fitted forward exits at every loop phase instead of reversing long gestures', () => {
     const fixture = structuredClone(config);
     const work = fixture.clips[1];
