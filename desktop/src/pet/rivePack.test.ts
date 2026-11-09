@@ -57,6 +57,12 @@ describe('Rive pack import', () => {
     expect(parse({ ...exits, sourcePose: true }).remoteCodex?.rive?.routing?.clips[0].exits?.sourcePose)
       .toBe(true);
     expect(() => parse({ ...exits, sourcePose: 1 })).toThrow('authored exits');
+    expect(parse({ ...exits, sourcePose: true, entryMs: 150 })
+      .remoteCodex?.rive?.routing?.clips[0].exits?.entryMs).toBe(150);
+    for (const entryMs of [0, -1, 800, '150', null]) {
+      expect(() => parse({ ...exits, sourcePose: true, entryMs })).toThrow('authored exits');
+    }
+    expect(() => parse({ ...exits, entryMs: 150 })).toThrow('authored exits');
     for (const responses of [
       {},
       [null],
@@ -223,6 +229,11 @@ describe('Rive pack import', () => {
       );
     expect(parse(route).remoteCodex?.rive?.routing).toEqual(route);
     const reaction = { clips: [2], targets: [0], animation: 'local-startle', durationMs: 800, settleMs: 100 };
+    expect(parse({ ...route, reactions: [{ ...reaction, entryMs: 150 }] })
+      .remoteCodex?.rive?.routing?.reactions?.[0].entryMs).toBe(150);
+    for (const entryMs of [0, -1, 800, '150', null]) {
+      expect(() => parse({ ...route, reactions: [{ ...reaction, entryMs }] })).toThrow('pose reaction');
+    }
     expect(parse({ ...route, reactions: [reaction] }).remoteCodex?.rive?.routing?.reactions).toEqual([
       reaction,
     ]);

@@ -3,6 +3,7 @@ import { RiveDrawer, type RivePack } from './rive';
 
 const fixture = vi.hoisted(() => {
   const applied: { name: string; time: number }[] = [];
+  const bodyInputs: number[] = [];
   const noop = () => {};
   const types = { number: 1, bool: 2, trigger: 3 };
   const names = {
@@ -32,6 +33,7 @@ const fixture = vi.hoisted(() => {
       return this.inputs[index];
     }
     advanceAndApply() {
+      bodyInputs.push(this.inputs.find((input) => input.name === 'breath')!.value);
       return false;
     }
     delete = noop;
@@ -66,7 +68,7 @@ const fixture = vi.hoisted(() => {
     Fit: { contain: 0 },
     Alignment: { center: 0 },
   };
-  return { applied, runtime };
+  return { applied, bodyInputs, runtime };
 });
 
 vi.mock('@rive-app/webgl2-advanced', () => ({ default: async () => fixture.runtime }));
@@ -100,6 +102,56 @@ async function workDrawer() {
 }
 
 describe('routed Rive application', () => {
+  it('keeps a local reaction on its displayed source until the additive cue finishes', async () => {
+    const pack = structuredClone(config);
+    pack.routing!.reactions = [{
+      clips: [1], targets: [2], animation: 'local-startle',
+      durationMs: 800, settleMs: 100, entryMs: 150,
+    }];
+    const canvas = { width: 100, height: 100, getContext: () => ({}) } as unknown as HTMLCanvasElement;
+    const drawer = await RiveDrawer.load(canvas, new Uint8Array(), pack, { motion: 1 });
+    drawer.seekMotion(1, 0.347);
+    drawer.advance(0);
+    drawer.set('motion', 2);
+    fixture.applied.length = 0;
+    drawer.advance(0.1);
+    expect(fixture.applied).toEqual([{ name: 'work', time: Math.fround(0.347) }]);
+    fixture.applied.length = 0;
+    drawer.advance(0.06);
+    expect(fixture.applied.at(-1)?.name).toBe('local-startle');
+    drawer.dispose();
+  });
+
+  it('applies the displayed source during the cue instead of the bank donor or reset painting', async () => {
+    const pack = structuredClone(config);
+    pack.routing!.clips[1].exits = {
+      everyMs: 100, durationMs: 800, animationPrefix: 'exit-', sourcePose: true,
+      entryMs: 150, end: 'rest',
+    };
+    const canvas = { width: 100, height: 100, getContext: () => ({}) } as unknown as HTMLCanvasElement;
+    const drawer = await RiveDrawer.load(canvas, new Uint8Array(), pack, { motion: 1 });
+    drawer.seekMotion(1, 0.347);
+    drawer.advance(0);
+    drawer.set('breath', 0.25);
+    drawer.set('motion', 0);
+    fixture.applied.length = 0;
+    drawer.advance(0.1);
+    drawer.set('breath', 0.75);
+    drawer.advance(0);
+    expect(fixture.bodyInputs.at(-1)).toBe(0.25);
+    expect(drawer.inputs.get('breath')!.value).toBe(0.75);
+    expect(fixture.applied).toEqual([
+      { name: 'work', time: Math.fround(0.347) },
+      { name: 'work', time: Math.fround(0.347) },
+    ]);
+    fixture.applied.length = 0;
+    drawer.advance(0.06);
+    expect(fixture.applied.map((sample) => sample.name)).toEqual([
+      'neutral-properties', 'work', 'exit-4',
+    ]);
+    drawer.dispose();
+  });
+
   it.each(['poke', 'dragStart'] as const)(
     'adds %s to an in-flight bank without restarting its drawing sequence',
     async (trigger) => {
@@ -130,6 +182,7 @@ describe('routed Rive application', () => {
   );
   beforeEach(() => {
     fixture.applied.length = 0;
+    fixture.bodyInputs.length = 0;
   });
 
   it.each([[2, 'poke'], [3, 'drag']] as const)(

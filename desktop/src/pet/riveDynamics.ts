@@ -16,7 +16,7 @@ export interface RiveProcedural {
   /** Legacy source sampling metadata, never a runtime clock quantizer. */
   sourceFps?: 24 | 30;
   transientFace?: boolean;
-  /** An authored upper-body acknowledgment while a longer exit is running. */
+  /** An authored acknowledgment on the displayed pose, independent of routing. */
   response?: boolean;
 }
 

@@ -246,6 +246,8 @@ export function parseManifest(data: Buffer): PetManifest {
               typeof e.animationPrefix !== 'string' || !e.animationPrefix.length ||
               e.animationPrefix.length > 90 ||
               (e.sourcePose !== undefined && typeof e.sourcePose !== 'boolean') ||
+              (e.entryMs !== undefined &&
+                (!e.sourcePose || !Number.isFinite(e.entryMs) || e.entryMs <= 0 || e.entryMs >= e.durationMs)) ||
               (e.responses !== undefined &&
                 (!Array.isArray(e.responses) ||
                   e.responses.length > 8 ||
@@ -300,6 +302,8 @@ export function parseManifest(data: Buffer): PetManifest {
               a.settleMs < 50 ||
               a.settleMs > 400 ||
               a.settleMs > a.durationMs ||
+              (a.entryMs !== undefined &&
+                (!Number.isFinite(a.entryMs) || a.entryMs <= 0 || a.entryMs >= a.durationMs)) ||
               (a.resumeValue !== undefined &&
                 (!q.clips.some((c) => c.value === a.resumeValue) ||
                   !Array.isArray(a.resumeTargets) ||
