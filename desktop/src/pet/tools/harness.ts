@@ -3,7 +3,7 @@ import { verifyRivePack } from '../riveValidation';
 import { petMediaResponse } from '../media';
 import { app, BrowserWindow, nativeTheme, screen, session, protocol, ipcMain } from 'electron';
 import { join } from 'node:path';
-import { cpSync, mkdtempSync } from 'node:fs';
+import { cpSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { createPetController } from '../controller';
 import type { Appearance, ActivityEvent, ActivityHubLike, ActivitySnapshot, DesktopSettings, HostCommand, SettingsStoreLike } from '../../shared/contract';
@@ -52,6 +52,11 @@ void app.whenReady().then(() => {
   const setIgnored = window.setIgnoreMouseEvents.bind(window);
   window.setIgnoreMouseEvents = (value, options) => { ignored = value; setIgnored(value, options); };
   Object.assign(globalThis, { petHarness: {
+    async removeFixture() {
+      store.set({ petId: 'moe' });
+      rmSync(join(app.getPath('userData'), 'pets', 'clip-fixture'), { recursive: true, force: true });
+      await controller.reloadPacks();
+    },
     inputPlatform(value: 'darwin' | 'native') {
       // Exercise forwarded-hit policy on Linux; this does not emulate macOS OS delivery.
       Object.defineProperty(process, 'platform', { value: value === 'native' ? nativePlatform : value });

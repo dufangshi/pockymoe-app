@@ -56,7 +56,13 @@ app.whenReady().then(() => {
 const app = await electron.launch({
   executablePath: resolve('node_modules/electron/dist/electron'),
   timeout: 30000,
-  args: ['--no-sandbox', '--ozone-platform=x11', main, resolve(output, 'app/index.html')],
+  args: [
+    '--no-sandbox',
+    '--ozone-platform=x11',
+    ...(process.env.RIVE_RECORD_SWIFTSHADER === '1' ? ['--use-angle=swiftshader'] : []),
+    main,
+    resolve(output, 'app/index.html'),
+  ],
 });
 const binary = await serveRiveBytes(await readFile(file));
 try {

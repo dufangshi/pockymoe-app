@@ -6,6 +6,7 @@ import { resolve } from 'node:path';
 import { summarizeNativeTrace } from './trace-summary.mjs';
 import { cpus } from 'node:os';
 import { createHash } from 'node:crypto';
+import { summarizeMemory } from '../../../src/pet/benchmarkMemory.ts';
 const [, , pack, out, id = 'mint-courier', seconds = '60'] = process.argv;
 if (!pack || !out) throw new Error('Usage: node art/tools/rive/benchmark.mjs PACK OUT ID [seconds=60]');
 const dpr = Number(process.env.RIVE_BENCH_DPR ?? '1');
@@ -29,6 +30,7 @@ const app = await electron.launch({
   executablePath: electronExecutable,
   args: [
     '--no-sandbox',
+    ...(process.env.RIVE_BENCH_SWIFTSHADER === '1' ? ['--use-angle=swiftshader'] : []),
     ...(process.platform === 'linux' ? ['--ozone-platform=x11', '--enable-unsafe-swiftshader'] : []),
     `--force-device-scale-factor=${dpr}`,
     resolve(process.env.RIVE_BENCH_HARNESS ?? '.local/desktop-evidence/pet/qa1/harness/main/index.js'),
@@ -286,6 +288,18 @@ try {
     rendererCPU: mean('pet'),
     gpuProcessCPU: mean('GPU'),
     allProcessCPU: (100 * (allCPU(last) - allCPU(first))) / elapsed,
+    memory: summarizeMemory(
+      samples.map((sample) => {
+        const renderer = sample.metrics.find((m) => m.pid === sample.petPid)?.memory;
+        const gpu = sample.metrics.filter((m) => m.type === 'GPU');
+        return {
+          rendererWorkingSetKiB: renderer?.workingSetSize ?? 0,
+          rendererHighWaterKiB: renderer?.peakWorkingSetSize ?? 0,
+          gpuWorkingSetKiB: gpu.reduce((sum, m) => sum + m.memory.workingSetSize, 0),
+          gpuHighWaterKiB: gpu.reduce((sum, m) => sum + m.memory.peakWorkingSetSize, 0),
+        };
+      }),
+    ),
     note:
       'CPU seconds / measured wall seconds * 100 (one fully busy logical core = 100%). ' +
       'GPU process CPU is not GPU hardware utilization. readbacks counts window WebGL readPixels ' +
@@ -329,7 +343,11 @@ try {
     const size = await sprite.evaluate(() => ({ w: innerWidth, h: innerHeight }));
     for (const [point, expected] of [
       [{ x: (sx / n / png.width) * size.w, y: (sy / n / png.height) * size.h }, false],
-      [{ x: 0, y: 0 }, true],
+      // New packs carry baked conservative silhouettes, including transparent corners.
+      [
+        { x: 0, y: 0 },
+        !riveBytes || !!manifest.remoteCodex?.rive?.hitMask && process.platform === 'darwin',
+      ],
     ]) {
       await app.evaluate((_, p) => {
         const b = globalThis.petHarness.metrics().sprite;
@@ -389,6 +407,13 @@ try {
         }
     }
     await app.evaluate(() => globalThis.petHarness.settings({ petEdgeHide: false }));
+    // The 100 ms pointer poll starts a 220 ms undock transition. A screenshot
+    // after only 120 ms captures its intentional clipping, not the final theme.
+    await sprite.waitForFunction(() => {
+      const character = document.querySelector('#character');
+      return character && !character.classList.contains('docked-rest') &&
+        !character.getAnimations().some((animation) => animation.playState === 'running');
+    });
   }
   // Appearance/width inspection runs after the idle measurement.
   if (id === 'mint-courier' || process.env.RIVE_BENCH_CAPTURE === '1')

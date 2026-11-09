@@ -20,6 +20,10 @@ export const RiveDrawer = {
           drawer.draw(0);
         },
         snapshot: () => drawer.route,
+        inputs: () => ({
+          motion: drawer.inputs.get('motion')?.value,
+          dragging: drawer.inputs.get('dragging')?.value,
+        }),
         hit: (x: number, y: number) => drawer.contains(x, y),
       },
     });

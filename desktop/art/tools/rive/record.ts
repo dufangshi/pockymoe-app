@@ -15,15 +15,19 @@ interface Scenario {
   name: string;
   duration: number;
   initial: number;
+  /** Seek a routed clip without consuming its intro; useful for fitted key poses. */
+  initialTime?: number;
   events?: { at: number; motion: number }[];
   frameValues?: Record<string, number | boolean>[];
 }
 const [, , pack, out, scenariosFile, fpsString = '24', sizeString = '648x702', dprString = '1'] =
   process.argv;
 if (!pack || !out || !scenariosFile)
-  throw new Error('Usage: node art/tools/rive/record.ts PACK OUT SCENARIOS [24|30] [WIDTHxHEIGHT] [DPR]');
+  throw new Error(
+    'Usage: node art/tools/rive/record.ts PACK OUT SCENARIOS [24|30|60|120] [WIDTHxHEIGHT] [DPR]',
+  );
 const fps = Number(fpsString);
-if (![24, 30].includes(fps)) throw new Error('Recording fps must be 24 or 30');
+if (![24, 30, 60, 120].includes(fps)) throw new Error('Recording fps must be 24, 30, 60 or 120');
 const size = /^(\d+)x(\d+)$/.exec(sizeString);
 const width = Number(size?.[1]),
   height = Number(size?.[2]),
@@ -68,8 +72,16 @@ app.whenReady().then(() => {
 );
 const app = await electron.launch({
   executablePath: resolve('node_modules/electron/dist/electron'),
-  args: ['--no-sandbox', '--ozone-platform=x11', main, resolve(output, 'app/index.html')],
+  args: [
+    '--no-sandbox',
+    '--ozone-platform=x11',
+    ...(process.env.RIVE_RECORD_SWIFTSHADER === '1' ? ['--use-angle=swiftshader'] : []),
+    main,
+    resolve(output, 'app/index.html'),
+  ],
 });
+if (process.env.RIVE_RECORD_DEBUG === '1')
+  app.process().stderr?.on('data', (data) => process.stderr.write(data));
 const bytes = await readFile(resolve(pack, config.path)),
   riveSha256 = createHash('sha256').update(bytes).digest('hex');
 const binary = await serveRiveBytes(bytes);
@@ -89,6 +101,8 @@ try {
       s.duration > 120
     )
       throw new Error('Invalid recording scenario');
+    if (s.initialTime !== undefined && (!Number.isFinite(s.initialTime) || s.initialTime < 0))
+      throw new Error('Invalid initial clip time');
     const directory = resolve(output, 'frames', s.name);
     await mkdir(directory, { recursive: true });
     await page.evaluate(
@@ -104,6 +118,11 @@ try {
       { url: binary.url, config, initial: s.initial, width, height, dpr },
     );
     await page.waitForFunction(() => window.preview.ready(), {}, { timeout: 15000 });
+    if (s.initialTime !== undefined)
+      await page.evaluate(
+        ({ motion, time }) => window.preview.boundary(motion, time),
+        { motion: s.initial, time: s.initialTime },
+      );
     const count = Math.round(s.duration * fps),
       samples = [];
     for (let i = 0; i < count; i++) {
