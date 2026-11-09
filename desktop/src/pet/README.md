@@ -517,6 +517,12 @@ finishes that exit forward before entering its new destination. Import test-load
 every named animation. Timing metadata alone does not establish visual continuity;
 authors must verify every exit and entry at multiple source phases.
 
+An exit may add `responses:[{targets:[13,14,15,16],animationPrefix:"poke-exit-"}]`.
+Those destinations use the corresponding numbered animations instead of the default
+exit bank, with the same checkpoint times, duration and final boundary. This lets
+a poke start with visible acting while an ordinary departure lowers its prop.
+Import test-loads both banks; a missing response animation rejects the pack.
+
 `procedural.response:true` declares an additional numeric `response` input. The
 drawer raises a smooth 480ms acknowledgment pulse on motion/state events and pet
 triggers. Bind it to a small head/upper-body gesture while a longer route runs;

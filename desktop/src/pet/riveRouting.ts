@@ -14,6 +14,8 @@ export interface RoutedClip {
     everyMs: number;
     durationMs: number;
     animationPrefix: string;
+    /** Optional event-specific acting at the same fitted checkpoints. */
+    responses?: { targets: number[]; animationPrefix: string }[];
     end: string;
   };
 }
@@ -48,7 +50,11 @@ interface Leg {
 export function riveExitAnimations(clip: RoutedClip): string[] {
   if (!clip.exits) return [];
   const count = Math.ceil(clip.durationMs / clip.exits.everyMs) + 1;
-  return Array.from({ length: count }, (_, i) => `${clip.exits!.animationPrefix}${i}`);
+  const prefixes = [
+    clip.exits.animationPrefix,
+    ...(clip.exits.responses?.map((response) => response.animationPrefix) ?? []),
+  ];
+  return prefixes.flatMap((prefix) => Array.from({ length: count }, (_, i) => `${prefix}${i}`));
 }
 interface Reaction {
   definition: RivePoseReaction;
@@ -214,10 +220,12 @@ export class RiveRestRouter {
         : 0;
     const family = exit ? exit.end : endpoint === 0 ? this.clip.start : this.clip.end;
     const bridge = this.path(family, target.start);
+    const responsePrefix = exit?.responses?.find((response) => response.targets.includes(target.value))
+      ?.animationPrefix;
     const authoredExit: RoutedClip | undefined = exit
       ? {
           value: this.clip.value,
-          animation: `${exit.animationPrefix}${exitIndex}`,
+          animation: `${responsePrefix ?? exit.animationPrefix}${exitIndex}`,
           durationMs: exit.durationMs,
           // The start is a fitted source pose. Future interrupts finish this
           // exit forward; they must never reverse into that unrelated pose.

@@ -11,6 +11,35 @@ const manifest = {
   remoteCodex: { rive: { path: 'pet.riv', artboard: 'Pet', stateMachine: 'Pet' } },
 };
 describe('Rive pack import', () => {
+  it('validates event-specific exit banks against routed destinations', () => {
+    const exits = {
+      everyMs: 100,
+      durationMs: 800,
+      animationPrefix: 'lower-',
+      end: 'rest',
+      responses: [{ targets: [0], animationPrefix: 'startle-' }],
+    };
+    const parse = (value: unknown) => parseManifest(Buffer.from(JSON.stringify({
+      ...manifest,
+      remoteCodex: { rive: {
+        ...manifest.remoteCodex.rive,
+        motions: { idle: [{ value: 0, durationMs: 1000 }] },
+        routing: {
+          bridges: [],
+          clips: [{ value: 0, animation: 'idle', durationMs: 1000, start: 'rest', end: 'rest', exits: value }],
+        },
+      } },
+    })));
+    expect(parse(exits).remoteCodex?.rive?.routing?.clips[0].exits).toEqual(exits);
+    for (const responses of [
+      {},
+      [null],
+      [{ targets: [], animationPrefix: 'startle-' }],
+      [{ targets: [99], animationPrefix: 'startle-' }],
+      [{ targets: [0], animationPrefix: '' }],
+    ]) expect(() => parse({ ...exits, responses })).toThrow('authored exits');
+  });
+
   it('keeps validated drawing dissolves and rejects invalid or unrouted windows', () => {
     const routing = {
       bridges: [],

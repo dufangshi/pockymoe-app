@@ -243,6 +243,19 @@ export function parseManifest(data: Buffer): PetManifest {
               !Number.isFinite(e.durationMs) || e.durationMs < 250 || e.durationMs > 2500 ||
               typeof e.animationPrefix !== 'string' || !e.animationPrefix.length ||
               e.animationPrefix.length > 90 ||
+              (e.responses !== undefined &&
+                (!Array.isArray(e.responses) ||
+                  e.responses.length > 8 ||
+                  e.responses.some((response) => (
+                    !response ||
+                    !Array.isArray(response.targets) ||
+                    !response.targets.length ||
+                    response.targets.length > q.clips.length ||
+                    response.targets.some((value) => !q.clips.some((clip) => clip.value === value)) ||
+                    typeof response.animationPrefix !== 'string' ||
+                    !response.animationPrefix.length ||
+                    response.animationPrefix.length > 90
+                  )))) ||
               !q.clips.some((other) => other.start === e.end || other.end === e.end))
           );
         })

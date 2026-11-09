@@ -44,6 +44,32 @@ const config: RiveRouting = {
   ],
 };
 describe('material-safe routing', () => {
+  it('selects event-specific acting without changing exit timing or reversing the source', () => {
+    const fixture = structuredClone(config);
+    fixture.clips[1].exits = {
+      everyMs: 100,
+      durationMs: 800,
+      animationPrefix: 'lower-',
+      responses: [{ targets: [2], animationPrefix: 'startle-' }],
+      end: 'rest',
+    };
+    const names = riveExitAnimations(fixture.clips[1]);
+    expect(names).toHaveLength(42);
+    expect(names).toContain('startle-20');
+    for (const phase of [0.25, 0.5, 0.75]) {
+      for (const target of [0, 2]) {
+        const router = new RiveRestRouter(fixture, 1);
+        router.seek(1, phase * 2 + 0.01);
+        router.request(target);
+        expect(router.step(0.1).animation).toBe(`${target === 2 ? 'startle' : 'lower'}-${phase * 20 + 1}`);
+        expect(router.step(0.1).time).toBeCloseTo(0.11);
+        const boundary = router.step(0.7);
+        expect(boundary.boundary).toBe(true);
+        expect(router.step(1 / 60).animation).toBe(target === 0 ? 'idle' : 'bed-in');
+      }
+    }
+  });
+
   it('takes fitted forward exits at every loop phase instead of reversing long gestures', () => {
     const fixture = structuredClone(config);
     const work = fixture.clips[1];
