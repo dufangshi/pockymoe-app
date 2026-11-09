@@ -247,7 +247,8 @@ function renderSprite(): void {
   const character = root.querySelector<HTMLElement>('#character')!;
   // Disabling docking restores the full figure immediately. Tweening a former
   // dock translation clips the hem against the fixed transparent window.
-  character.classList.toggle('undocked', !state.edge);
+  // The physical edge remains recorded when edge hiding is switched off.
+  character.classList.toggle('undocked', !state.edgeHide || !state.edge);
   character.setAttribute('aria-label', t('桌宠，点击查看任务，拖动以移动'));
   character.style.width = `${state.pet.width}px`; character.style.height = `${state.pet.height}px`;
   // Leaning out from the edge; at the top she hangs upside down, so it is still her head that shows.
