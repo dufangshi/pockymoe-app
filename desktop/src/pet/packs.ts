@@ -1,5 +1,6 @@
 import type { RivePack } from './rive';
 import { RiveHitMask } from './riveHitMask';
+import { validateDissolves } from './riveDissolve';
 import { inspectWebM } from './webm';
 import type { PeekArt } from './geometry';
 import type { FaceBox } from './geometry';
@@ -161,26 +162,20 @@ export function parseManifest(data: Buffer): PetManifest {
       )
         fail('invalid Rive motions');
     }
-    // Newer mask packs may omit the old cadence fields. Keep the existing
-    // player's defaults; this compatibility does not change its motion clock.
-    if (r.procedural && typeof r.procedural === 'object') {
-      if (r.procedural.idleFps === undefined) r.procedural.idleFps = 24;
-      if (r.procedural.activeFps === undefined) r.procedural.activeFps = 60;
-    }
-    if (r.routing && typeof r.routing === 'object' && r.routing.maxExitMs === undefined)
-      r.routing.maxExitMs = 350;
     if (
       r.procedural !== undefined &&
       (!r.procedural ||
         typeof r.procedural.bodyBone !== 'string' ||
         !r.procedural.bodyBone.length ||
         r.procedural.bodyBone.length > 100 ||
-        ![15, 24, 30].includes(r.procedural.idleFps) ||
-        ![30, 60].includes(r.procedural.activeFps))
+        (r.procedural.idleFps !== undefined && ![15, 24, 30].includes(r.procedural.idleFps)) ||
+        (r.procedural.activeFps !== undefined && ![30, 60].includes(r.procedural.activeFps)))
     )
       fail('invalid Rive procedural settings');
     if (r.procedural?.eyeOpen !== undefined && typeof r.procedural.eyeOpen !== 'boolean')
       fail('invalid Rive eyeOpen setting');
+    if (r.procedural?.response !== undefined && typeof r.procedural.response !== 'boolean')
+      fail('invalid Rive response setting');
     if (
       r.procedural?.transientFace !== undefined &&
       (typeof r.procedural.transientFace !== 'boolean' ||
@@ -203,9 +198,10 @@ export function parseManifest(data: Buffer): PetManifest {
       if (
         !q ||
         !r.motions ||
-        !Number.isFinite(q.maxExitMs) ||
-        q.maxExitMs < 100 ||
-        q.maxExitMs > 400 ||
+        (q.resetAnimation !== undefined &&
+          (typeof q.resetAnimation !== 'string' || !q.resetAnimation.length || q.resetAnimation.length > 100)) ||
+        (q.maxExitMs !== undefined &&
+          (!Number.isFinite(q.maxExitMs) || q.maxExitMs < 100 || q.maxExitMs > 400)) ||
         !Array.isArray(q.clips) ||
         !q.clips.length ||
         q.clips.length > 128 ||
@@ -239,6 +235,35 @@ export function parseManifest(data: Buffer): PetManifest {
         )
       )
         fail('invalid Rive exit animation');
+      if (
+        q.clips.some((c) => {
+          const e = c.exits;
+          return (
+            e !== undefined &&
+            (!e ||
+              !Number.isFinite(e.everyMs) || e.everyMs < 50 || e.everyMs > 1000 ||
+              !Number.isFinite(e.durationMs) || e.durationMs < 250 || e.durationMs > 2500 ||
+              typeof e.animationPrefix !== 'string' || !e.animationPrefix.length ||
+              e.animationPrefix.length > 90 ||
+              (e.sourcePose !== undefined && typeof e.sourcePose !== 'boolean') ||
+              (e.responses !== undefined &&
+                (!Array.isArray(e.responses) ||
+                  e.responses.length > 8 ||
+                  e.responses.some((response) => (
+                    !response ||
+                    !Array.isArray(response.targets) ||
+                    !response.targets.length ||
+                    response.targets.length > q.clips.length ||
+                    response.targets.some((value) => !q.clips.some((clip) => clip.value === value)) ||
+                    typeof response.animationPrefix !== 'string' ||
+                    !response.animationPrefix.length ||
+                    response.animationPrefix.length > 90
+                  )))) ||
+              !q.clips.some((other) => other.start === e.end || other.end === e.end))
+          );
+        })
+      )
+        fail('invalid Rive authored exits');
       if (
         q.clips.some(
           (c) =>
@@ -324,6 +349,14 @@ export function parseManifest(data: Buffer): PetManifest {
         if (families.some((n) => !seen.has(n))) fail('Rive routing has disconnected boundaries');
       }
     }
+    if (r.dissolves !== undefined) {
+      if (!r.routing) fail('Rive dissolves require routing');
+      try {
+        validateDissolves(r.dissolves, r.routing!);
+      } catch {
+        fail('invalid Rive dissolves');
+      }
+    }
     if (r.hitMask !== undefined) {
       try {
         new RiveHitMask(r.hitMask);
@@ -342,6 +375,7 @@ export function parseManifest(data: Buffer): PetManifest {
       ...(r.routing ? { routing: r.routing } : {}),
       ...(r.backing ? { backing: r.backing } : {}),
       ...(r.hitMask ? { hitMask: r.hitMask } : {}),
+      ...(r.dissolves ? { dissolves: r.dissolves } : {}),
     };
   }
   const extension = extensions?.sleeping as SleepingStrip | undefined;

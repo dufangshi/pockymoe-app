@@ -9,19 +9,35 @@ export const RIVE_DYNAMIC_INPUTS = [
 ] as const;
 export interface RiveProcedural {
   bodyBone: string;
-  idleFps: 15 | 24 | 30;
-  activeFps: 30 | 60;
+  /** Legacy pack metadata; animation now follows the display's requestAnimationFrame. */
+  idleFps?: 15 | 24 | 30;
+  activeFps?: 30 | 60;
   eyeOpen?: boolean;
+  /** Legacy source sampling metadata, never a runtime clock quantizer. */
   sourceFps?: 24 | 30;
   transientFace?: boolean;
+  /** An authored upper-body acknowledgment while a longer exit is running. */
+  response?: boolean;
+}
+
+/** An event cue, separate from source playback and never time-warping its clock. */
+export class RiveResponse {
+  private age = Infinity;
+  request(): void {
+    this.age = 0;
+  }
+  step(seconds: number): number {
+    this.age += Math.max(0, seconds);
+    return this.age < 0.48 ? Math.sin(Math.PI * this.age / 0.48) : 0;
+  }
 }
 export interface BodySample {
   x: number;
   y: number;
   angle: number;
 }
-export function riveSourceTime(seconds: number, fps?: number, leaving = false): number {
-  return Math.fround(fps && !leaving ? Math.floor(seconds * fps + 1e-5) / fps : seconds);
+export function riveSourceTime(seconds: number): number {
+  return Math.fround(seconds);
 }
 const clamp = (v: number, limit = 1): number => Math.max(-limit, Math.min(limit, v));
 /** Inertial springs, integrated at <=1/120 s; no fixed looping secondary keys. */
@@ -32,10 +48,6 @@ export class RiveDynamics {
   private previous?: BodySample;
   private velocity = { x: 0, y: 0, angle: 0 };
   private springs = [0, 0, 0].map(() => ({ x: 0, v: 0 }));
-  /** Ignore subpixel spring noise when deciding whether to wake a source drawing. */
-  get moving(): boolean {
-    return this.springs.some((s) => Math.abs(s.v) > 0.5 || Math.abs(s.x) > 0.1);
-  }
   constructor(private readonly random: () => number = Math.random) {
     this.nextBlink = 2 + random() * 4;
   }
@@ -83,65 +95,37 @@ export class RiveDynamics {
     const blink = age < 0.075 ? age / 0.075 : age < 0.125 ? 1 : age < 0.24 ? 1 - (age - 0.125) / 0.115 : 0;
     return {
       blink: Math.max(0, blink),
-      // Author small micro-motion ranges so these steps remain subpixel at the
-      // intended size/DPR. Constant visible values can then skip a draw.
-      breath:
-        Math.round(
-          (0.5 + 0.32 * Math.sin(this.time * 1.29) + 0.12 * Math.sin(this.time * 0.731 + 0.8)) * 10,
-        ) / 10,
-      weightShift:
-        Math.round((0.65 * Math.sin(this.time * 0.287) + 0.22 * Math.sin(this.time * 0.419 + 1.3)) * 12) / 12,
-      swayHair: Math.round(this.springs[0].x * 1024) / 1024,
-      swayGown: Math.round(this.springs[1].x * 1024) / 1024,
-      swayWings: Math.round(this.springs[2].x * 1024) / 1024,
+      breath: 0.5 + 0.32 * Math.sin(this.time * 1.29) + 0.12 * Math.sin(this.time * 0.731 + 0.8),
+      weightShift: 0.65 * Math.sin(this.time * 0.287) + 0.22 * Math.sin(this.time * 0.419 + 1.3),
+      swayHair: this.springs[0].x,
+      swayGown: this.springs[1].x,
+      swayWings: this.springs[2].x,
       dragLean: clamp(-drag.x / 1400),
     };
-  }
-}
-/** Source drawings keep their own cadence; only live motion needs the higher rate. */
-export class RiveSourceCadence {
-  private gaze?: { x: number; y: number };
-  private gazeUntil = 0;
-  fps(now: number, source: number, gaze: { x: number; y: number }, live: boolean): number {
-    if (this.gaze && (Math.abs(gaze.x - this.gaze.x) > 1 / 1024 || Math.abs(gaze.y - this.gaze.y) > 1 / 1024))
-      this.gazeUntil = now + 150;
-    this.gaze = { ...gaze };
-    return live || now < this.gazeUntil ? 60 : source;
   }
 }
 /** Transient gaze exposes source eye paint again after movement ends. */
 export class RiveGazePulse {
   private point?: { x: number; y: number };
+  private current = { x: 0, y: 0 };
+  private at?: number;
   private movedAt = -Infinity;
   sample(now: number, point?: { x: number; y: number }): { x: number; y: number; opacity: number } {
+    const elapsed = this.at === undefined ? 0 : Math.max(0, Math.min(100, now - this.at));
+    this.at = now;
     if (!point) {
       this.point = undefined;
+      this.current = { x: 0, y: 0 };
       this.movedAt = -Infinity;
       return { x: 0, y: 0, opacity: 0 };
     }
     if (!this.point || Math.hypot(point.x - this.point.x, point.y - this.point.y) > 0.005) this.movedAt = now;
     this.point = point;
+    // Cursor IPC arrives at 10 Hz; interpolate its target on every display frame.
+    const mix = 1 - Math.exp(-elapsed / 45);
+    this.current.x += (point.x - this.current.x) * mix;
+    this.current.y += (point.y - this.current.y) * mix;
     const opacity = Math.max(0, Math.min(1, (360 - (now - this.movedAt)) / 180));
-    return { x: point.x * opacity, y: point.y * opacity, opacity };
-  }
-}
-/** Retains elapsed animation time while limiting expensive draws, without RAF rounding drift. */
-export class RiveFrameGate {
-  private last?: number;
-  private next = 0;
-  take(now: number, fps: number, urgent = false): number | null {
-    const period = 1000 / fps;
-    if (this.last === undefined) {
-      this.last = now;
-      this.next = now + period;
-      return 0;
-    }
-    if (!urgent && now + 0.1 < this.next) return null;
-    const dt = Math.max(0, Math.min(0.1, (now - this.last) / 1000));
-    this.last = now;
-    this.next = urgent
-      ? now + period
-      : this.next + period * Math.max(1, Math.floor((now - this.next + 0.1) / period) + 1);
-    return dt;
+    return { x: this.current.x * opacity, y: this.current.y * opacity, opacity };
   }
 }

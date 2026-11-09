@@ -1,6 +1,6 @@
 import { riveBackingSize } from './riveRouting';
 import { RiveMotionClock } from './riveMotion';
-import { RiveDynamics, RiveFrameGate, RiveSourceCadence, RiveGazePulse } from './riveDynamics';
+import { RiveDynamics, RiveGazePulse } from './riveDynamics';
 import { RiveDrawer, RIVE_STATES } from './rive';
 import { VideoClipPlayer } from './videoPlayer';
 document.documentElement.dataset.platform = navigator.userAgent.includes('Windows') ? 'win32' : '';
@@ -291,17 +291,15 @@ function renderSprite(): void {
 }
 
 let riveClock: RiveMotionClock | null = null;
-let riveDynamics: RiveDynamics | null = null,
-  riveGate = new RiveFrameGate();
-let riveCadence = new RiveSourceCadence(),
-  riveGaze = new RiveGazePulse();
+let riveDynamics: RiveDynamics | null = null;
+let riveGaze = new RiveGazePulse();
 let riveDrawer: RiveDrawer | null = null,
   riveToken = 0,
   riveKey = '',
-  riveActive = true,
   riveAt = 0,
   riveEpoch = -1,
-  riveDragging = false;
+  riveDragging = false,
+  rivePokeUntil = 0;
 function syncRive(): void {
   const config = state?.rive;
   if (!config || state?.surface !== 'sprite') return;
@@ -333,14 +331,12 @@ function syncRive(): void {
         ? new RiveMotionClock(config.motions, Math.random, !!config.procedural)
         : null;
       riveDynamics = config.procedural ? new RiveDynamics() : null;
-      riveGate = new RiveFrameGate();
-      riveCadence = new RiveSourceCadence();
       riveGaze = new RiveGazePulse();
       riveDrawer = drawer;
-      riveActive = true;
       riveAt = 0;
       riveEpoch = -1;
       riveDragging = false;
+      rivePokeUntil = 0;
       root.querySelector('#character')?.classList.add('rive');
     })
     .catch((error) => {
@@ -360,6 +356,12 @@ function stepRive(now: number): void {
     state.rive?.backing,
   );
   const procedural = state.rive?.procedural;
+  // React to a body press before the controller's 4 px movement threshold.
+  // Capsule presses set started only after that threshold, preserving clicks.
+  const held = !!state.dragging || !!drag?.started;
+  const pendingPoke = now < rivePokeUntil;
+  const pokeAcknowledged = pendingPoke && state.mood === 'poked';
+  if (pokeAcknowledged) rivePokeUntil = 0;
   const gazePoint =
     state.cursor &&
     !tucked &&
@@ -373,44 +375,30 @@ function stepRive(now: number): void {
         }
       : undefined;
   const gaze = procedural?.transientFace ? riveGaze.sample(now, gazePoint) : undefined;
-  const slow = ['idle', 'sleeping', 'resting'].includes(state.mood) && !state.dragging && !speechPlaying();
-  const fps = procedural?.sourceFps
-    ? riveCadence.fps(
-        now,
-        procedural.sourceFps,
-        gaze ? { x: gaze.x, y: gaze.y } : { x: state.cursor?.x ?? 0, y: state.cursor?.y ?? 0 },
-        !!d.route?.leaving ||
-          !!gaze?.opacity ||
-          !!state.dragging ||
-          state.mood === 'landing' ||
-          !!riveDynamics?.moving,
-      )
-    : procedural && (slow ? procedural.idleFps : procedural.activeFps);
-  const scheduled = procedural
-    ? riveGate.take(
-        now,
-        Number(fps),
-        riveEpoch !== state.moodEpoch ||
-          d.canvas.width !== w ||
-          d.canvas.height !== h ||
-          (!tucked && d.needsHitDraw),
-      )
-    : null;
-  if (procedural && scheduled === null) return;
+  // requestAnimationFrame follows the display, including 120 Hz displays.
+  // Only tucked, reduced-motion or unchanged artboards may skip work.
+  const scheduled = Math.min(0.1, riveAt ? (now - riveAt) / 1000 : 0);
   let dirty = !tucked && d.needsHitDraw;
   if (d.canvas.width !== w || d.canvas.height !== h) {
     d.canvas.width = w;
     d.canvas.height = h;
     dirty = true;
   }
-  const dt = procedural ? scheduled! : Math.min(0.1, riveAt ? (now - riveAt) / 1000 : 0);
+  const dt = scheduled;
+  const riveMood = held
+    ? 'dragging'
+    : pendingPoke
+      ? 'poked'
+      : state.mood.startsWith('running-')
+        ? 'running'
+        : state.mood;
   const beat =
     !tucked && !motion.matches
       ? riveClock?.step(
-          state.dragging ? 'dragging' : state.mood.startsWith('running-') ? 'running' : state.mood,
+          riveMood,
           d.route?.leaving ? 0 : dt,
           now,
-          riveEpoch !== state.moodEpoch,
+          riveEpoch !== state.moodEpoch && !pokeAcknowledged,
         )
       : null;
   if (beat) {
@@ -469,7 +457,7 @@ function stepRive(now: number): void {
     ) || dirty;
   if (procedural?.eyeOpen)
     dirty = d.set('eyeOpen', gaze ? gaze.opacity : !!cursor && !tucked ? 1 : 0) || dirty;
-  const dragging = !!state.dragging;
+  const dragging = held;
   if (dragging !== riveDragging) {
     d.fire(dragging ? 'dragStart' : 'land');
     riveDragging = dragging;
@@ -487,24 +475,26 @@ function stepRive(now: number): void {
     }
     riveEpoch = state.moodEpoch;
   }
-  if (riveDynamics && procedural && !tucked && !motion.matches) {
-    // Evaluate body motion first; springs respond to the actual animated root,
-    // plus the controller's window drag velocity. Apply their blend inputs at t=0.
-    riveActive = d.advance(dt);
-    const m = d.artboard.rootBone(procedural.bodyBone).worldTransform();
-    for (const [name, value] of Object.entries(
-      riveDynamics.step(dt, { x: m.tx, y: m.ty, angle: Math.atan2(m.xy, m.xx) }, state.dragVelocity),
-    ))
-      dirty = d.set(name, value) || dirty;
-    d.advance(0);
+  if (!tucked && !motion.matches) {
+    // Advance every display frame even if a drawing is unchanged. A held key
+    // must not prevent the clock from reaching its next moving key.
+    d.advance(dt);
+    if (riveDynamics && procedural) {
+      // Springs follow the actual animated root and the window drag velocity.
+      const m = d.artboard.rootBone(procedural.bodyBone).worldTransform();
+      for (const [name, value] of Object.entries(
+        riveDynamics.step(dt, { x: m.tx, y: m.ty, angle: Math.atan2(m.xy, m.xx) }, state.dragVelocity),
+      ))
+        dirty = d.set(name, value) || dirty;
+      d.advance(0);
+    }
   }
-  if (dirty || ((procedural ? d.artboard.didChange() : riveActive) && !tucked && !motion.matches)) {
-    riveActive = d.draw(tucked || motion.matches || riveDynamics ? 0 : dt).active;
+  if (dirty || (d.artboard.didChange() && !tucked && !motion.matches)) {
+    d.draw(0);
     updateHit();
   }
   riveAt = now;
 }
-
 // A pack's clips replace the atlas for the states they cover; any other state, or a clip that
 // fails to decode, draws from the atlas. Sheets are decoded when needed and few are kept.
 const CLIP_CACHE = 6, ONE_SHOT = ['failed', 'waving', 'jumping', 'poked', 'landing'], LEAVE_MS = 600;
@@ -762,6 +752,7 @@ root.addEventListener('pointerdown', (event) => {
   drag = { id: event.pointerId, x: event.screenX, y: event.screenY, moved: false, started: true };
   root.setPointerCapture(event.pointerId);
   root.querySelector('#character')?.classList.add('dragging');
+  if (riveDrawer) stepRive(performance.now());
   void bridge.action({ type: 'dragStart', x: event.screenX, y: event.screenY });
 });
 function release(event: PointerEvent, cancelled = false): void {
@@ -773,7 +764,16 @@ function release(event: PointerEvent, cancelled = false): void {
   drag = null;
   root.querySelector('#character')?.classList.remove('dragging');
   if (started) void bridge.action({ type: 'dragEnd', x: event.screenX, y: event.screenY });
-  if (clicked) void bridge.action({ type: 'click' });
+  if (clicked) {
+    if (riveDrawer) {
+      // Keep the click intent through the IPC round trip. Otherwise a frame
+      // between release and acknowledgement can select the old work exit.
+      const now = performance.now();
+      rivePokeUntil = now + 300;
+      stepRive(now);
+    }
+    void bridge.action({ type: 'click' });
+  }
 }
 root.addEventListener('pointerup', (event) => release(event));
 root.addEventListener('pointercancel', (event) => release(event, true));

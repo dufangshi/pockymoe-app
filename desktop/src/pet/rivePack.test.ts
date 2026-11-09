@@ -11,6 +11,105 @@ const manifest = {
   remoteCodex: { rive: { path: 'pet.riv', artboard: 'Pet', stateMachine: 'Pet' } },
 };
 describe('Rive pack import', () => {
+  it('validates an optional pose initializer without requiring a visible reset bridge', () => {
+    const parse = (resetAnimation: unknown) => parseManifest(Buffer.from(JSON.stringify({
+      ...manifest,
+      remoteCodex: { rive: {
+        ...manifest.remoteCodex.rive,
+        motions: { idle: [{ value: 0, durationMs: 1000 }] },
+        routing: {
+          resetAnimation,
+          bridges: [],
+          clips: [{ value: 0, animation: 'idle', durationMs: 1000, start: 'rest', end: 'rest' }],
+        },
+      } },
+    })));
+    expect(parse('neutral-properties').remoteCodex?.rive?.routing?.resetAnimation).toBe('neutral-properties');
+    expect(parse(undefined).remoteCodex?.rive?.routing?.resetAnimation).toBeUndefined();
+    for (const invalid of ['', 7, {}, 'a'.repeat(101)]) expect(() => parse(invalid)).toThrow('routing');
+  });
+
+  it('validates event-specific exit banks against routed destinations', () => {
+    const exits = {
+      everyMs: 100,
+      durationMs: 800,
+      animationPrefix: 'lower-',
+      end: 'rest',
+      responses: [{ targets: [0], animationPrefix: 'startle-' }],
+    };
+    const parse = (value: unknown) => parseManifest(Buffer.from(JSON.stringify({
+      ...manifest,
+      remoteCodex: { rive: {
+        ...manifest.remoteCodex.rive,
+        motions: { idle: [{ value: 0, durationMs: 1000 }] },
+        routing: {
+          bridges: [],
+          clips: [{ value: 0, animation: 'idle', durationMs: 1000, start: 'rest', end: 'rest', exits: value }],
+        },
+      } },
+    })));
+    expect(parse(exits).remoteCodex?.rive?.routing?.clips[0].exits).toEqual(exits);
+    expect(parse({ ...exits, everyMs: 50 }).remoteCodex?.rive?.routing?.clips[0].exits?.everyMs)
+      .toBe(50);
+    for (const everyMs of [0, 25, 49, 1001, null]) {
+      expect(() => parse({ ...exits, everyMs })).toThrow('authored exits');
+    }
+    expect(parse({ ...exits, sourcePose: true }).remoteCodex?.rive?.routing?.clips[0].exits?.sourcePose)
+      .toBe(true);
+    expect(() => parse({ ...exits, sourcePose: 1 })).toThrow('authored exits');
+    for (const responses of [
+      {},
+      [null],
+      [{ targets: [], animationPrefix: 'startle-' }],
+      [{ targets: [99], animationPrefix: 'startle-' }],
+      [{ targets: [0], animationPrefix: '' }],
+    ]) expect(() => parse({ ...exits, responses })).toThrow('authored exits');
+  });
+
+  it('keeps validated drawing dissolves and rejects invalid or unrouted windows', () => {
+    const routing = {
+      bridges: [],
+      clips: [{ value: 0, animation: 'idle', durationMs: 1000, start: 'rest', end: 'rest' }],
+    };
+    const dissolves = {
+      stateMs: 450,
+      bedMs: 550,
+      clips: [{ value: 0, windows: [{ atMs: 500, durationMs: 350, regions: [[0, 0, 1, 1]] }] }],
+    };
+    const parse = (route: unknown, fades: unknown) =>
+      parseManifest(Buffer.from(JSON.stringify({
+        ...manifest,
+        remoteCodex: { rive: {
+          ...manifest.remoteCodex.rive,
+          motions: { idle: [{ value: 0, durationMs: 1000 }] },
+          routing: route,
+          dissolves: fades,
+        } },
+      })));
+    expect(parse(routing, dissolves).remoteCodex?.rive?.dissolves).toEqual(dissolves);
+    expect(() => parse(undefined, dissolves)).toThrow('dissolves');
+    expect(() => parse(routing, { ...dissolves, stateMs: 5000 })).toThrow('dissolves');
+    expect(() => parse(routing, {
+      ...dissolves,
+      clips: [{ value: 99, windows: [] }],
+    })).toThrow('dissolves');
+  });
+  it('does not require obsolete frame-rate or exit-speed settings', () => {
+    const rive = {
+      ...manifest.remoteCodex.rive,
+      procedural: { bodyBone: 'body' },
+      motions: { idle: [{ value: 0, durationMs: 1000 }] },
+      routing: {
+        bridges: [],
+        clips: [{ value: 0, animation: 'idle', durationMs: 1000, start: 'rest', end: 'rest' }],
+      },
+    };
+    const parse = (config: unknown) =>
+      parseManifest(Buffer.from(JSON.stringify({ ...manifest, remoteCodex: { rive: config } })));
+    expect(parse(rive).remoteCodex?.rive).toEqual(rive);
+    expect(() => parse({ ...rive, procedural: { bodyBone: 'body', idleFps: 0 } })).toThrow();
+    expect(() => parse({ ...rive, routing: { ...rive.routing, maxExitMs: 0 } })).toThrow();
+  });
   it('rejects unsafe paths, missing selectors and unsupported ViewModel declarations', () => {
     for (const rive of [
       { ...manifest.remoteCodex.rive, path: '../pet.riv' },

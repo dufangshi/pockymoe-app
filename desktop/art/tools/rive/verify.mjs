@@ -24,6 +24,7 @@ const app = await electron.launch({
     '--no-sandbox',
     '--ozone-platform=x11',
     '--enable-unsafe-swiftshader',
+    ...(process.env.RIVE_RECORD_SWIFTSHADER === '1' ? ['--use-angle=swiftshader'] : []),
     resolve('.local/desktop-evidence/pet/qa1/harness/main/index.js'),
   ],
   env: { ...process.env, TMPDIR: resolve(out), ELECTRON_RENDERER_URL: '' },
@@ -61,6 +62,22 @@ try {
     results.push({ test: test.name, result: 'passed', error });
   }
   if (config.routing) {
+    const exits = structuredClone(config);
+    exits.routing.clips[0].exits = {
+      everyMs: 500, durationMs: 1250, animationPrefix: 'MissingExit-',
+      end: exits.routing.clips[0].end,
+    };
+    let exitError = null;
+    try {
+      await app.evaluate((_, t) => globalThis.petHarness.verifyRive(t.bytes, t.config), {
+        bytes, config: exits,
+      });
+    } catch (e) {
+      exitError = String(e);
+    }
+    if (!exitError?.includes('Missing routed animation: MissingExit-0'))
+      throw new Error(`missing-exit: ${exitError}`);
+    results.push({ test: 'missing-exit', result: 'passed', error: exitError });
     let error = null;
     const invalid = {
       ...config,
