@@ -7,7 +7,7 @@ export interface LocalState {
   revision?: number; connectionError?: string;
   message?: LocalMessage | null;
   glassFallback?: boolean; platform?: string; locale: string; preferencesRequestId: number; preferencesSection: 'general' | 'pet' | 'shortcuts'; settings: DesktopSettings; appearance: Appearance | null; snapshot: ActivitySnapshot | null;
-  petAvailable: boolean; petPacks: { id: string; name: string; thumbnail?: string; rows?: number; author?: string; source?: string; license?: string; licenseUrl?: string }[]; version: string; voice: VoiceStatus; summary: SummaryStatus;
+  petAvailable: boolean; petPacks: { id: string; name: string; thumbnail?: string; rows?: number; imported?: boolean; author?: string; source?: string; license?: string; licenseUrl?: string }[]; version: string; voice: VoiceStatus; summary: SummaryStatus;
 }
 export type LocalAction =
   | { type: 'settings'; patch: Partial<DesktopSettings> }
@@ -18,6 +18,7 @@ export type LocalAction =
   | { type: 'retryConnection' }
   | { type: 'hide' }
   | { type: 'importPet' }
+  | { type: 'deletePet'; id: string }
   | { type: 'external'; url: string }
   | { type: 'quickSize'; height: number }
   | { type: 'connectionSize'; expanded: boolean }

@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, it } from 'vitest';
@@ -31,5 +31,22 @@ it('ignores unsafe manifests and never replaces bundled catalog assets with an i
     const catalog = new PetCatalog([join(root, 'bundled'), join(root, 'imported')]);
     expect(catalog.list()).toHaveLength(1);
     expect(await (await catalog.asset('pockymoe-pet://atlas/moe')).text()).toBe('bundled-image');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+it('removes only a pack from the user directory', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'pockymoe-catalog-'));
+  try {
+    for (const [directory, id] of [['bundled', 'moe'], ['user', 'mine']]) {
+      mkdirSync(join(root, directory, id), { recursive: true });
+      writeFileSync(join(root, directory, id, 'pet.json'), JSON.stringify({ displayName: id, spritesheetPath: 'spritesheet.webp', spriteVersionNumber: 2 }));
+      writeFileSync(join(root, directory, id, 'spritesheet.webp'), 'image');
+    }
+    const catalog = new PetCatalog([join(root, 'bundled'), join(root, 'user')]);
+    expect(catalog.list().map(({ id, imported }) => [id, !!imported])).toEqual([['moe', false], ['mine', true]]);
+    for (const id of ['moe', 'unknown', '..', '../bundled/moe']) await expect(catalog.remove(id)).rejects.toThrow();
+    expect(existsSync(join(root, 'bundled/moe/pet.json'))).toBe(true);
+    await catalog.remove('mine');
+    expect(existsSync(join(root, 'user/mine'))).toBe(false);
+    expect(catalog.list().map(({ id }) => id)).toEqual(['moe']);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

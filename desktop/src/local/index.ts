@@ -22,7 +22,8 @@ const icons: Record<string, string> = {
   arrow: '<path d="m9 5 7 7-7 7"/>',
   terminal: '<path d="m5 7 5 5-5 5M13 17h6"/>',
   link: '<path d="m10 13 4-4M8 16l-1 1a4 4 0 0 1-6-6l5-5a4 4 0 0 1 6 0m0 2 1-1a4 4 0 0 1 6 6l-5 5a4 4 0 0 1-6 0"/>',
-  check: '<path d="m5 12 4 4L19 6"/>'
+  check: '<path d="m5 12 4 4L19 6"/>',
+  trash: '<path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M10 11v6M14 11v6"/>'
 };
 export const icon = (name: string): string => `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icons[name] || icons.general}</svg>`;
 export const escapeHtml = (text: string): string => text.replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]!);
@@ -117,7 +118,7 @@ function renderPreferences(): void {
   else if (section === 'pet') {
     const pack = state.petPacks.find(pack => pack.id === s.petId);
     content.innerHTML = `<section class="settings-group">${toggle('petVisible', t('显示桌宠'), state.petAvailable ? '' : t('桌宠模块尚未安装。'), s.petVisible, !state.petAvailable)}
-      <div class="setting-row pet-picker-row"><label for="petId">${t('选择宠物')}</label><div class="inline-controls">${picker('petId', t('选择宠物'), !state.petAvailable)}<button id="import-pet" title="${t('导入…')}" aria-label="${t('导入…')}" ${!state.petAvailable ? 'disabled' : ''}>＋</button></div></div>
+      <div class="setting-row pet-picker-row"><label for="petId">${t('选择宠物')}</label><div class="inline-controls">${picker('petId', t('选择宠物'), !state.petAvailable)}<button id="import-pet" title="${t('导入…')}" aria-label="${t('导入…')}" ${!state.petAvailable ? 'disabled' : ''}>＋</button>${pack?.imported ? `<button id="delete-pet" title="${t('删除此桌宠')}" aria-label="${t('删除此桌宠')}" ${!state.petAvailable ? 'disabled' : ''}>${icon('trash')}</button>` : ''}</div></div>
       ${pack?.thumbnail ? `<div class="pet-credit"><span class="pet-thumbnail"><img src="${escapeHtml(pack.thumbnail)}" style="height:${(pack.rows || 9) * 100}%" alt="${escapeHtml(pack.name)}"/></span><span><strong>${escapeHtml(pack.name)}</strong><small>${escapeHtml(pack.author || '')}${pack.license ? ` · <button class="text-link" data-external="${escapeHtml(pack.licenseUrl!)}">${escapeHtml(pack.license)}</button>` : ''}${pack.source ? ` · <button class="text-link" data-external="${escapeHtml(pack.source)}">${t('来源')}</button>` : ''}</small></span></div>` : ''}
       <div class="setting-row"><label for="petSize">${t('大小')}</label>${picker('petSize', t('宠物大小'))}</div>
       ${toggle('petEdgeHide', t('贴边时缩到边缘'), t('贴边时保留脸部可见，指针靠近时完全探出。'), s.petEdgeHide)}
@@ -140,6 +141,7 @@ function renderPreferences(): void {
   const relay = root.querySelector<HTMLButtonElement>('#change-relay'); if (relay) relay.onclick = () => { void action({ type: 'changeConnection' }); };
   const shortcut = root.querySelector<HTMLButtonElement>('#save-shortcut'); if (shortcut) shortcut.onclick = () => { void save({ quickWindowShortcut: root.querySelector<HTMLInputElement>('#quickWindowShortcut')!.value }); };
   const importer = root.querySelector<HTMLButtonElement>('#import-pet'); if (importer) importer.onclick = () => { void action({ type: 'importPet' }); };
+  const remover = root.querySelector<HTMLButtonElement>('#delete-pet'); if (remover) remover.onclick = () => { void action({ type: 'deletePet', id: state.settings.petId }); };
   root.querySelectorAll<HTMLButtonElement>('[data-external]').forEach(button => { button.onclick = () => { void action({ type: 'external', url: button.dataset.external! }); }; });
   if (state.platform === 'win32') root.querySelectorAll('textarea').forEach(element => element.setAttribute('data-scroll', ''));
   enhanceScrollbars(root); root.querySelector('.pref-main')!.scrollTop = scroll;
