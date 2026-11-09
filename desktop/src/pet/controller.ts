@@ -1079,6 +1079,11 @@ export function createPetController(deps: PetControllerDeps, benchmark?: { quad:
         voiceOn = next.petVoice && !settings.petVoice;
       settings = next;
       visible = next.petVisible;
+      if (next.petEdgeHide === false) {
+        // Emit full geometry now, rather than waiting for the next cursor poll.
+        dockAmount = 0;
+        peek = true;
+      }
       // Turning a cue on previews it, so the setting's effect is obvious.
       if (soundOn) cue('completed');
       if (voiceOn) cue(undefined, t('语音播报已打开', {}, uiLocale));
