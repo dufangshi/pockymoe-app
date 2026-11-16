@@ -421,6 +421,7 @@ jobs:
           }
           $executable = (Resolve-Path $installed).Path
           node scripts/release-fuses.cjs $executable
+          $env:POCKYMOE_SMOKE_POWERSHELL = Join-Path $PSHOME 'pwsh.exe'
           node test/inspector-fuse-smoke.mjs $executable off
       - run: $PSNativeCommandUseErrorActionPreference = $true; node test/update-roundtrip.mjs
       - if: always()

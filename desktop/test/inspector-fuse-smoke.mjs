@@ -15,7 +15,7 @@ assert.equal(wire[FuseV1Options.EnableNodeCliInspectArguments], expected === 'on
 assert.equal(wire[FuseV1Options.RunAsNode], FuseState.ENABLE);
 const profile = mkdtempSync(join(tmpdir(), 'pockymoe-inspector-'));
 const env = {};
-for (const key of ['PATH', 'HOME', 'TMPDIR', 'SystemRoot', 'WINDIR', 'TEMP', 'TMP', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'ComSpec']) {
+for (const key of ['PATH', 'HOME', 'TMPDIR', 'USER', 'LOGNAME', 'SystemRoot', 'WINDIR', 'TEMP', 'TMP', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'ComSpec', 'PATHEXT', 'ProgramData', 'ProgramFiles', 'ProgramFiles(x86)', 'CommonProgramFiles', 'USERNAME', 'USERDOMAIN', 'COMPUTERNAME', 'PSModulePath']) {
   if (process.env[key]) env[key] = process.env[key];
 }
 env.POCKYMOE_DESKTOP_USER_DATA = profile;
@@ -54,7 +54,9 @@ try {
   assert.equal(opened, expected === 'on', 'Inspector behavior differs from the expected fuse policy');
   if (process.platform === 'win32') {
     // Require a native app window as well as a live process, without attaching a debugger.
-    execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
+    // Use the runner's current shell; legacy Windows PowerShell cold startup
+    // can stall independently of the app. Keep normal OS/module context above.
+    execFileSync(process.env.POCKYMOE_SMOKE_POWERSHELL || 'pwsh.exe', ['-NoProfile', '-NonInteractive', '-Command',
       `$ErrorActionPreference='Stop'; $p=Get-Process -Id ${child.pid}; if ($p.MainWindowHandle -eq 0) { throw 'Packaged app has no native window' }`],
     { env, timeout: 15_000, stdio: 'pipe' });
   }
