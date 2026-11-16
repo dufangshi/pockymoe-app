@@ -42,4 +42,9 @@ describe('pet presentation cadence', () => {
     for (const fps of [60, 120]) expect(() => assertPresentationRate(fps * 15, 15)).toThrow(/cap/);
     expect(() => assertPresentationRate(451, 15)).not.toThrow();
   });
+  it('holds ambient loops during system idle while allowing a bounded reaction or speech', () => {
+    expect(petAnimationRuns(true, 'sprite', false, false, false, true, false)).toBe(false);
+    expect(petAnimationRuns(true, 'sprite', false, false, false, true, true)).toBe(true);
+    expect(petAnimationRuns(false, 'sprite', false, false, false, true, true)).toBe(false);
+  });
 });

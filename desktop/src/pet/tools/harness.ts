@@ -38,8 +38,10 @@ const store: SettingsStoreLike = {
   onChange: (listener) => { settingsListeners.add(listener); return () => settingsListeners.delete(listener); },
 };
 void app.whenReady().then(() => {
+  let idle = false;
+  const idleListeners = new Set<(idle: boolean) => void>();
   session.defaultSession.protocol.handle('pockymoe-pet', async request => await petMediaResponse(request) ?? new Response(null, { status: 404 }));
-  const controller = createPetController({ openPreferences: () => undefined, mainFocused: () => false, lowerMain: () => undefined, speak: async () => null, summarize: async () => null, hub, settings: store, appearance: () => appearance, onAppearance: (listener) => { appearanceListeners.add(listener); return () => appearanceListeners.delete(listener); }, dispatch: async (command) => { commands.push(command); if (command.type === failingCommand) { await new Promise((resolve) => setTimeout(resolve, 100)); return { ok: false, code: 'needsThread', error: 'needsThread' }; } if (command.type === 'reply') { await new Promise((resolve) => setTimeout(resolve, 120)); if (replyFails) return { ok: false, error: '模拟发送失败，请重试' }; } return { ok: true }; }, shouldSpeak: () => true, petDirectories: [join(process.cwd(), 'assets/pets')] });
+  const controller = createPetController({ idle: () => idle, onIdle: listener => { idleListeners.add(listener); return () => { idleListeners.delete(listener); }; }, openPreferences: () => undefined, mainFocused: () => false, lowerMain: () => undefined, speak: async () => null, summarize: async () => null, hub, settings: store, appearance: () => appearance, onAppearance: (listener) => { appearanceListeners.add(listener); return () => appearanceListeners.delete(listener); }, dispatch: async (command) => { commands.push(command); if (command.type === failingCommand) { await new Promise((resolve) => setTimeout(resolve, 100)); return { ok: false, code: 'needsThread', error: 'needsThread' }; } if (command.type === 'reply') { await new Promise((resolve) => setTimeout(resolve, 120)); if (replyFails) return { ok: false, error: '模拟发送失败，请重试' }; } return { ok: true }; }, shouldSpeak: () => true, petDirectories: [join(process.cwd(), 'assets/pets')] });
   const window = BrowserWindow.getAllWindows().find(view => !view.getParentWindow())!, glass = BrowserWindow.getAllWindows().find(view => !!view.getParentWindow())!;
   const nativeSetBounds = window.setBounds.bind(window); let spriteBoundsCalls = 0; let requestedBounds = window.getBounds();
   window.setBounds = (bounds, animate) => { spriteBoundsCalls++; requestedBounds = { ...requestedBounds, ...bounds }; nativeSetBounds(bounds, animate); };
@@ -52,6 +54,7 @@ void app.whenReady().then(() => {
   const setIgnored = window.setIgnoreMouseEvents.bind(window);
   window.setIgnoreMouseEvents = (value, options) => { ignored = value; setIgnored(value, options); };
   Object.assign(globalThis, { petHarness: {
+    idle(value: boolean) { idle = value; idleListeners.forEach(listener => listener(value)); },
     async removeFixture() {
       store.set({ petId: 'moe' });
       rmSync(join(app.getPath('userData'), 'pets', 'clip-fixture'), { recursive: true, force: true });

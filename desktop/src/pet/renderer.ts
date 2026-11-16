@@ -1,4 +1,5 @@
 import { PetFrameScheduler, petAnimationRuns } from './frameScheduler';
+import { installRenderingGate, setPageRendering } from '../shared/renderingGate';
 import { riveBackingSize } from './riveRouting';
 import { RiveMotionClock } from './riveMotion';
 import { RiveDynamics, RiveGazePulse } from './riveDynamics';
@@ -27,6 +28,7 @@ import type { PetClip } from './packs';
 import type { ActivityItem, HostCommandResult } from '../shared/contract';
 import type { PetAction, PetBridge, PetViewState } from './bridge';
 const bridge = (window as unknown as { rcDesktop: { pet: PetBridge } }).rcDesktop.pet;
+installRenderingGate();
 const root = document.querySelector<HTMLElement>('#app')!;
 const markStyle = document.createElement('style'); markStyle.textContent = statusMarkStyles; document.head.append(markStyle);
 const motion = matchMedia('(prefers-reduced-motion: reduce)');
@@ -116,7 +118,7 @@ function speechBubble(speech: PetSpeech, group: PetConversation): string {
   return `<aside class="bubble speech" data-key="${escape(group.key)}" data-conversation-key="${escape(group.key)}" aria-label="${escape(t('正在播报'))}"><div class="bubble-line">${status(group.statusItem)}${button('open', group.title, heading, 'class="bubble-title"')}<span class="bubble-device"> · ${escape(item.deviceName)}</span>${speechWave(speech.playing)}${errorSlot(`bubble:${group.key}`)}</div><div class="speech-detail">${speech.text.startsWith(group.title) ? '' : `<p class="speech-heading">${heading}</p>`}<p class="speech-text">${escape(speech.text)}</p>${result && result !== speech.text ? `<p class="speech-result">${escape(result)}</p>` : ''}<div class="speech-foot"><span class="speech-meta" title="${escape(foot)}">${escape(foot)}</span>${muteButton(group)}${button('open', t('打开'), icon('open'))}</div></div></aside>`;
 }
 function renderGlass(): void {
-  if (!state || state.surface !== 'glass') return;
+  if (!state || state.rendering === false || state.surface !== 'glass') return;
   const input = document.querySelector<HTMLInputElement>('#reply-input'), focused = document.activeElement === input;
   const selection = input?.selectionStart ?? null, savedScroll = document.querySelector('.task-list')?.scrollTop ?? 0;
   const readingSummary = root.querySelector('.bubble-full-text')?.textContent;
@@ -220,7 +222,7 @@ root.addEventListener('submit', event => {
 let peekSource: HTMLImageElement | null = null;
 let dockClipHeld = false;
 function paintPeek(): void {
-  const ch = root.querySelector('#character'); if (!state || !ch) return;
+  const ch = root.querySelector('#character'); if (!state || state.rendering === false || !ch) return;
   let c = ch.querySelector<HTMLCanvasElement>('#peek-art');
   if (!state.peekArt || state.edge !== 'left' && state.edge !== 'right') { c?.remove(); return; }
   if (!c) { c = document.createElement('canvas'); c.id = 'peek-art'; ch.append(c); }
@@ -234,7 +236,7 @@ function paintPeek(): void {
   else ctx.drawImage(peekSource, r.x, r.y, r.width, r.height);
 }
 function renderSprite(): void {
-  if (!state) return;
+  if (!state || state.rendering === false) return;
   if (!root.querySelector('#character'))
     root.innerHTML = [
       '<div id="character" role="button" tabindex="0">',
@@ -286,6 +288,7 @@ function renderSprite(): void {
   const hold = !!state.clips && !!state.edge && state.dockAmount > 0;
   if (hold !== dockClipHeld) { dockClipHeld = hold; if (!moodChanged) playClips(); }
   paintSprite();
+  if (!speechPlaying()) paintTalk(performance.now());
   if (clipPlayer && (dockClipHeld || motion.matches)) { clipPlayer.drawn = 0; drawClip(0); }
   const videoSurface = root.querySelector<HTMLCanvasElement>('#clip');
   if (videoPlayer?.playing && videoSurface && (videoSurface.width !== Math.round(state.pet.width * devicePixelRatio) || videoSurface.height !== Math.round(state.pet.height * devicePixelRatio))) videoPlayer.invalidate(true);
@@ -814,11 +817,28 @@ bridge.onCue(cue => {
 });
 bridge.onSpeech((audio, id) => {
   if (state?.surface !== 'sprite') return;
-  const report = (playing: boolean): void => { syncAnimation(); if (id) void bridge.action({ type: 'speechState', id, playing }); };
+  const report = (playing: boolean): void => {
+    syncAnimation();
+    if (!playing && state?.rendering !== false) { paintTalk(performance.now()); if (riveDrawer) animation.invalidate(); }
+    if (id) void bridge.action({ type: 'speechState', id, playing });
+  };
   void playSpeech(audio, () => report(false)).then(started => { root.dataset.lastSpeech = String(audio.byteLength); report(started); syncAnimation(); }, () => { root.dataset.lastSpeech = 'undecodable'; report(false); });
 });
 bridge.onState(next => {
+  setPageRendering(next.rendering !== false);
   const old = state, changedMode = old?.mode !== next.mode;
+  if (next.rendering === false) {
+    // Keep the already presented pixels; incoming activity is owned by main.
+    state = old ? { ...old, rendering: false } : next;
+    syncAnimation();
+    return;
+  }
+  if (old?.rendering === false && ONE_SHOT.includes(old.mood)) {
+    // An interrupted reaction must not finish its old clip after returning.
+    // Sustained poses keep their decoder and resume the frame that was held.
+    clipToken++; clipPlayer = null; clipSequence = null; videoState = null;
+    videoPlayer?.dispose(); videoPlayer = null;
+  }
   if (old && old.accountId !== next.accountId) { failures.clear(); pending.clear(); draft = ''; sendState = 'idle'; selected = null; selectedRequest = null; collapsedRequests.clear(); }
   state = { ...next, cursor: old?.packEpoch === next.packEpoch ? old.cursor : undefined }; document.documentElement.dataset.glassFallback = String(!!next.glassFallback); setLocale(next.locale); applyAppearance(next.appearance); document.title = `Pockymoe · ${t('桌宠')}`; root.setAttribute('aria-label', document.title);
   const accent = next.appearance.accent; canvas.width = 1; canvas.height = 1; context.clearRect(0, 0, 1, 1); context.fillStyle = accent; context.fillRect(0, 0, 1, 1); const [r, g, b] = context.getImageData(0, 0, 1, 1).data; document.documentElement.style.setProperty('--accent-fg', accentForeground(r, g, b));
@@ -859,13 +879,17 @@ bridge.onState(next => {
 const animation = new PetFrameScheduler(animate);
 function syncAnimation(): void {
   if (!state || state.surface === 'glass') { animation.setRunning(false); return; }
+  if (state.rendering === false) { riveAt = 0; animation.setRunning(false); videoPlayer?.setSuspended(true); return; }
   const tucked = !!state.edge && state.dockAmount > 0;
-  const running = petAnimationRuns(state.visible, state.surface, tucked, motion.matches, !!state.clips?.format.mediaType && !!videoPlayer?.playing && !speechPlaying());
+  const reacting = !!state.reacting || ONE_SHOT.includes(state.mood) || speechPlaying();
+  const held = !!state.ambientPaused && !reacting;
+  const running = petAnimationRuns(state.visible, state.surface, tucked, motion.matches, !!state.clips?.format.mediaType && !!videoPlayer?.playing && !speechPlaying(), !!state.ambientPaused, reacting);
   // Reset the elapsed-time origin across a deliberate pause, never across frames.
   if (!running) riveAt = 0;
   videoPlayer?.setSuspended(!state.visible);
+  videoPlayer?.setHeld(held);
   animation.setRunning(running);
-  root.classList.toggle('animation-still', !state.visible || tucked || motion.matches);
+  root.classList.toggle('animation-still', !state.visible || tucked || motion.matches || held);
   if (state.visible && !state.clips?.format.mediaType) animation.invalidate();
 }
 bridge.onCursor(cursor => {
@@ -877,6 +901,7 @@ bridge.onCursor(cursor => {
   if (state.visible && !motion.matches && state.dockAmount === 0) animation.invalidate();
 });
 function animate(now: number): void {
+  if (state?.rendering === false) return;
   if (state?.surface === 'sprite') {
     if (riveDrawer) stepRive(now);
     else {

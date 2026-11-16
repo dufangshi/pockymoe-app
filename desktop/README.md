@@ -49,6 +49,20 @@ the pet continue receiving changes. Hidden/minimized Web windows suspend renderi
 (RAF, CSS and Web Animations), while connection timers and activity IPC remain
 unthrottled; showing/restoring resumes rendering. Cmd/Ctrl+Q or Quit Pockymoe exits.
 
+Rendering also pauses on screen lock, system suspend and inactive login sessions.
+The pet holds its current frame; returning shows the current activity pose
+without replaying missed reactions. Network sync, native notifications and speech
+continue. Utility windows defer background snapshots and the quick window stops
+its elapsed clock. These hard power states use Electron powerMonitor wake events.
+
+Two minutes without input pauses only the pet's ambient motion: the main and
+local windows keep rendering, including streaming follow-scroll, clocks and
+status indicators. Completion, failure, needs-input reactions and speech with lip
+movement still play, then return to a held resting frame. Ambient motion resumes
+within one second of input. The idle threshold uses an adaptive deadline and no
+per-second active poll. Display sleep relies on the compositor's normal behavior;
+the app runs no display watcher or helper process.
+
 ## Connection discovery
 
 First run asks for **Pockymoe 地址**, accepting a Web origin or Relay origin.

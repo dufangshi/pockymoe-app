@@ -39,6 +39,9 @@ export function installRenderingGate(): void {
       paused.clear();
       for (const id of frames.keys()) schedule(id);
     }
+    if (next) delete document.documentElement.dataset.pockymoeRendering;
+    else document.documentElement.dataset.pockymoeRendering = 'paused';
+    window.dispatchEvent(new Event('pockymoe-rendering-change'));
   };
 }
 

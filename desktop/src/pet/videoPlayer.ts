@@ -12,6 +12,7 @@ export class VideoClipPlayer {
   private leaveTimer: ReturnType<typeof setTimeout> | undefined;
   private still = false;
   private suspended = false;
+  private held = false;
   private wanted: PetClip | null = null;
   private switching: Promise<void> | null = null;
   private presentation = new PetFrameScheduler(() => {
@@ -66,7 +67,7 @@ export class VideoClipPlayer {
     } catch { if (token === this.token) { this.dispose(); this.failed(); } }
   }
   private videoFrames(slot: Slot): void {
-    if (slot.callback !== null || this.still || this.suspended || this.completed) return;
+    if (slot.callback !== null || this.still || this.suspended || this.held || this.completed) return;
     slot.callback = slot.video.requestVideoFrameCallback((_now, metadata) => {
       slot.callback = null;
       if (this.active !== slot || slot.disposed || this.suspended) return;
@@ -76,7 +77,7 @@ export class VideoClipPlayer {
   }
   private syncPlayback(): void {
     const a = this.active; if (!a) return;
-    if (this.still || this.suspended) {
+    if (this.still || this.suspended || this.held) {
       a.video.pause();
       if (a.callback !== null) a.video.cancelVideoFrameCallback(a.callback);
       a.callback = null;
@@ -93,8 +94,16 @@ export class VideoClipPlayer {
     this.syncPlayback();
     if (!value) this.invalidate();
   }
+  /** Stop decode at the presented frame; a newly loaded pose may present once. */
+  setHeld(value: boolean): void {
+    if (value === this.held) return;
+    this.held = value;
+    if (value) this.presentation.setRunning(false);
+    this.syncPlayback();
+    if (!value) this.invalidate();
+  }
   private complete(slot: Slot): void {
-    if (this.active !== slot || this.completed || this.still || this.suspended) return;
+    if (this.active !== slot || this.completed || this.still || this.suspended || this.held) return;
     clearTimeout(this.leaveTimer);
     this.completed = true; this.wanted = null; this.finish();
   }

@@ -85,6 +85,10 @@ export function createPetController(deps: PetControllerDeps, benchmark?: { quad:
     targetKey: string | null = null;
   const targets = new Map<string, ActivityItem>();
   const initial = deps.hub.snapshot();
+  let rendering = deps.rendering?.() ?? true;
+  let ambientPaused = deps.idle?.() ?? false;
+  let ambientReactionUntil = 0;
+  let lastMood: PetViewState['mood'] | null = null;
   if (initial) {
     items = initial.items;
     recent = initial.recent ?? [];
@@ -478,9 +482,19 @@ export function createPetController(deps: PetControllerDeps, benchmark?: { quad:
       lastCursor = null;
       media = pack ? petMedia(pack) : null;
     }
+    const mood: PetViewState['mood'] = drag?.moved && pack?.manifest.remoteCodex?.clips?.dragging
+      ? 'dragging' : moods.value(items, now, snoozed);
+    if (ambientPaused && rendering && lastMood !== null && mood !== lastMood) {
+      // Finish the normal pose handoff before holding the new resting frame.
+      ambientReactionUntil = Math.max(ambientReactionUntil, now + 600 + (mood === 'waiting' ? reactionMs('waiting') : 0));
+    }
+    lastMood = mood;
     const shared = {
       packEpoch,
       visible,
+      rendering,
+      ambientPaused,
+      reacting: now < ambientReactionUntil,
       appearance,
       glassFallback:
         process.platform === 'win32' &&
@@ -489,10 +503,7 @@ export function createPetController(deps: PetControllerDeps, benchmark?: { quad:
       items,
       recent,
       targets: effectiveTargets,
-      mood:
-        drag?.moved && pack?.manifest.remoteCodex?.clips?.dragging
-          ? 'dragging'
-          : moods.value(items, now, snoozed),
+      mood,
       moodEpoch,
       pinned: controlsPinned && !panel && !menu,
       rive: pack?.manifest.remoteCodex?.rive
@@ -555,7 +566,7 @@ export function createPetController(deps: PetControllerDeps, benchmark?: { quad:
     }
     if (!live()) return;
     const show =
-      visible &&
+      visible && rendering &&
       readyGlass &&
       (panel ||
         menu ||
@@ -961,6 +972,13 @@ export function createPetController(deps: PetControllerDeps, benchmark?: { quad:
     trusted(event) ? action(value) : { ok: false, error: t('不受信任的桌宠页面', {}, uiLocale) },
   );
   const unsubscribes = [
+    deps.onRendering?.((next) => {
+      rendering = next;
+      if (next) { moods.settle(items, Date.now()); completedConversations.clear(); }
+      if (next && ambientPaused) ambientReactionUntil = Date.now() + 600;
+      emit();
+    }) ?? (() => {}),
+    deps.onIdle?.((next) => { ambientPaused = next; emit(); }) ?? (() => {}),
     deps.onAppearance((next) => {
       appearance = next;
       if (next.locale) uiLocale = resolveLocale(next.locale);
@@ -1003,11 +1021,16 @@ export function createPetController(deps: PetControllerDeps, benchmark?: { quad:
         deps.shouldSpeak(event) &&
         !(settings.snoozeUntil && Date.parse(settings.snoozeUntil) > now);
       let reaction: 'waving' | 'jumping' = 'waving';
-      if (event.type === 'completed' && delivered) {
+      const react = delivered && rendering;
+      if (event.type === 'completed' && react) {
         for (const [key, at] of completedConversations)
           if (now - at > 1200) completedConversations.delete(key);
         completedConversations.set(conversationKey(event.item), now);
         reaction = completedConversations.size > 1 ? 'jumping' : 'waving';
+      }
+      if (react && ['needsInput', 'completed', 'failed'].includes(event.type)) {
+        const pose = event.type === 'needsInput' ? 'waiting' : event.type === 'failed' ? 'failed' : reaction;
+        ambientReactionUntil = Math.max(ambientReactionUntil, now + reactionMs(pose) + 600);
       }
       if (delivered) {
         const title = spokenActivityTitle(event.item, items);
@@ -1036,11 +1059,11 @@ export function createPetController(deps: PetControllerDeps, benchmark?: { quad:
       moods.onEvent(
         event.type,
         now,
-        delivered,
+        react,
         reaction,
         reactionMs(event.type === 'failed' ? 'failed' : reaction),
       );
-      if (delivered && ['completed', 'failed'].includes(event.type)) moodEpoch++;
+      if (react && ['completed', 'failed'].includes(event.type)) moodEpoch++;
       if (delivered && bubbles.push(event, now)) {
         targetKey = event.item.key;
         targets.set(event.item.key, event.item);
@@ -1161,7 +1184,7 @@ export function createPetController(deps: PetControllerDeps, benchmark?: { quad:
   }
   let pointerTimer: ReturnType<typeof setInterval> | undefined;
   function syncPointerPoll(): void {
-    if (!visible) { clearInterval(pointerTimer); pointerTimer = undefined; lastCursor = null; return; }
+    if (!visible || !rendering) { clearInterval(pointerTimer); pointerTimer = undefined; lastCursor = null; return; }
     if (pointerTimer !== undefined) return;
     pointerTimer = setInterval(() => {
       if (!live()) return;
@@ -1173,7 +1196,8 @@ export function createPetController(deps: PetControllerDeps, benchmark?: { quad:
     clearTimeout(deadlineTimer);
     const bubble = bubbles.current;
     const deadlines = [
-      moods.deadline(items, now, snoozed),
+      rendering ? moods.deadline(items, now, snoozed) : Infinity,
+      rendering && ambientPaused && ambientReactionUntil > now ? ambientReactionUntil : Infinity,
       !near && bubble && !bubble.sticky && bubble.shownAt !== null ? bubble.shownAt + BUBBLE_MS : Infinity,
       speech.deadline(near),
       snoozed ? Date.parse(settings.snoozeUntil!) : Infinity,

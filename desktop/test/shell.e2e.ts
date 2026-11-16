@@ -13,6 +13,7 @@ import type { Notifications } from '../src/main/notifications';
 import type { AppearanceStore } from '../src/main/appearance';
 import type { ShowMessage } from '../src/main/updates';
 import type { LocalMessages } from '../src/main/messages';
+import type { RenderingPresence } from '../src/main/renderingPresence';
 import type { Appearance, PockymoeHost } from '../src/shared/contract';
 import { resolveLocale } from '../src/shared/i18n';
 import { primaryKey } from './nativeKeys';
@@ -20,7 +21,7 @@ import { windowAt } from './windowReady';
 import { auditSurface } from './surfaceAudit';
 import { item, snapshot } from './fixtures';
 
-type Runtime = { messages: LocalMessages; lastMessageResponse?: number; showMessageBox: ShowMessage; lastDialog?: Electron.MessageBoxOptions; lastSave?: Electron.SaveDialogOptions; appearance: AppearanceStore; hub: ActivityHub; settings: SettingsStore; windows: Windows; tray: DesktopTray; notifications: Notifications };
+type Runtime = { presence: RenderingPresence; messages: LocalMessages; lastMessageResponse?: number; showMessageBox: ShowMessage; lastDialog?: Electron.MessageBoxOptions; lastSave?: Electron.SaveDialogOptions; appearance: AppearanceStore; hub: ActivityHub; settings: SettingsStore; windows: Windows; tray: DesktopTray; notifications: Notifications };
 declare global { var __pockymoeDesktopTest: Runtime }
 declare global { interface Window { pockymoeHost?: PockymoeHost; commands: unknown[] } }
 const evidence = join(process.env.POCKYMOE_DESKTOP_EVIDENCE || join(tmpdir(), 'pockymoe-shell-evidence'), 'compat');

@@ -34,6 +34,7 @@ export type LocalAction =
   | { type: 'muteTargets' }
   | { type: 'summaryTest' };
 export interface LocalBridge {
+  onRendering?(listener: (rendering: boolean) => void): () => void;
   getState(): Promise<LocalState>;
   onState(listener: (state: LocalState) => void): () => void;
   action(action: LocalAction): Promise<HostCommandResult>;

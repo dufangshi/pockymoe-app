@@ -8,6 +8,13 @@ import { defaults } from '../main/store';
 const item = (state: ActivityItem['state'], id = 'a', since = 0): ActivityItem => ({ key: `d:${id}`, threadId: id, deviceId: 'd', deviceName: 'Mac', workspaceId: 'w', workspaceLabel: 'Workspace', title: id, state, since: new Date(since).toISOString(), unread: true });
 const snapshot = (items: ActivityItem[], at = 1000): ActivitySnapshot => ({ version: 1, generatedAt: new Date(at).toISOString(), accountId: 'a', focusedThreadKey: null, items, syncedDeviceIds: ['d'] });
 describe('v3 stability under sparse multi-device history', () => {
+  it('resumes the current sustained pose without replaying an away reaction', () => {
+    const mood = new StableMood(0);
+    mood.react('waving', 1000, 10000);
+    expect(mood.value([], 1001)).toBe('waving');
+    mood.settle([item('running')], 2000);
+    expect(mood.value([item('running')], 2000)).toBe('running');
+  });
   it('keeps historical failures and unread completions out of the pose for the full login minute', () => {
     const history = Array.from({ length: 250 }, (_, i) => item(i % 2 ? 'failed' : 'completed', String(i)));
     const mood = new StableMood(0); const poses = new Set();

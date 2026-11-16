@@ -24,6 +24,6 @@ export class PetFrameScheduler {
   get pending(): boolean { return this.timer !== undefined; }
 }
 
-export function petAnimationRuns(visible: boolean, surface: 'sprite' | 'glass', tucked: boolean, reduced: boolean, video: boolean): boolean {
-  return visible && surface === 'sprite' && !tucked && !reduced && !video;
+export function petAnimationRuns(visible: boolean, surface: 'sprite' | 'glass', tucked: boolean, reduced: boolean, video: boolean, ambientPaused = false, reacting = false): boolean {
+  return visible && surface === 'sprite' && !tucked && !reduced && !video && (!ambientPaused || reacting);
 }

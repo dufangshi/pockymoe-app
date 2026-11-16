@@ -112,12 +112,19 @@ export function mountQuick(root: HTMLElement, initial: LocalState): void {
     if (lastStatus) status(localizeMessage(lastStatus.message), lastStatus.error, lastStatus.openKey);
   };
   localBridge().onState(next => { const changed = next.locale !== state.locale; state = next; if (changed) refreshLabels(); render(); });
-  const tick = setInterval(() => {
-    if (document.hidden) return;
-    if (!root.isConnected) { clearInterval(tick); return; }
-    for (const timer of list.querySelectorAll<HTMLElement>('[data-since]')) timer.textContent = elapsed(timer.dataset.since!);
-  }, 1000);
+  let tick: ReturnType<typeof setTimeout> | undefined;
+  const clock = (): void => {
+    clearTimeout(tick); tick = undefined;
+    if (document.hidden || document.documentElement.dataset.pockymoeRendering === 'paused' || !root.isConnected) return;
+    const timers = list.querySelectorAll<HTMLElement>('[data-since]');
+    for (const timer of timers) { const value = elapsed(timer.dataset.since!); if (timer.textContent !== value) timer.textContent = value; }
+    if (timers.length) tick = setTimeout(clock, 1000);
+  };
+  document.addEventListener('visibilitychange', clock);
+  window.addEventListener('pockymoe-rendering-change', clock);
+  localBridge().onState(clock);
   render(); search.focus();
+  clock();
 }
 
 export function elapsed(since: string, now = Date.now()): string {

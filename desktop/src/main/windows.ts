@@ -11,6 +11,7 @@ import type { Appearance, HostCommand, HostCommandResult } from '../shared/contr
 import { channels as c } from '../shared/channels';
 import { deepLinkPath, externalUrl, isSignInUrl, isWebFrame, threadPath } from './security';
 import { readJson, writeJson, type SettingsStore } from './store';
+import type { RenderingPresence } from './renderingPresence';
 
 export type CommandInput = HostCommand extends infer T ? T extends HostCommand ? Omit<T, 'id'> : never : never;
 export type LocalRole = 'quick' | 'preferences' | 'relay' | 'about' | 'offline';
@@ -79,10 +80,20 @@ export class Windows {
       w.setTitle(role === 'preferences' ? t('设置 — Pockymoe') : role === 'relay' ? t('连接 — Pockymoe') : 'Pockymoe');
     }
   }
-  constructor(private settings: SettingsStore, private dataDir: string) {
+  constructor(private settings: SettingsStore, private dataDir: string, private presence?: RenderingPresence) {
     const stored = readJson(join(dataDir, 'window-bounds.json'));
     this.bounds = stored && typeof stored === 'object' ? stored as Record<string, Rectangle> : {};
     nativeTheme.on('updated', () => this.refreshChrome());
+  }
+  private watchRendering(w: BrowserWindow): void {
+    const sync = (): void => {
+      if (!w.isDestroyed()) w.webContents.send('rcDesktop:rendering', w.isVisible() && !w.isMinimized() && (this.presence?.get() ?? true));
+    };
+    w.on('show', sync); w.on('hide', sync); w.on('minimize', sync); w.on('restore', sync);
+    w.webContents.on('did-finish-load', sync);
+    const stop = this.presence?.subscribe(sync);
+    w.once('closed', () => stop?.());
+    w.webContents.on('input-event', () => this.presence?.input());
   }
   private refreshChrome(): void {
     if (process.platform !== 'win32') return;
@@ -133,12 +144,8 @@ export class Windows {
     this.relay.add(w);
     // eb938940 keeps account activity/notifications alive in the hidden Web owner.
     // Suspend CSS, Web Animations and RAF through preload, leaving network timers alone.
-    const syncRendering = (): void => {
-      if (!w.isDestroyed()) w.webContents.send('rcDesktop:rendering', w.isVisible() && !w.isMinimized());
-    };
-    w.on('show', syncRendering); w.on('hide', syncRendering);
-    w.on('minimize', syncRendering); w.on('restore', syncRendering);
-    w.webContents.on('did-finish-load', () => { this.syncPageChrome(w); syncRendering(); });
+    this.watchRendering(w);
+    w.webContents.on('did-finish-load', () => this.syncPageChrome(w));
     this.secure(w, true);
     w.on('close', e => { if (!this.quitting && !this.closingForUpdate) { e.preventDefault(); backgrounded = true; w.hide(); } });
     w.on('closed', () => {
@@ -237,7 +244,7 @@ export class Windows {
       webPreferences: { preload: join(__dirname, '../preload/local.js'), contextIsolation: true, sandbox: true, nodeIntegration: false,
         additionalArguments: process.env.ELECTRON_RENDERER_URL ? ['--pockymoe-local-dev'] : [] }
     });
-    this.local.set(w, role); this.secure(w, false);
+    this.local.set(w, role); this.secure(w, false); this.watchRendering(w);
     w.on('closed', () => this.local.delete(w));
     if (quick) { w.setAlwaysOnTop(true, 'floating'); w.on('blur', () => { if (process.env.POCKYMOE_DESKTOP_E2E !== '1') w.hide(); }); }
     w.once('ready-to-show', () => { if (!quick) w.show(); });

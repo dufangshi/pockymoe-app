@@ -44,11 +44,25 @@ test('synthetic VP9 alpha streams through the pet protocol and switches without 
     const range=await app.evaluate(async({net},url)=>{const r=await net.fetch(url,{headers:{Range:'bytes=0-3'}});return {status:r.status,type:r.headers.get('content-type'),range:r.headers.get('content-range'),bytes:[...new Uint8Array(await r.arrayBuffer())]};},sample.source);
     expect(range).toMatchObject({status:206,type:'video/webm',bytes:[26,69,223,163]});expect(range.range).toMatch(/^bytes 0-3\//);
     await app.evaluate(()=> (globalThis as unknown as {petHarness:{settings(p:unknown):void}}).petHarness.settings({petEdgeHide:true}));
+    await expect.poll(() => sprite.locator('#clip').getAttribute('data-media-frame')).not.toBe('0');
+    await app.evaluate(() => (globalThis as unknown as { petHarness: { idle(value: boolean): void } }).petHarness.idle(true));
+    await expect(sprite.locator('#app')).toHaveClass(/animation-still/);
+    await expect.poll(() => sprite.locator('video.pet-video').evaluateAll(v => v.every(x => (x as HTMLVideoElement).paused))).toBe(true);
+    const held = await sprite.locator('#clip').getAttribute('data-media-frame');
+    // Observe a real decoding interval: holding must preserve the presented
+    // frame, rather than seeking to frame zero or continuing the 24fps loop.
+    await sprite.waitForTimeout(350);
+    expect(await sprite.locator('#clip').getAttribute('data-media-frame')).toBe(held);
     const act = (value: unknown) => sprite.evaluate(v => (window as unknown as {rcDesktop:{pet:{action(v:unknown):Promise<unknown>}}}).rcDesktop.pet.action(v), value);
     await act({type:'click'});
     await expect(sprite.locator('#clip')).toHaveAttribute('data-clip-path','clips/reaction.webm',{timeout:1500});
+    await expect.poll(() => sprite.locator('video.pet-video').evaluateAll(v => v.some(x => !(x as HTMLVideoElement).paused))).toBe(true);
     await expect(sprite.locator('#app')).toHaveAttribute('data-mood','idle',{timeout:3500});
     await expect.poll(() => sprite.locator('#clip').getAttribute('data-clip-path')).not.toBe('clips/reaction.webm');
+    await expect(sprite.locator('#app')).toHaveClass(/animation-still/);
+    expect(await sprite.evaluate(() => (window as unknown as { pendingVideoCallbacks(): number }).pendingVideoCallbacks())).toBe(0);
+    await app.evaluate(() => (globalThis as unknown as { petHarness: { idle(value: boolean): void } }).petHarness.idle(false));
+    await expect.poll(() => sprite.locator('video.pet-video').evaluateAll(v => v.some(x => !(x as HTMLVideoElement).paused))).toBe(true);
     for (const edge of ['top','bottom','right'] as const) {
       // Hidden windows can report stale native coordinates on a headless display.
       const {bounds,area}=await app.evaluate(({screen})=>({bounds:(globalThis as unknown as {petHarness:{metrics():{requestedBounds:Electron.Rectangle}}}).petHarness.metrics().requestedBounds,area:screen.getPrimaryDisplay().workArea}));

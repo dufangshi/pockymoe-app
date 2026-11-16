@@ -70,6 +70,13 @@ test.beforeEach(async () => {
   await expect.poll(() => page.evaluate(() => (window as unknown as { fixtureReady?: boolean }).fixtureReady)).toBe(true);
   await expect.poll(() => page.evaluate(() => !!window.pockymoeHost)).toBe(true);
   await page.evaluate(() => window.pockymoeHost!.capabilities());
+  if (process.env.POCKYMOE_TEST_IDLE_SECONDS !== undefined) {
+    // Reproduce an idle hosted runner without changing the machine's input state.
+    await app.evaluate(({ powerMonitor }, seconds) => {
+      powerMonitor.getSystemIdleTime = () => seconds;
+      globalThis.__pockymoeDesktopTest.presence.refresh();
+    }, Number(process.env.POCKYMOE_TEST_IDLE_SECONDS));
+  }
 });
 test.afterEach(async () => { await app?.close(); rmSync(profile, { recursive: true, force: true }); });
 const pet = async (surface: 'sprite' | 'glass'): Promise<Page> => {
