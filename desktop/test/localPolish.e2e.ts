@@ -185,3 +185,29 @@ test('empty quick reply placeholder follows language changes', async () => {
     await expect(quick.locator('#reply')).toHaveAttribute('placeholder', locale === 'en' ? 'Quick reply to the selected thread…' : '给选中的线程快速回复…');
   }
 });
+
+test('hidden and minimized Web pauses rendering while heartbeat and activity continue', async () => {
+  const web = await pageAt(origin);
+  await app.evaluate(() => globalThis.__pockymoeDesktopTest.settings.set({ petVisible: false }));
+  await web.evaluate(() => {
+    const box = document.createElement('div'); box.id = 'render-probe'; box.textContent = 'Running'; document.body.append(box);
+    const style = document.createElement('style'); style.textContent = '@keyframes probe { to { opacity:.2 } } #render-probe { animation:probe 1s infinite alternate }'; document.head.append(style);
+    const probe = { frames: 0, beats: 0 }; Object.assign(window, { renderProbe: probe });
+    const frame = (): void => { probe.frames++; requestAnimationFrame(frame); }; requestAnimationFrame(frame);
+    setInterval(() => { probe.beats++; window.pockymoeHost!.activity.sync({ version: 1, accountId: 'render-probe', generatedAt: new Date().toISOString(), focusedThreadKey: null, syncedDeviceIds: [], items: [] }); }, 100);
+  });
+  const probe = () => web.evaluate(() => (window as unknown as { renderProbe: { frames: number; beats: number } }).renderProbe);
+  await expect.poll(async () => (await probe()).frames).toBeGreaterThan(2);
+  for (const action of ['hide', 'minimize'] as const) {
+    await app.evaluate((_e, action) => { const w = globalThis.__pockymoeDesktopTest.windows.main(); w.show(); w[action](); }, action);
+    await expect.poll(() => web.locator('#render-probe').evaluate(e => getComputedStyle(e).animationPlayState)).toBe('paused');
+    const before = await probe();
+    await expect.poll(async () => (await probe()).beats).toBeGreaterThan(before.beats + 3);
+    expect((await probe()).frames).toBe(before.frames);
+    expect(await web.evaluate(() => document.visibilityState)).toBe('visible');
+    expect(await app.evaluate(() => globalThis.__pockymoeDesktopTest.hub.snapshot()?.accountId)).toBe('render-probe');
+    await app.evaluate(() => { const w = globalThis.__pockymoeDesktopTest.windows.main(); w.restore(); w.show(); });
+    await expect.poll(async () => (await probe()).frames).toBeGreaterThan(before.frames + 2);
+    await expect.poll(() => web.locator('#render-probe').evaluate(e => getComputedStyle(e).animationPlayState)).toBe('running');
+  }
+});

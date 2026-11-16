@@ -45,7 +45,9 @@ sheet. Show pet, size, mini mode and sound take effect immediately. Alt+Space
 opens the quick window by default; choose another accelerator in Shortcuts if
 that key is already used. Closing the main window keeps the app in the menu bar
 or tray. Its Web activity source keeps running while hidden; native alerts and
-the pet continue receiving changes. Cmd/Ctrl+Q or Quit Pockymoe exits.
+the pet continue receiving changes. Hidden/minimized Web windows suspend rendering
+(RAF, CSS and Web Animations), while connection timers and activity IPC remain
+unthrottled; showing/restoring resumes rendering. Cmd/Ctrl+Q or Quit Pockymoe exits.
 
 ## Connection discovery
 

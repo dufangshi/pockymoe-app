@@ -11,7 +11,11 @@ import type { PetBubble } from './bubbles';
 import type { PetSpeech } from './speechBubble';
 import type { DockEdge, FaceBox, Rect, PeekArt } from './geometry';
 import type { ClipFormat, PetClip } from './packs';
+export type PetPackImages = Pick<PetViewState, 'imageUrl' | 'peekArt' | 'sleeping'>;
+export type PetStateMessage = Omit<PetViewState, keyof PetPackImages | 'cursor'>;
 export interface PetViewState {
+  packEpoch: number;
+  visible: boolean;
   rive?: import('./rive').RivePack & { epoch: number };
   cursor?: { x: number; y: number };
   dragging?: boolean;
@@ -87,6 +91,7 @@ export type PetAction =
   | { type: 'dragStart' | 'dragMove' | 'dragEnd'; x: number; y: number };
 export interface PetBridge {
   onState(listener: (state: PetViewState) => void): () => void;
+  onCursor(listener: (cursor: { x: number; y: number } | null) => void): () => void;
   onCue(listener: (cue: PetCue) => void): () => void;
   onSpeech(listener: (audio: Uint8Array, id: number) => void): () => void;
   clip(path: string): Promise<Uint8Array | null>;

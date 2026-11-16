@@ -45,6 +45,10 @@ test('synthetic VP9 alpha streams through the pet protocol and switches without 
     expect(range).toMatchObject({status:206,type:'video/webm',bytes:[26,69,223,163]});expect(range.range).toMatch(/^bytes 0-3\//);
     await app.evaluate(()=> (globalThis as unknown as {petHarness:{settings(p:unknown):void}}).petHarness.settings({petEdgeHide:true}));
     const act = (value: unknown) => sprite.evaluate(v => (window as unknown as {rcDesktop:{pet:{action(v:unknown):Promise<unknown>}}}).rcDesktop.pet.action(v), value);
+    await act({type:'click'});
+    await expect(sprite.locator('#clip')).toHaveAttribute('data-clip-path','clips/reaction.webm',{timeout:1500});
+    await expect(sprite.locator('#app')).toHaveAttribute('data-mood','idle',{timeout:3500});
+    await expect.poll(() => sprite.locator('#clip').getAttribute('data-clip-path')).not.toBe('clips/reaction.webm');
     for (const edge of ['top','bottom','right'] as const) {
       // Hidden windows can report stale native coordinates on a headless display.
       const {bounds,area}=await app.evaluate(({screen})=>({bounds:(globalThis as unknown as {petHarness:{metrics():{requestedBounds:Electron.Rectangle}}}).petHarness.metrics().requestedBounds,area:screen.getPrimaryDisplay().workArea}));

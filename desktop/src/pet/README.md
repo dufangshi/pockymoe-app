@@ -375,13 +375,28 @@ integrated in steps of at most 1/120 s; stale drag samples expire after 120 ms.
 Random blink intervals and incommensurate breathing/shift phases continue on
 all authored poses. Closed-eye sleeping art may mask the blink layer.
 
-Procedural rigs advance at the display's `requestAnimationFrame` cadence, including
-120 Hz displays. `idleFps`, `activeFps` and `sourceFps` remain accepted as legacy
-manifest fields but no longer cap rendering or hold body time. Bones and vertices
-interpolate continuously between authored keys; breath, weight shift and spring
-inputs are not quantized. Draws are skipped only when size, inputs and the
-artboard are unchanged, or while tucked/reduced motion holds the pose. Speech
-keeps the existing 60/120 ms envelope.
+Pet presentation is capped at **30 fps on every display**, reversing PR #44's
+unbounded display-rate playback. A cancellable timeout schedules the next draw;
+there is no per-vsync skip loop. Rive routes, reactions, drag/landing and gaze
+advance by actual elapsed time. `idleFps`, `activeFps` and `sourceFps` remain
+legacy manifest fields, without overriding the global cap or quantizing source
+time. Authored transition speed is unchanged; spring integration remains bounded.
+
+Tucked/resting edge poses, hidden pets and reduced-motion still poses have no
+animation loop. Inputs/state changes can request one still redraw. Hidden video
+decoders pause too. WebM uses `requestVideoFrameCallback`, with a capped one-shot
+draw timer for new frames and native `ended` handoffs (interruption retains its
+existing 3×/600 ms one-shot deadline); it has no independent
+animation tick. The glass surface renders state changes only, with static status
+and speech marks. Sprite CSS fades/edge transitions use steps below 30 fps.
+
+The main process polls hover at 100 ms only while visible. An unchanged pointer
+relation does not rebuild or stringify view state. Gaze is a separate small
+cursor IPC, sent only on movement within range (plus one clear on leaving).
+Atlas/peek/sleeping images encode once per loaded pack and travel separately once
+per pack epoch and renderer; they never enter frequent state messages. Dedicated
+deadline timers expire reactions, mood holds, bubbles, speech and snooze without
+requiring pointer polls or periodic full emits. Speech keeps its 60/120 ms envelope.
 
 For planted poses, author breathing on spine/chest/neck or spatially weighted
 control points above the hips. Root translation, root scale and a whole-body
@@ -457,7 +472,7 @@ packs retain the existing renderer and full DPR. The native-size cap has no effe
 when the pet's CSS size × DPR is already below it. The prototype binary limit is
 96 MiB for lossless source drawing atlases; expanded ZIPs remain capped at 256 MiB.
 
-Routed source drawings now use continuous source time at every display frame.
+Routed source drawings now use continuous elapsed source time on the capped cadence.
 Material selection uses that same float32 clock. Drawing keys must still share
 matching material coordinates; higher sampling cannot repair incompatible paint.
 Authors must fit inbetweens and supply shared boundaries or dedicated transitions.
@@ -469,7 +484,7 @@ sample and cannot consume a boundary hold.
 
 `procedural.transientFace:true` requires `eyeOpen:true`. Gaze activates only for
 nearby cursor movement, holds for 180 ms, then fades to source paint over 180 ms.
-The cursor target interpolates at display rate between the 100 ms IPC samples.
+The cursor target interpolates at the capped cadence between the 100 ms IPC samples.
 The authored eyeOpen layer must expose the original source pupils through an eye
 mask, and zero input must show source paint. Blink layers should use the current
 expression's lids and return to opacity zero; mouth layers should preserve its
@@ -552,7 +567,15 @@ drawer raises a smooth 480ms acknowledgment pulse on motion/state events and pet
 triggers. Bind it to a small head/upper-body gesture while a longer route runs;
 keep its layer separate from breathing and planted leg controls. It neither seeks
 nor speeds up the source animation. `idleFps`, `activeFps`, `sourceFps` and
-`maxExitMs` are legacy import metadata; new display-rate packs should omit them.
+`maxExitMs` are legacy import metadata; new packs should omit them.
+
+The built-app benchmark accepts `--size M` (default) or `--size L`. It counts
+actual Rive/quad and WebM canvas draws independently of RAF, and fails above
+`floor(drawElapsedSeconds * 30) + 1` frames (the renderer snapshots its counter
+and elapsed clock together before trace shutdown), so reverting to display-rate presentation
+fails even on a 60/120 Hz host. It also checks that Rive advances 0.85–1.15
+animation seconds per wall second, catching accidental playback slowdowns. CI uses the committed sample sources/generated
+geometric media only (`test/petCadence.e2e.ts` runs the actual Rive benchmark). Personal installed packs must remain local and untracked.
 
 Both benchmark commands report renderer and GPU-process working-set memory in
 MiB: OS peak (including startup), maximum sampled RSS and settled median of the

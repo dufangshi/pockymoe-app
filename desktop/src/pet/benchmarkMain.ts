@@ -1,3 +1,4 @@
+import { assertPresentationRate } from './presentationBudget';
 import { app, BrowserWindow, screen, session } from 'electron';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { resolve, join } from 'node:path';
@@ -20,6 +21,7 @@ interface Options {
   webm: string;
   out: string;
   seconds: number;
+  size: 'M' | 'L';
   mode?: Mode;
 }
 interface Sample {
@@ -41,6 +43,8 @@ interface Run {
   nativeReadsPerSecond: number;
   appReadsPerSecond: number;
   drawFrames: number;
+  drawElapsed: number;
+  animationSecondsPerSecond: number | null;
   samples: Sample[];
   display: unknown;
   nativeTrace: ReturnType<typeof summarizeNativeTrace>;
@@ -58,6 +62,9 @@ function options(argv: string[]): Options {
   const outIndex = argv.indexOf('--output');
   const secondsIndex = argv.indexOf('--seconds');
   const seconds = secondsIndex >= 0 ? Number(argv[secondsIndex + 1]) : 60;
+  const sizeIndex = argv.indexOf('--size');
+  const size = sizeIndex >= 0 ? argv[sizeIndex + 1] : 'M';
+  if (size !== 'M' && size !== 'L') throw new Error('Benchmark size must be M or L');
   const mode = child >= 0 ? (argv[index + 1] as Mode) : undefined;
   if (
     !rive ||
@@ -69,9 +76,9 @@ function options(argv: string[]): Options {
     seconds > 120 ||
     (mode && !['webm', 'quad', 'rive'].includes(mode))
   ) {
-    throw new Error('Usage: Pockymoe --pet-benchmark Rive.zip WebM.zip --output DIRECTORY [--seconds 60]');
+    throw new Error('Usage: Pockymoe --pet-benchmark Rive.zip WebM.zip --output DIRECTORY [--seconds 60] [--size M|L]');
   }
-  return { rive: resolve(rive), webm: resolve(webm), out: resolve(argv[outIndex + 1]), seconds, mode };
+  return { rive: resolve(rive), webm: resolve(webm), out: resolve(argv[outIndex + 1]), seconds, size, mode };
 }
 
 async function waitFor(test: () => Promise<boolean>, description: string): Promise<void> {
@@ -100,7 +107,7 @@ async function measure(config: Options): Promise<Run> {
     throw new Error('Wrong benchmark ZIP format');
   store.set({
     petId: pack.manifest.id,
-    petSize: 'M',
+    petSize: config.size,
     petVisible: true,
     petEdgeHide: false,
     petSound: false,
@@ -184,11 +191,11 @@ async function measure(config: Options): Promise<Run> {
     if (name === 'Tracing.dataCollected') trace.push(...parameters.value);
     if (name === 'Tracing.tracingComplete') finishTrace();
   });
-  await contents.executeJavaScript('Object.assign(window.petBenchmarkStats, {calls:0,frames:0,reads:0})');
   await debuggerAPI.sendCommand('Tracing.start', {
     categories: 'gpu,disabled-by-default-gpu.service',
     transferMode: 'ReportEvents',
   });
+  await contents.executeJavaScript('Object.assign(window.petBenchmarkStats, {calls:0,frames:0,reads:0,advancedSeconds:0,startedAt:performance.now()})');
   const sample = (): Sample => {
     const metrics = app.getAppMetrics();
     const rendererPid = contents.getOSProcessId();
@@ -213,6 +220,12 @@ async function measure(config: Options): Promise<Run> {
     await delay(1000);
     samples.push(sample());
   }
+  const stats = (await contents.executeJavaScript('({...window.petBenchmarkStats, elapsed:(performance.now()-window.petBenchmarkStats.startedAt)/1000})')) as {
+    frames: number;
+    elapsed: number;
+    reads: number;
+    advancedSeconds: number;
+  };
   await debuggerAPI.sendCommand('Tracing.end');
   await Promise.race([
     traceComplete,
@@ -233,11 +246,11 @@ async function measure(config: Options): Promise<Run> {
     throw new Error('Renderer or GPU process restarted during benchmark');
   }
   const elapsed = (last.time - first.time) / 1000;
-  const stats = (await contents.executeJavaScript('window.petBenchmarkStats')) as {
-    frames: number;
-    reads: number;
-  };
   if (mode !== 'webm' && !stats.frames) throw new Error('WebGL control did not draw');
+  assertPresentationRate(stats.frames, stats.elapsed);
+  const animationSecondsPerSecond = mode === 'webm' ? null : stats.advancedSeconds / stats.elapsed;
+  if (animationSecondsPerSecond !== null && (animationSecondsPerSecond < 0.85 || animationSecondsPerSecond > 1.15))
+    throw new Error(`Pet animation clock changed speed: ${animationSecondsPerSecond.toFixed(3)} seconds per second`);
   const mediaEnd = await media();
   const display = await contents.executeJavaScript(`({
     dpr: devicePixelRatio, width: innerWidth, height: innerHeight,
@@ -255,6 +268,8 @@ async function measure(config: Options): Promise<Run> {
     nativeReadsPerSecond: nativeTrace.readPixels / elapsed,
     appReadsPerSecond: stats.reads / elapsed,
     drawFrames: stats.frames,
+    drawElapsed: stats.elapsed,
+    animationSecondsPerSecond,
     samples,
     display,
     nativeTrace,
@@ -293,9 +308,10 @@ async function childRun(config: Options, mode: Mode, repeat: number): Promise<Ru
     out,
     '--seconds',
     String(config.seconds),
+    '--size', config.size,
   ];
   const output = await new Promise<string>((yes, no) => {
-    const child = spawn(process.execPath, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(process.execPath, args, { stdio: ['ignore', 'pipe', 'pipe'], timeout: 180_000, killSignal: 'SIGKILL' });
     let log = '';
     child.stdout.on('data', (bytes) => {
       log += bytes;
@@ -349,7 +365,7 @@ export async function runPetBenchmark(argv: string[]): Promise<void> {
           ? 'GLES2 draw events observed'
           : 'unverified: no GLES2 draw positive control in every run',
         appReadsPerSecond: median(rows.map((row) => row.appReadsPerSecond)),
-        webglDrawFramesPerSecond: median(rows.map((row) => row.drawFrames / row.elapsed)),
+        drawFramesPerSecond: median(rows.map((row) => row.drawFrames / row.drawElapsed)),
         rendererPeakMiB: median(rows.map((row) => row.memory.renderer.peakMiB)),
         rendererSettledMiB: median(rows.map((row) => row.memory.renderer.settledMiB)),
         gpuPeakMiB: median(rows.map((row) => row.memory.gpu.peakMiB)),
@@ -370,6 +386,7 @@ export async function runPetBenchmark(argv: string[]): Promise<void> {
       logicalCPUs: cpus().length,
       dpr: screen.getPrimaryDisplay().scaleFactor,
       seconds: config.seconds,
+      size: config.size,
       repeats: 3,
       packs,
       table,

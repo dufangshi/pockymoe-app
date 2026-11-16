@@ -875,3 +875,51 @@ test('clips: dedicated peek handoff fades out before fading in in both direction
     expect(samples.some(s => s.body > 0 && s.body < 1 || s.peek > 0 && s.peek < 1)).toBe(true);
   }
 });
+
+test('idle pointer polling sends no full state or images, and still pets have no frame loop', async () => {
+  await baseline();
+  const sprite = await pet('sprite'), glass = await pet('glass');
+  await app.evaluate(({ BrowserWindow, screen }) => {
+    let n = 0;
+    screen.getCursorScreenPoint = () => ({ x: -5000 + n++, y: -5000 });
+    const counts = { state: 0, pack: 0, cursor: 0, imagesInState: false };
+    Object.assign(globalThis, { petDeliveryProbe: counts });
+    for (const w of BrowserWindow.getAllWindows().filter(w => w.webContents.getURL().includes('pet/index.html'))) {
+      const send = w.webContents.send.bind(w.webContents);
+      w.webContents.send = (channel, ...args) => {
+        if (channel === 'rcDesktop:pet:state') { counts.state++; counts.imagesInState ||= JSON.stringify(args).includes('data:image'); }
+        if (channel === 'rcDesktop:pet:pack') counts.pack++;
+        if (channel === 'rcDesktop:pet:cursor') counts.cursor++;
+        send(channel, ...args);
+      };
+    }
+  });
+  await app.evaluate(() => globalThis.__pockymoeDesktopTest.settings.set({ petEdgeHide: false }));
+  // Let the hover fade and initial geometry acknowledgement finish first.
+  await sprite.waitForTimeout(600);
+  await app.evaluate(() => Object.assign((globalThis as unknown as { petDeliveryProbe: object }).petDeliveryProbe, { state: 0, pack: 0, cursor: 0 }));
+  await sprite.waitForTimeout(700);
+  expect(await app.evaluate(() => (globalThis as unknown as { petDeliveryProbe: object }).petDeliveryProbe)).toEqual({ state: 0, pack: 0, cursor: 0, imagesInState: false });
+  for (const p of [sprite, glass]) await p.evaluate(() => {
+    const probe = { timers: 0, raf: 0 }; Object.assign(window, { petLoopProbe: probe });
+    const timeout = window.setTimeout.bind(window), raf = window.requestAnimationFrame.bind(window);
+    window.setTimeout = ((callback: TimerHandler, delay?: number, ...args: unknown[]) => { if ((delay ?? 0) <= 35) probe.timers++; return timeout(callback, delay, ...args); }) as typeof setTimeout;
+    window.requestAnimationFrame = callback => { probe.raf++; return raf(callback); };
+  });
+  for (const reduced of [true, false]) {
+    if (reduced) await sprite.emulateMedia({ reducedMotion: 'reduce' });
+    else await app.evaluate(() => globalThis.__pockymoeDesktopTest.settings.set({ petVisible: false }));
+    await sprite.waitForTimeout(150);
+    for (const p of [sprite, glass]) await p.evaluate(() => Object.assign((window as unknown as { petLoopProbe: object }).petLoopProbe, { timers: 0, raf: 0 }));
+    await sprite.waitForTimeout(400);
+    for (const p of [sprite, glass]) expect(await p.evaluate(() => (window as unknown as { petLoopProbe: object }).petLoopProbe)).toEqual({ timers: 0, raf: 0 });
+  }
+});
+
+test('a completion bubble expires on its deadline without a pointer change', async () => {
+  test.setTimeout(40_000);
+  await finish();
+  const glass = await pet('glass');
+  await expect(glass.locator('.bubble')).toBeVisible();
+  await expect(glass.locator('.bubble')).toHaveCount(0, { timeout: 32_000 });
+});

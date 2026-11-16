@@ -20,14 +20,14 @@ button:active { background:var(--theme-hover); }
 button:disabled { opacity:.4;cursor:default; }
 button:focus-visible,input:focus-visible,[tabindex]:focus-visible { outline:2px solid var(--theme-accent-solid);outline-offset:-2px; }
 svg { width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;flex:none; }
-#character { position:absolute;left:0;top:0;transform-origin:50% 50%;touch-action:none;cursor:grab;will-change:transform;transition:transform 220ms cubic-bezier(.215,.61,.355,1); }
+#character { position:absolute;left:0;top:0;transform-origin:50% 50%;touch-action:none;cursor:grab;will-change:transform;transition:transform 220ms steps(6,end); }
 #character.dragging { transition:none; }
 #character:active { cursor:grabbing; }
-#sprite,#sprite-old { position:absolute;inset:0;background-repeat:no-repeat;image-rendering:auto;transition:opacity 160ms linear; }
+#sprite,#sprite-old { position:absolute;inset:0;background-repeat:no-repeat;image-rendering:auto;transition:opacity 160ms steps(4,end); }
 #sprite-old { opacity:0;pointer-events:none; }
 .sleep-motes { display:none;position:absolute;right:10%;top:5%;width:30px;height:40px;stroke:var(--theme-muted);stroke-width:1.8; }
 .sleeping .sleep-motes { display:block; }
-.sleep-motes path { animation:sleep-rise 5s ease-in-out infinite; }
+.sleep-motes path { animation:sleep-rise 5s steps(50,end) infinite; }
 .sleep-motes path:nth-child(2) { animation-delay:-1.7s; }.sleep-motes path:nth-child(3) { animation-delay:-3.4s; }
 @keyframes sleep-rise { 0%,100% { opacity:0;transform:translateY(4px); } 35%,65% { opacity:.6; } 90% { opacity:0;transform:translateY(-6px); } }
 .glass { background:var(--glass);border:.5px solid var(--pet-line);border-radius:var(--pet-radius);box-shadow:var(--pet-shadow);overflow:hidden; }
@@ -130,7 +130,7 @@ hr { border:0;border-top:1px solid var(--theme-border);margin:4px; }
 .bubble-request-line { display:flex;align-items:flex-start;gap:6px; }.bubble-request-line .request-summary { flex:1;min-width:0; }
 .bubble-request-line .request-more { align-self:flex-start; }
 /* An alert pops her head out with a little overshoot; the way back in stays plain. */
-#character.peeking { transition:transform 460ms cubic-bezier(.34,1.8,.64,1); }
+#character.peeking { transition:transform 460ms steps(13,end); }
 
 :root[data-platform=win32]{font-family:"Segoe UI Variable Text","Segoe UI","Microsoft YaHei UI",sans-serif;--pet-bg:var(--windows-panel-bg);--pet-tint:85%;--pet-hover-tint:95%;--theme-fg:var(--windows-panel-fg);--theme-muted:var(--windows-panel-muted)}
 :root[data-platform=win32][data-glass-fallback=true]{--pet-tint:100%;--pet-hover-tint:100%}
@@ -182,8 +182,8 @@ hr { border:0;border-top:1px solid var(--theme-border);margin:4px; }
 
 /* Dedicated head art never inherits the body's crop or rotation. Move the whole
    body behind the physical edge while its opacity changes, rather than clipping it. */
-#peek-art { position:absolute;inset:0;width:100%;height:100%;opacity:0;pointer-events:none;transition:opacity 80ms linear; }
-.has-peek #sprite,.has-peek #sprite-old,.has-peek #clip,.has-peek #talk { transition:opacity 80ms linear,translate 160ms ease;translate:var(--body-slide) 0; }
+#peek-art { position:absolute;inset:0;width:100%;height:100%;opacity:0;pointer-events:none;transition:opacity 80ms steps(2,end); }
+.has-peek #sprite,.has-peek #sprite-old,.has-peek #clip,.has-peek #talk { transition:opacity 80ms steps(2,end),translate 160ms steps(4,end);translate:var(--body-slide) 0; }
 .has-peek.art-tucked #sprite,.has-peek.art-tucked #sprite-old,.has-peek.art-tucked #clip,.has-peek.art-tucked #talk { opacity:0!important;visibility:visible; }
 .has-peek #peek-art { transition-delay:0ms; }
 .has-peek.art-tucked #peek-art { opacity:1;transition-delay:80ms; }
@@ -196,5 +196,12 @@ hr { border:0;border-top:1px solid var(--theme-border);margin:4px; }
 #rive { position:absolute;inset:0;width:100%;height:100%;display:none; }
 #character.rive #rive { display:block; }
 #character.rive #clip,#character.rive #sprite,#character.rive #sprite-old,#character.rive #talk { display:none; }
-.has-peek #rive { transition:opacity 80ms linear,translate 160ms ease;translate:var(--body-slide) 0; }
+.has-peek #rive { transition:opacity 80ms steps(2,end),translate 160ms steps(4,end);translate:var(--body-slide) 0; }
 .has-peek.art-tucked #rive { opacity:0!important; }
+
+/* Resting edge poses and reduced-motion stills never keep compositor animations alive. */
+.animation-still *, .animation-still *::before, .animation-still *::after { animation-play-state: paused !important; }
+
+/* The glass surface only paints state changes, including speech/status changes. */
+body[data-surface="glass"] *, body[data-surface="glass"] *::before, body[data-surface="glass"] *::after { animation:none !important; transition:none !important; }
+body[data-surface="glass"] .speech-wave.playing i { height:8px; }

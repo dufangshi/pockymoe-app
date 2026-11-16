@@ -70,3 +70,16 @@ describe('working animation', () => {
     expect(moodFor([at('running', 1000)], { now, snoozed: true })).toBe('sleeping');
   });
 });
+
+it('provides exact reaction and sustained-mood deadlines without periodic emits', () => {
+  const stable = new StableMood(0);
+  const running = [{ key: 'd:t', state: 'running', since: new Date(0).toISOString() }] as ActivityItem[];
+  expect(stable.value(running, 1000)).toBe('idle');
+  expect(stable.deadline(running, 1000)).toBe(2000);
+  expect(stable.value(running, 2000)).toBe('running');
+  expect(stable.deadline(running, 2000)).toBe(Infinity);
+  stable.react('poked', 2100, 850);
+  expect(stable.deadline(running, 2100)).toBe(2950);
+  expect(stable.value(running, 2950)).toBe('running');
+  expect(stable.deadline(running, 2950)).toBe(Infinity);
+});

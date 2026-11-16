@@ -70,7 +70,7 @@ export class BubbleQueue {
   }
 
   /** Restarts the visible bubble's time while the pointer is on it. */
-  hold(now: number): void { const current = this.queue[0]; if (current && current.shownAt !== null) this.queue[0] = { ...current, shownAt: now }; }
+  hold(now: number): void { const current = this.queue[0]; if (current && current.shownAt !== null) current.shownAt = now; }
 
   tick(now: number): void {
     while (this.current && !this.current.sticky && this.current.shownAt !== null && now - this.current.shownAt >= BUBBLE_MS) this.queue.shift();
