@@ -221,8 +221,10 @@ requires an empty output folder and refuses extra files rather than deleting
 anything. Default output is `.local/client-release/<version>` and contains only
 the three named artifacts. Intermediate builds, extraction and smoke profiles
 use a temporary directory. To verify an unmerged **clean candidate branch**,
-`--validate` runs the same real build/scan/signature/startup gates, bypassing only
-the main/origin check; it cannot be combined with `--publish`. Every unpublished
+`--validate` runs the same real build/scan/signature/startup gates, bypassing
+the main/origin check and permitting an equal Android versionCode for a rebuild
+of the current version (downgrades still fail). Normal release commands still
+require a strictly higher versionCode. It cannot be combined with `--publish`. Every unpublished
 run, including normal builds on `main`, signs update metadata with a fresh
 throwaway Ed25519 key held only in memory. It never reads the production metadata
 private key. Validation notes and their public key are saved beside the output

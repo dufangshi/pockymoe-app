@@ -120,6 +120,14 @@ class ArtifactGateTests(unittest.TestCase):
                         release.previous_apk(work, code)
                 else:
                     self.assertEqual(release.previous_apk(work, code).name, 'Pockymoe-1.2.2-android.apk')
+            for code in [6, 7, 8]:
+                work = self.root / f'validation-{code}'
+                work.mkdir()
+                if code < 7:
+                    with self.assertRaisesRegex(RuntimeError, 'must rise'):
+                        release.previous_apk(work, code, validation=True)
+                else:
+                    self.assertEqual(release.previous_apk(work, code, validation=True).name, 'Pockymoe-1.2.2-android.apk')
 
     def test_public_build_strips_fixture_feed_and_signing_environment(self):
         class StopAfterBuildEnvironment(Exception):
@@ -206,7 +214,8 @@ class CommandTests(unittest.TestCase):
             notes.write_text('Reviewed notes\n\n<!-- pockymoe-updates-v1\nold\n-->\n')
             calls = []
 
-            def build(version, _code, folder, _work):
+            def build(version, _code, folder, _work, validation=False):
+                self.assertEqual(validation, '--validate' in arguments)
                 for name in release.asset_names(version):
                     (folder / name).write_bytes(b'fixture')
 

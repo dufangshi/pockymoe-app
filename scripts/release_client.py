@@ -103,7 +103,7 @@ def apk_certificate(apk):
     return sorted(set(digest.lower() for digest in digests))
 
 
-def previous_apk(work, code):
+def previous_apk(work, code, validation=False):
     # Failure to query GitHub is not evidence that there is no previous release.
     release = json.loads(run('gh', 'release', 'view', '--repo', REPO, '--json', 'tagName,assets', capture=True))
     assets = [asset['name'] for asset in release['assets'] if asset['name'].endswith('.apk')]
@@ -118,9 +118,10 @@ def previous_apk(work, code):
     previous = folder / assets[0]
     badging = run(sdk_tool('aapt'), 'dump', 'badging', previous, capture=True).decode()
     previous_code = int(re.search(r"versionCode='(\d+)'", badging).group(1))
-    if code <= previous_code:
+    if code < previous_code or (code == previous_code and not validation):
         raise RuntimeError('Android versionCode must rise above latest release')
-    print(f'Android versionCode: {code} > previous {previous_code}')
+    relation = '== (unpublished validation only)' if code == previous_code else '>'
+    print(f'Android versionCode: {code} {relation} previous {previous_code}')
     return previous
 
 
@@ -167,8 +168,8 @@ def verify_mac_dmg(dmg, work, signing):
         run('hdiutil', 'detach', mount, capture=True)
 
 
-def build(version, code, output, work):
-    previous = previous_apk(work, code)
+def build(version, code, output, work, validation=False):
+    previous = previous_apk(work, code, validation)
     run('python3', ROOT / 'scripts/check-production-address.py')
     run('pnpm', 'install', '--frozen-lockfile', cwd=DESKTOP)
     artifacts = work / 'builder'
@@ -264,7 +265,7 @@ def main():
     if list(output.iterdir()):
         raise RuntimeError('Output folder must be empty; nothing will be deleted or overwritten')
     with tempfile.TemporaryDirectory(prefix='pockymoe-client-') as temporary:
-        build(args.version, code, output, Path(temporary))
+        build(args.version, code, output, Path(temporary), validation=args.validate)
     if source_gate(args.validate) != sha:
         raise RuntimeError('Source changed during build')
     exact_output(output, args.version)
