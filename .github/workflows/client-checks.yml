@@ -134,6 +134,7 @@ jobs:
         run: |
           $PSNativeCommandUseErrorActionPreference = $true
           pnpm typecheck
+          node --test scripts/test-release-fuses.cjs
           pnpm vitest run
 
   windows:
@@ -387,6 +388,41 @@ jobs:
       - run: $PSNativeCommandUseErrorActionPreference = $true; pnpm install --frozen-lockfile
       - run: $PSNativeCommandUseErrorActionPreference = $true; node test/update-roundtrip.mjs --self-test
       - run: $PSNativeCommandUseErrorActionPreference = $true; node test/update-roundtrip.mjs --diagnostics-only
+      # Keep the A-to-B fixture below unchanged and inspector-enabled for Playwright.
+      # Only this separate output opts into the release fuse; never feed it to Playwright.
+      - name: Build release-fused Windows x64 NSIS package
+        timeout-minutes: 10
+        env:
+          POCKYMOE_RELEASE_FUSES: '1'
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          pnpm build
+          pnpm exec electron-builder --win nsis --x64 --publish never '-c.directories.output=release/fuse-smoke'
+      - name: Verify and launch the NSIS payload without Playwright
+        timeout-minutes: 2
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          $seven = node scripts/7zip-path.cjs | Select-Object -Last 1
+          $installer = Get-ChildItem release/fuse-smoke/Pockymoe-*-win-x64.exe
+          if (@($installer).Count -ne 1) { throw 'Expected one release-fused NSIS installer' }
+          & $seven x $installer.FullName '-orelease/fuse-smoke/installer' -y
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot extract NSIS installer' }
+          $payload = Get-ChildItem release/fuse-smoke/installer -Filter app-64.7z -Recurse
+          # Windows 7za can extract the embedded 7z app directly; the Mac tool
+          # understands the NSIS container and returns an app-64.7z wrapper.
+          if (Test-Path release/fuse-smoke/installer/Pockymoe.exe) {
+            if (@($payload).Count -ne 0) { throw 'Ambiguous NSIS extraction layout' }
+            $installed = 'release/fuse-smoke/installer/Pockymoe.exe'
+          } else {
+            if (@($payload).Count -ne 1) { throw 'Expected one x64 NSIS payload' }
+            & $seven x $payload.FullName '-orelease/fuse-smoke/installed' -y
+            if ($LASTEXITCODE -ne 0) { throw 'Cannot extract NSIS payload' }
+            $installed = 'release/fuse-smoke/installed/Pockymoe.exe'
+          }
+          $executable = (Resolve-Path $installed).Path
+          node scripts/release-fuses.cjs $executable
+          $env:POCKYMOE_SMOKE_POWERSHELL = Join-Path $PSHOME 'pwsh.exe'
+          node test/inspector-fuse-smoke.mjs $executable off
       - run: $PSNativeCommandUseErrorActionPreference = $true; node test/update-roundtrip.mjs
       - if: always()
         run: $PSNativeCommandUseErrorActionPreference = $true; git diff --exit-code -- src/main/index.ts package.json

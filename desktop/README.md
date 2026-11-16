@@ -221,8 +221,10 @@ requires an empty output folder and refuses extra files rather than deleting
 anything. Default output is `.local/client-release/<version>` and contains only
 the three named artifacts. Intermediate builds, extraction and smoke profiles
 use a temporary directory. To verify an unmerged **clean candidate branch**,
-`--validate` runs the same real build/scan/signature/startup gates, bypassing only
-the main/origin check; it cannot be combined with `--publish`. Every unpublished
+`--validate` runs the same real build/scan/signature/startup gates, bypassing
+the main/origin check and permitting an equal Android versionCode for a rebuild
+of the current version (downgrades still fail). Normal release commands still
+require a strictly higher versionCode. It cannot be combined with `--publish`. Every unpublished
 run, including normal builds on `main`, signs update metadata with a fresh
 throwaway Ed25519 key held only in memory. It never reads the production metadata
 private key. Validation notes and their public key are saved beside the output
@@ -272,6 +274,24 @@ the release, so stale hashes from an earlier build are never reused.
 
 The release script never touches `/Applications/Pockymoe.app`. A separate local
 development-signed build/install is optional; do not distribute that identity.
+
+The release path (including `--validate`) sets `POCKYMOE_RELEASE_FUSES=1` for
+packaging. `afterPack` disables only Electron's `EnableNodeCliInspectArguments`
+before the explicit Mac signature and DMG creation. `RunAsNode` stays enabled
+for the updater's `ELECTRON_RUN_AS_NODE` helper; all other fuses retain Electron's
+defaults. Verification reads the fuses from the app inside the final DMG and the
+executable extracted from the final x64 NSIS installer, failing unless inspector
+arguments are off and `RunAsNode` is on. Metadata hashes/signatures are generated
+after these final artifacts are verified, so they cover the fused, signed bytes.
+
+Normal `dist:mac`/`dist:win`, local dev-signed packages and CI's Playwright packages
+leave that variable unset and retain the inspector. To profile the main process,
+use a dev build (`pnpm exec electron-vite --inspect=9229`) or launch a normal local package
+with `--inspect=9229`; published builds ignore Node inspector switches. The selected
+packaging/updater CI tier also builds a separate release-fused NSIS package,
+extracts its payload and checks native startup, Node helper execution and a closed
+inspector port without Playwright. The real NSIS A-to-B test retains its existing
+inspector-enabled fixture packages.
 
 For a local Apple Development identity already present in Keychain (substitute
 your own identity; no personal identity is committed):

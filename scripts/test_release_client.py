@@ -120,6 +120,14 @@ class ArtifactGateTests(unittest.TestCase):
                         release.previous_apk(work, code)
                 else:
                     self.assertEqual(release.previous_apk(work, code).name, 'Pockymoe-1.2.2-android.apk')
+            for code in [6, 7, 8]:
+                work = self.root / f'validation-{code}'
+                work.mkdir()
+                if code < 7:
+                    with self.assertRaisesRegex(RuntimeError, 'must rise'):
+                        release.previous_apk(work, code, validation=True)
+                else:
+                    self.assertEqual(release.previous_apk(work, code, validation=True).name, 'Pockymoe-1.2.2-android.apk')
 
     def test_public_build_strips_fixture_feed_and_signing_environment(self):
         class StopAfterBuildEnvironment(Exception):
@@ -143,6 +151,7 @@ class ArtifactGateTests(unittest.TestCase):
         for key in inherited:
             self.assertNotIn(key, captured[0])
         self.assertEqual(captured[0]['CSC_IDENTITY_AUTO_DISCOVERY'], 'false')
+        self.assertEqual(captured[0]['POCKYMOE_RELEASE_FUSES'], '1')
 
     def test_final_dmg_checks_pinned_app_and_scans_volume_root(self):
         work = self.root / 'dmg-work'
@@ -151,9 +160,23 @@ class ArtifactGateTests(unittest.TestCase):
             release.verify_mac_dmg(self.root / 'final.dmg', work, {'certificateSha1': 'a' * 40})
         mount = work / 'dmg-mount'
         self.assertEqual(run.call_args_list[1].args, ('codesign', '--verify', '--deep', '--strict', '-R', '=certificate leaf = H"' + 'a' * 40 + '"', mount / 'Pockymoe.app'))
+        self.assertEqual(run.call_args_list[2].args, ('node', self.desktop / 'scripts/release-fuses.cjs', mount / 'Pockymoe.app'))
         extract.assert_called_once_with(mount / 'Pockymoe.app/Contents/Resources', work / 'scan-mac-asar')
         scan.assert_called_once_with(mount, work / 'scan-mac-asar')
         self.assertEqual(run.call_args_list[-1].args, ('hdiutil', 'detach', mount))
+
+    def test_final_dmg_rejects_bad_fuses_and_still_detaches(self):
+        work = self.root / 'dmg-bad-fuses'
+        work.mkdir()
+        def run(*args, **_kwargs):
+            if args[0] == 'node':
+                raise RuntimeError('release fuses rejected')
+        with patch.object(release, 'run', side_effect=run) as command, patch.object(release, 'extract_asar') as extract, patch.object(release, 'scan') as scan:
+            with self.assertRaisesRegex(RuntimeError, 'release fuses rejected'):
+                release.verify_mac_dmg(self.root / 'final.dmg', work, {'certificateSha1': 'a' * 40})
+            extract.assert_not_called()
+            scan.assert_not_called()
+            self.assertEqual(command.call_args_list[-1].args, ('hdiutil', 'detach', work / 'dmg-mount'))
 
     def test_final_dmg_invalid_pinned_signature_stops_scan_and_still_detaches(self):
         work = self.root / 'dmg-invalid'
@@ -191,7 +214,8 @@ class CommandTests(unittest.TestCase):
             notes.write_text('Reviewed notes\n\n<!-- pockymoe-updates-v1\nold\n-->\n')
             calls = []
 
-            def build(version, _code, folder, _work):
+            def build(version, _code, folder, _work, validation=False):
+                self.assertEqual(validation, '--validate' in arguments)
                 for name in release.asset_names(version):
                     (folder / name).write_bytes(b'fixture')
 

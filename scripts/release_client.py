@@ -103,7 +103,7 @@ def apk_certificate(apk):
     return sorted(set(digest.lower() for digest in digests))
 
 
-def previous_apk(work, code):
+def previous_apk(work, code, validation=False):
     # Failure to query GitHub is not evidence that there is no previous release.
     release = json.loads(run('gh', 'release', 'view', '--repo', REPO, '--json', 'tagName,assets', capture=True))
     assets = [asset['name'] for asset in release['assets'] if asset['name'].endswith('.apk')]
@@ -118,9 +118,10 @@ def previous_apk(work, code):
     previous = folder / assets[0]
     badging = run(sdk_tool('aapt'), 'dump', 'badging', previous, capture=True).decode()
     previous_code = int(re.search(r"versionCode='(\d+)'", badging).group(1))
-    if code <= previous_code:
+    if code < previous_code or (code == previous_code and not validation):
         raise RuntimeError('Android versionCode must rise above latest release')
-    print(f'Android versionCode: {code} > previous {previous_code}')
+    relation = '== (unpublished validation only)' if code == previous_code else '>'
+    print(f'Android versionCode: {code} {relation} previous {previous_code}')
     return previous
 
 
@@ -157,6 +158,8 @@ def verify_mac_dmg(dmg, work, signing):
     try:
         mounted_app = mount / 'Pockymoe.app'
         run('codesign', '--verify', '--deep', '--strict', '-R', '=certificate leaf = H"' + signing['certificateSha1'] + '"', mounted_app, capture=True)
+        print('Final DMG Mac signature: pinned certificate, deep/strict verification passed')
+        run('node', DESKTOP / 'scripts/release-fuses.cjs', mounted_app, cwd=DESKTOP)
         resources = mounted_app / 'Contents/Resources'
         extract_asar(resources, work / 'scan-mac-asar')
         # Include volume-root files such as .DS_Store and background artwork.
@@ -165,8 +168,8 @@ def verify_mac_dmg(dmg, work, signing):
         run('hdiutil', 'detach', mount, capture=True)
 
 
-def build(version, code, output, work):
-    previous = previous_apk(work, code)
+def build(version, code, output, work, validation=False):
+    previous = previous_apk(work, code, validation)
     run('python3', ROOT / 'scripts/check-production-address.py')
     run('pnpm', 'install', '--frozen-lockfile', cwd=DESKTOP)
     artifacts = work / 'builder'
@@ -176,6 +179,8 @@ def build(version, code, output, work):
         if key.startswith(('CSC_', 'WIN_CSC_', 'APPLE_', 'POCKYMOE_UPDATER_TEST_')):
             env.pop(key)
     env['CSC_IDENTITY_AUTO_DISCOVERY'] = 'false'
+    # Both --validate and publication must exercise exactly the release fuse policy.
+    env['POCKYMOE_RELEASE_FUSES'] = '1'
     run('pnpm', 'build', cwd=DESKTOP, env=env)
     # Self-signed identities are omitted by builder's trusted-identity discovery.
     # Sign explicitly in a dedicated keychain without changing system trust.
@@ -222,6 +227,8 @@ def build(version, code, output, work):
     installed = work / 'scan-installed'
     run(seven, 'x', payloads[0], f'-o{installed}', '-y', capture=True)
     run('node', DESKTOP / 'scripts/verify-windows-package.cjs', installed, 'x64', cwd=DESKTOP)
+    print('Final NSIS extracted Windows executable:')
+    run('node', DESKTOP / 'scripts/release-fuses.cjs', installed / 'Pockymoe.exe', cwd=DESKTOP)
     extract_asar(installed / 'resources', work / 'scan-win-asar')
     scan(apk, scan_apk, artifacts / asset_names(version)[1], artifacts / asset_names(version)[2], installer, installed, work / 'scan-win-asar')
     if list(output.iterdir()):
@@ -258,7 +265,7 @@ def main():
     if list(output.iterdir()):
         raise RuntimeError('Output folder must be empty; nothing will be deleted or overwritten')
     with tempfile.TemporaryDirectory(prefix='pockymoe-client-') as temporary:
-        build(args.version, code, output, Path(temporary))
+        build(args.version, code, output, Path(temporary), validation=args.validate)
     if source_gate(args.validate) != sha:
         raise RuntimeError('Source changed during build')
     exact_output(output, args.version)
