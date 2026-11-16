@@ -755,3 +755,7 @@ callback before disposal; the app must still exit cleanly.
 Activity status marks in the quick window and pet panels are static: running is
 a fixed three-quarter open arc and agents-running is a purple ring with a centre
 dot. They schedule no animation and use the same shapes with reduced motion.
+
+When WebM pet speech ends, the renderer clears the speech face on the audio-end
+event without waiting for another mouth tick, revealing the playing decoder. Synthetic
+media acceptance covers this handoff as well as clip-to-reaction transitions.
