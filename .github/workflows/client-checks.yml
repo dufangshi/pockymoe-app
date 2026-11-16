@@ -400,7 +400,7 @@ jobs:
         run: |
           $PSNativeCommandUseErrorActionPreference = $true
           pnpm build
-          pnpm exec electron-builder --win nsis --x64 --publish never -c.directories.output=release/fuse-smoke
+          pnpm exec electron-builder --win nsis --x64 --publish never '-c.directories.output=release/fuse-smoke'
       - name: Verify and launch the NSIS payload without Playwright
         timeout-minutes: 2
         run: |
