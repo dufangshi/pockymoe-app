@@ -1,4 +1,5 @@
 import { PackImages, PetStateDelivery } from './stateDelivery';
+import { PetPointerPoll, type PointerSample } from './pointerPoll';
 import { verifyRivePack } from './riveValidation';
 import { RiveHitMask } from './riveHitMask';
 import { petMedia } from './media';
@@ -717,6 +718,9 @@ export function createPetController(deps: PetControllerDeps, benchmark?: { quad:
       case 'dismiss':
         for (const event of [...(bubbles.current?.events ?? [])]) deps.hub.acknowledge(event.alertId, 'pet');
         break;
+      case 'pointerActivity':
+        pointerPoll.wake();
+        return { ok: true };
       case 'toggleTray':
       case 'toggleChat':
         if (panel) dismissSurface();
@@ -1121,12 +1125,12 @@ export function createPetController(deps: PetControllerDeps, benchmark?: { quad:
       bounds = window.getBounds();
     return { ...visible, x: bounds.x + visible.x, y: bounds.y + visible.y };
   }
-  const pollPointer = (): void => {
+  const pollPointer = (): PointerSample => {
     const wasNear = near, wasPeek = peek, wasDock = dockAmount, wasPinned = controlsPinned;
     const now = Date.now(),
       cursor = screen.getCursorScreenPoint(),
       bounds = window.getBounds(),
-      child = glass.getBounds();
+      child = glass.isVisible() ? glass.getBounds() : null;
     const within = (r: Electron.Rectangle, margin = 0) =>
       cursor.x >= r.x - margin &&
       cursor.x <= r.x + r.width + margin &&
@@ -1134,7 +1138,7 @@ export function createPetController(deps: PetControllerDeps, benchmark?: { quad:
       cursor.y <= r.y + r.height + margin;
     const tucked = position.edge && settings.petEdgeHide !== false && dockAmount > 0;
     const close =
-      (tucked ? within(visiblePetRect(), 0) : within(bounds, 60)) || (glass.isVisible() && within(child, 8));
+      (tucked ? within(visiblePetRect(), 0) : within(bounds, 60)) || (!!child && within(child, 8));
     if (controlsPinned && !close && now - awaySince >= 4000) controlsPinned = false;
     if (close) bubbles.hold(now); // Reading it keeps it there.
     if (close || near) speech.hold(now);
@@ -1162,11 +1166,13 @@ export function createPetController(deps: PetControllerDeps, benchmark?: { quad:
     const alerting = !!bubbles.current && !(settings.snoozeUntil && Date.parse(settings.snoozeUntil) > now);
     dockAmount = position.edge && settings.petEdgeHide !== false && !peek ? (alerting ? HEAD_PEEK : 1) : 0;
     sendCursor(cursor, bounds);
-    const fading = awaySince > 0 && now - awaySince < 400 && glass.isVisible();
+    const fading = awaySince > 0 && now - awaySince < 400 && !!child;
     if (near !== wasNear || peek !== wasPeek || dockAmount !== wasDock || controlsPinned !== wasPinned || fading) {
       if (glass.isVisible()) placeGlass();
       emit();
     }
+    return { ...cursor, far: !within(bounds, 300) && (!child || !within(child, 100)),
+      settling: near || controlsPinned || fading || !!hoverSince && now - hoverSince < 150 || !!awaySince && now - awaySince < 800 };
   };
   let lastCursor: { x: number; y: number } | null = null;
   function sendCursor(cursor: Electron.Point, bounds: Electron.Rectangle): void {
@@ -1182,14 +1188,13 @@ export function createPetController(deps: PetControllerDeps, benchmark?: { quad:
       window.webContents.send('rcDesktop:pet:cursor', lastCursor);
     }
   }
-  let pointerTimer: ReturnType<typeof setInterval> | undefined;
+  const pointerPoll = new PetPointerPoll(() => {
+    if (!live()) return null;
+    try { return pollPointer(); } catch (error) { retireDestroyed(error); return null; }
+  });
   function syncPointerPoll(): void {
-    if (!visible || !rendering) { clearInterval(pointerTimer); pointerTimer = undefined; lastCursor = null; return; }
-    if (pointerTimer !== undefined) return;
-    pointerTimer = setInterval(() => {
-      if (!live()) return;
-      try { pollPointer(); } catch (error) { retireDestroyed(error); }
-    }, 100);
+    pointerPoll.setRunning(visible && rendering);
+    if (!visible || !rendering) lastCursor = null;
   }
   let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
   function scheduleDeadline(now: number, snoozed: boolean): void {
@@ -1242,7 +1247,7 @@ export function createPetController(deps: PetControllerDeps, benchmark?: { quad:
   function dispose(destroyWindows = true): void {
     if (disposed) return;
     disposed = true;
-    clearInterval(pointerTimer);
+    pointerPoll.setRunning(false);
     clearTimeout(deadlineTimer);
     clearTimeout(blurTimer);
     savePosition();

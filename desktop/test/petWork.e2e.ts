@@ -151,6 +151,37 @@ test('with nothing running, the click says so', async () => {
   await sprite.evaluate(() => (window as unknown as { rcDesktop: { pet: { action(value: unknown): Promise<unknown> } } }).rcDesktop.pet.action({ type: 'click' }));
   await expect(glass.locator('.running-list .empty')).toContainText('No threads are running');
 });
+
+test('distant still pointers reduce native probes and pointer entry wakes hover immediately', async () => {
+  await baseline(); await settings({ petEdgeHide: false });
+  const sprite = await pet('sprite'), glass = await pet('glass');
+  await app.evaluate(({ screen, BrowserWindow }) => {
+    const window = BrowserWindow.getAllWindows().find(w => w.webContents.getURL().includes('pet/index.html') && !w.getParentWindow())!;
+    const bounds = window.getBounds();
+    const probe = { point: { x: -5000, y: -5000 }, times: [] as number[], nearAt: null as number | null, near: { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 } };
+    Object.assign(globalThis, { pointerProbe: probe });
+    screen.getCursorScreenPoint = () => { const at = Date.now(); probe.times.push(at); if (probe.point === probe.near) probe.nearAt ??= at; return probe.point; };
+  });
+  const times = () => app.evaluate(() => (globalThis as unknown as { pointerProbe: { times: number[] } }).pointerProbe.times);
+  await expect.poll(async () => (await times()).some((at, i, all) => i > 0 && at - all[i - 1]! >= 400)).toBe(true);
+  const quietReads = await app.evaluate(async () => {
+    const probe = (globalThis as unknown as { pointerProbe: { times: number[] } }).pointerProbe;
+    const before = probe.times.length;
+    await new Promise(resolve => setTimeout(resolve, 1100));
+    return probe.times.length - before;
+  });
+  expect(quietReads).toBeLessThanOrEqual(3);
+  const last = (await times()).at(-1);
+  await expect.poll(async () => (await times()).at(-1)).not.toBe(last);
+  const enteredAt = await app.evaluate(() => {
+    const probe = (globalThis as unknown as { pointerProbe: { point: { x: number; y: number }; near: { x: number; y: number } } }).pointerProbe;
+    probe.point = probe.near; return Date.now();
+  });
+  await sprite.locator('#app').dispatchEvent('pointerenter');
+  await expect(glass.locator('.controls')).toBeVisible({ timeout: 1000 });
+  const observedAt = await app.evaluate(() => (globalThis as unknown as { pointerProbe: { nearAt: number | null } }).pointerProbe.nearAt);
+  expect(observedAt).not.toBeNull(); expect(observedAt! - enteredAt).toBeLessThan(300);
+});
 test('working: the pet shows work while a thread runs', async () => {
   await baseline();
   await sync([item()]);
