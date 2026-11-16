@@ -134,7 +134,7 @@ jobs:
         run: |
           $PSNativeCommandUseErrorActionPreference = $true
           pnpm typecheck
-          node --test scripts/release-fuses.test.cjs
+          node --test scripts/test-release-fuses.cjs
           pnpm vitest run
 
   windows:

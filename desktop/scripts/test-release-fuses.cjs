@@ -6,6 +6,7 @@ const { join } = require('node:path');
 const { test } = require('node:test');
 const { flipReleaseInspectorFuse, verifyReleaseFuses } = require('./release-fuses.cjs');
 
+// Run with node --test (separate from the application's Vitest suite).
 // Electron's documented V1 wire: sentinel, version byte, length, ASCII states.
 // Include an unknown future fuse so the test also guards preservation on upgrades.
 const fixture = states => Buffer.concat([Buffer.from('prefix:dL7pKGdnNz796PbbjQWNKmHXBZaB9tsX'), Buffer.from([1, states.length]), Buffer.from(states), Buffer.from(':suffix')]);
