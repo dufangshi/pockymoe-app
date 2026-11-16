@@ -20,7 +20,7 @@ export function activityStatus(item: Pick<ActivityItem, 'state' | 'unread'>): St
 }
 export function statusMarkSvg(status: StatusMark, label?: string): string {
   const kind = Object.hasOwn(labels, status) ? status : 'unknown';
-  const ring = '<circle cx="8" cy="8" r="5.25" fill="none" stroke="currentColor" stroke-width="1.8" opacity=".22"/><circle class="status-mark-orbit" cx="8" cy="8" r="5.25" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-dasharray="12 21"/>';
+  const ring = '<circle class="status-mark-arc" cx="8" cy="8" r="5.25" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-dasharray="23 10" transform="rotate(-45 8 8)"/>';
   const shapes: Record<StatusMark, string> = {
     running: ring,
     unread: '<circle cx="8" cy="8" r="3.5" fill="currentColor"/>',
@@ -39,9 +39,5 @@ export const statusMarkStyles = `
 .pockymoe-status-mark[data-status=failed]{color:var(--theme-danger,#d8524f)}
 .pockymoe-status-mark[data-status=interrupted],.pockymoe-status-mark[data-status=waiting]{color:var(--theme-warning,#c58b24)}
 .pockymoe-status-mark[data-status=unknown]{opacity:.55}
-.pockymoe-status-mark[data-status=agents-running]{color:var(--theme-agent-running,#9870cb);animation:pockymoe-status-breathe 2.4s ease-in-out infinite}
-.status-mark-orbit{transform-origin:8px 8px;animation:pockymoe-status-spin 1.1s linear infinite}
-@keyframes pockymoe-status-spin{to{transform:rotate(360deg)}}
-@keyframes pockymoe-status-breathe{50%{opacity:.5}}
-@media(prefers-reduced-motion:reduce){.status-mark-orbit,.pockymoe-status-mark{animation:none!important}}
+.pockymoe-status-mark[data-status=agents-running]{color:var(--theme-agent-running,#9870cb)}
 `;

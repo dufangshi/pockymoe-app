@@ -76,7 +76,7 @@ try {
     await expect(page.locator('.scroll-frame')).toHaveAttribute('data-overflow-bottom', 'true');
     await expect(page.locator('.tray [data-status="waiting"]')).toHaveCount(2);
     await expect(page.locator('.tray [data-status="interrupted"]')).toHaveCount(1);
-    await expect(page.locator('.tray [data-status="running"] .status-mark-orbit')).toHaveCount(2);
+    await expect(page.locator('.tray [data-status="running"] .status-mark-arc')).toHaveCount(2);
     await shot(`${id}-tray-top`, context);
     if (polish) {
       await capturePolish(id, items, context); continue;
