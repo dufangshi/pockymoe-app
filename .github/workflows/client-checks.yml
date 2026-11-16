@@ -411,11 +411,20 @@ jobs:
           & $seven x $installer.FullName '-orelease/fuse-smoke/installer' -y
           if ($LASTEXITCODE -ne 0) { throw 'Cannot extract NSIS installer' }
           $payload = Get-ChildItem release/fuse-smoke/installer -Filter app-64.7z -Recurse
-          if (@($payload).Count -ne 1) { throw 'Expected one x64 NSIS payload' }
-          & $seven x $payload.FullName '-orelease/fuse-smoke/installed' -y
-          if ($LASTEXITCODE -ne 0) { throw 'Cannot extract NSIS payload' }
-          node scripts/release-fuses.cjs release/fuse-smoke/installed/Pockymoe.exe
-          node test/inspector-fuse-smoke.mjs (Resolve-Path release/fuse-smoke/installed/Pockymoe.exe).Path off
+          # Windows 7za can extract the embedded 7z app directly; the Mac tool
+          # understands the NSIS container and returns an app-64.7z wrapper.
+          if (Test-Path release/fuse-smoke/installer/Pockymoe.exe) {
+            if (@($payload).Count -ne 0) { throw 'Ambiguous NSIS extraction layout' }
+            $installed = 'release/fuse-smoke/installer/Pockymoe.exe'
+          } else {
+            if (@($payload).Count -ne 1) { throw 'Expected one x64 NSIS payload' }
+            & $seven x $payload.FullName '-orelease/fuse-smoke/installed' -y
+            if ($LASTEXITCODE -ne 0) { throw 'Cannot extract NSIS payload' }
+            $installed = 'release/fuse-smoke/installed/Pockymoe.exe'
+          }
+          $executable = (Resolve-Path $installed).Path
+          node scripts/release-fuses.cjs $executable
+          node test/inspector-fuse-smoke.mjs $executable off
       - uses: actions/upload-artifact@v4
         if: always()
         with:
