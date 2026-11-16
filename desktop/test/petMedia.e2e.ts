@@ -41,6 +41,19 @@ test('synthetic VP9 alpha streams through the pet protocol and switches without 
     });
     expect(sample.records.every(r=>r.opaque>200&&r.corner===0&&r.decoders<=2)).toBe(true);
     expect(new Set(sample.records.map(r=>r.path)).size).toBeGreaterThan(1);
+    // Speech ends while the decoder keeps playing. Its final presentation must
+    // remove the talk layer even when no mouth timer will run another frame.
+    const audio = Buffer.alloc(44 + 24_000 * 2);
+    audio.write('RIFF'); audio.writeUInt32LE(audio.length - 8, 4); audio.write('WAVEfmt ', 8); audio.writeUInt32LE(16, 16); audio.writeUInt16LE(1, 20); audio.writeUInt16LE(1, 22); audio.writeUInt32LE(24_000, 24); audio.writeUInt32LE(48_000, 28); audio.writeUInt16LE(2, 32); audio.writeUInt16LE(16, 34); audio.write('data', 36); audio.writeUInt32LE(48_000, 40);
+    for (let frame = 0; frame < 24_000; frame++) audio.writeInt16LE(Math.round(Math.sin(frame / 24_000 * Math.PI * 440) * 6000), 44 + frame * 2);
+    await app.evaluate(({ BrowserWindow }, bytes) => {
+      BrowserWindow.getAllWindows().find(w => w.webContents.getURL().includes('pet/index.html') && !w.getParentWindow())!.webContents.send('rcDesktop:pet:speech', Uint8Array.from(bytes));
+    }, [...audio]);
+    await expect(sprite.locator('#character')).toHaveClass(/talking/);
+    await expect(sprite.locator('#character')).not.toHaveClass(/talking/, { timeout: 2500 });
+    await expect(sprite.locator('#talk')).toHaveCSS('display', 'none');
+    const resumed = await sprite.locator('#clip').getAttribute('data-media-frame');
+    await expect.poll(() => sprite.locator('#clip').getAttribute('data-media-frame')).not.toBe(resumed);
     const range=await app.evaluate(async({net},url)=>{const r=await net.fetch(url,{headers:{Range:'bytes=0-3'}});return {status:r.status,type:r.headers.get('content-type'),range:r.headers.get('content-range'),bytes:[...new Uint8Array(await r.arrayBuffer())]};},sample.source);
     expect(range).toMatchObject({status:206,type:'video/webm',bytes:[26,69,223,163]});expect(range.range).toMatch(/^bytes 0-3\//);
     await app.evaluate(()=> (globalThis as unknown as {petHarness:{settings(p:unknown):void}}).petHarness.settings({petEdgeHide:true}));
