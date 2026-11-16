@@ -43,6 +43,7 @@ interface Run {
   nativeReadsPerSecond: number;
   appReadsPerSecond: number;
   drawFrames: number;
+  drawElapsed: number;
   animationSecondsPerSecond: number | null;
   samples: Sample[];
   display: unknown;
@@ -190,11 +191,11 @@ async function measure(config: Options): Promise<Run> {
     if (name === 'Tracing.dataCollected') trace.push(...parameters.value);
     if (name === 'Tracing.tracingComplete') finishTrace();
   });
-  await contents.executeJavaScript('Object.assign(window.petBenchmarkStats, {calls:0,frames:0,reads:0,advancedSeconds:0})');
   await debuggerAPI.sendCommand('Tracing.start', {
     categories: 'gpu,disabled-by-default-gpu.service',
     transferMode: 'ReportEvents',
   });
+  await contents.executeJavaScript('Object.assign(window.petBenchmarkStats, {calls:0,frames:0,reads:0,advancedSeconds:0,startedAt:performance.now()})');
   const sample = (): Sample => {
     const metrics = app.getAppMetrics();
     const rendererPid = contents.getOSProcessId();
@@ -219,6 +220,12 @@ async function measure(config: Options): Promise<Run> {
     await delay(1000);
     samples.push(sample());
   }
+  const stats = (await contents.executeJavaScript('({...window.petBenchmarkStats, elapsed:(performance.now()-window.petBenchmarkStats.startedAt)/1000})')) as {
+    frames: number;
+    elapsed: number;
+    reads: number;
+    advancedSeconds: number;
+  };
   await debuggerAPI.sendCommand('Tracing.end');
   await Promise.race([
     traceComplete,
@@ -239,14 +246,9 @@ async function measure(config: Options): Promise<Run> {
     throw new Error('Renderer or GPU process restarted during benchmark');
   }
   const elapsed = (last.time - first.time) / 1000;
-  const stats = (await contents.executeJavaScript('window.petBenchmarkStats')) as {
-    frames: number;
-    reads: number;
-    advancedSeconds: number;
-  };
   if (mode !== 'webm' && !stats.frames) throw new Error('WebGL control did not draw');
-  assertPresentationRate(stats.frames, elapsed);
-  const animationSecondsPerSecond = mode === 'webm' ? null : stats.advancedSeconds / elapsed;
+  assertPresentationRate(stats.frames, stats.elapsed);
+  const animationSecondsPerSecond = mode === 'webm' ? null : stats.advancedSeconds / stats.elapsed;
   if (animationSecondsPerSecond !== null && (animationSecondsPerSecond < 0.85 || animationSecondsPerSecond > 1.15))
     throw new Error(`Pet animation clock changed speed: ${animationSecondsPerSecond.toFixed(3)} seconds per second`);
   const mediaEnd = await media();
@@ -266,6 +268,7 @@ async function measure(config: Options): Promise<Run> {
     nativeReadsPerSecond: nativeTrace.readPixels / elapsed,
     appReadsPerSecond: stats.reads / elapsed,
     drawFrames: stats.frames,
+    drawElapsed: stats.elapsed,
     animationSecondsPerSecond,
     samples,
     display,
@@ -362,7 +365,7 @@ export async function runPetBenchmark(argv: string[]): Promise<void> {
           ? 'GLES2 draw events observed'
           : 'unverified: no GLES2 draw positive control in every run',
         appReadsPerSecond: median(rows.map((row) => row.appReadsPerSecond)),
-        drawFramesPerSecond: median(rows.map((row) => row.drawFrames / row.elapsed)),
+        drawFramesPerSecond: median(rows.map((row) => row.drawFrames / row.drawElapsed)),
         rendererPeakMiB: median(rows.map((row) => row.memory.renderer.peakMiB)),
         rendererSettledMiB: median(rows.map((row) => row.memory.renderer.settledMiB)),
         gpuPeakMiB: median(rows.map((row) => row.memory.gpu.peakMiB)),

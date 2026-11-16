@@ -571,7 +571,8 @@ nor speeds up the source animation. `idleFps`, `activeFps`, `sourceFps` and
 
 The built-app benchmark accepts `--size M` (default) or `--size L`. It counts
 actual Rive/quad and WebM canvas draws independently of RAF, and fails above
-`floor(elapsedSeconds * 30) + 1` frames, so reverting to display-rate presentation
+`floor(drawElapsedSeconds * 30) + 1` frames (the renderer snapshots its counter
+and elapsed clock together before trace shutdown), so reverting to display-rate presentation
 fails even on a 60/120 Hz host. It also checks that Rive advances 0.85–1.15
 animation seconds per wall second, catching accidental playback slowdowns. CI uses the committed sample sources/generated
 geometric media only (`test/petCadence.e2e.ts` runs the actual Rive benchmark). Personal installed packs must remain local and untracked.

@@ -37,6 +37,6 @@ test('the actual Rive benchmark presents at most 30fps independently of display 
     expect(metrics.animationSecondsPerSecond).toBeGreaterThan(0.85);
     expect(metrics.animationSecondsPerSecond).toBeLessThan(1.15);
     expect(metrics.drawFrames).toBeGreaterThan(10);
-    expect(metrics.drawFrames).toBeLessThanOrEqual(Math.floor(metrics.elapsed * 30) + 1);
+    expect(metrics.drawFrames).toBeLessThanOrEqual(Math.floor(metrics.drawElapsed * 30) + 1);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
