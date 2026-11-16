@@ -49,17 +49,19 @@ the pet continue receiving changes. Hidden/minimized Web windows suspend renderi
 (RAF, CSS and Web Animations), while connection timers and activity IPC remain
 unthrottled; showing/restoring resumes rendering. Cmd/Ctrl+Q or Quit Pockymoe exits.
 
-Rendering also pauses on screen lock, system suspend, inactive login sessions,
-macOS display sleep, and two minutes of system idle. The pet holds its current
-frame; returning shows the current activity pose without replaying missed
-reactions. Network sync, native notifications and speech continue. Utility
-windows defer background snapshots and the quick window stops its elapsed clock.
-Display sleep/wake on macOS comes from a permission-free NSWorkspace listener
-running under the system JXA interpreter. Lock/suspend/display events require no
-polling; the idle threshold uses an adaptive deadline. Local input resumes
-immediately; input in another app is detected within one second while idle.
-Windows display-only sleep notifications are not yet available; lock, suspend
-and idle use Electron powerMonitor on both platforms.
+Rendering also pauses on screen lock, system suspend and inactive login sessions.
+The pet holds its current frame; returning shows the current activity pose
+without replaying missed reactions. Network sync, native notifications and speech
+continue. Utility windows defer background snapshots and the quick window stops
+its elapsed clock. These hard power states use Electron powerMonitor wake events.
+
+Two minutes without input pauses only the pet's ambient motion: the main and
+local windows keep rendering, including streaming follow-scroll, clocks and
+status indicators. Completion, failure, needs-input reactions and speech with lip
+movement still play, then return to a held resting frame. Ambient motion resumes
+within one second of input. The idle threshold uses an adaptive deadline and no
+per-second active poll. Display sleep relies on the compositor's normal behavior;
+the app runs no display watcher or helper process.
 
 ## Connection discovery
 

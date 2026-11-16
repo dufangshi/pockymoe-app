@@ -18,6 +18,9 @@ export interface PetViewState {
   visible: boolean;
   /** False freezes the current frame without hiding it or pausing audio. */
   rendering?: boolean;
+  /** System idle holds ambience, with bounded reactions and speech still live. */
+  ambientPaused?: boolean;
+  reacting?: boolean;
   rive?: import('./rive').RivePack & { epoch: number };
   cursor?: { x: number; y: number };
   dragging?: boolean;

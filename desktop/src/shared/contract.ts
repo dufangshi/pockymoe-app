@@ -283,6 +283,8 @@ export interface PetControllerDeps {
   /** Rendering presence is independent of notifications, voice and sync. */
   rendering?(): boolean;
   onRendering?(listener: (rendering: boolean) => void): () => void;
+  idle?(): boolean;
+  onIdle?(listener: (idle: boolean) => void): () => void;
 }
 
 export interface PetController {

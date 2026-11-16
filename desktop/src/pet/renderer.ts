@@ -288,6 +288,7 @@ function renderSprite(): void {
   const hold = !!state.clips && !!state.edge && state.dockAmount > 0;
   if (hold !== dockClipHeld) { dockClipHeld = hold; if (!moodChanged) playClips(); }
   paintSprite();
+  if (!speechPlaying()) paintTalk(performance.now());
   if (clipPlayer && (dockClipHeld || motion.matches)) { clipPlayer.drawn = 0; drawClip(0); }
   const videoSurface = root.querySelector<HTMLCanvasElement>('#clip');
   if (videoPlayer?.playing && videoSurface && (videoSurface.width !== Math.round(state.pet.width * devicePixelRatio) || videoSurface.height !== Math.round(state.pet.height * devicePixelRatio))) videoPlayer.invalidate(true);
@@ -816,7 +817,11 @@ bridge.onCue(cue => {
 });
 bridge.onSpeech((audio, id) => {
   if (state?.surface !== 'sprite') return;
-  const report = (playing: boolean): void => { syncAnimation(); if (id) void bridge.action({ type: 'speechState', id, playing }); };
+  const report = (playing: boolean): void => {
+    syncAnimation();
+    if (!playing && state?.rendering !== false) { paintTalk(performance.now()); if (riveDrawer) animation.invalidate(); }
+    if (id) void bridge.action({ type: 'speechState', id, playing });
+  };
   void playSpeech(audio, () => report(false)).then(started => { root.dataset.lastSpeech = String(audio.byteLength); report(started); syncAnimation(); }, () => { root.dataset.lastSpeech = 'undecodable'; report(false); });
 });
 bridge.onState(next => {
@@ -876,12 +881,15 @@ function syncAnimation(): void {
   if (!state || state.surface === 'glass') { animation.setRunning(false); return; }
   if (state.rendering === false) { riveAt = 0; animation.setRunning(false); videoPlayer?.setSuspended(true); return; }
   const tucked = !!state.edge && state.dockAmount > 0;
-  const running = petAnimationRuns(state.visible, state.surface, tucked, motion.matches, !!state.clips?.format.mediaType && !!videoPlayer?.playing && !speechPlaying());
+  const reacting = !!state.reacting || ONE_SHOT.includes(state.mood) || speechPlaying();
+  const held = !!state.ambientPaused && !reacting;
+  const running = petAnimationRuns(state.visible, state.surface, tucked, motion.matches, !!state.clips?.format.mediaType && !!videoPlayer?.playing && !speechPlaying(), !!state.ambientPaused, reacting);
   // Reset the elapsed-time origin across a deliberate pause, never across frames.
   if (!running) riveAt = 0;
   videoPlayer?.setSuspended(!state.visible);
+  videoPlayer?.setHeld(held);
   animation.setRunning(running);
-  root.classList.toggle('animation-still', !state.visible || tucked || motion.matches);
+  root.classList.toggle('animation-still', !state.visible || tucked || motion.matches || held);
   if (state.visible && !state.clips?.format.mediaType) animation.invalidate();
 }
 bridge.onCursor(cursor => {

@@ -218,7 +218,7 @@ test('hidden and minimized Web pauses rendering while heartbeat and activity con
   }
 });
 
-test('lock, display sleep and suspend freeze rendering while activity stays live', async () => {
+test('lock, suspend and inactive sessions freeze rendering while activity stays live', async () => {
   const web = await pageAt(origin);
   await app.evaluate(() => globalThis.__pockymoeDesktopTest.settings.set({ petVisible: true, petEdgeHide: false }));
   let pet: Page | undefined;
@@ -244,10 +244,9 @@ test('lock, display sleep and suspend freeze rendering while activity stays live
   });
   const probe = () => web.evaluate(() => (window as unknown as { presenceProbe: { frames: number; beats: number } }).presenceProbe);
   await expect.poll(async () => (await probe()).frames).toBeGreaterThan(2);
-  for (const reason of ['lock', 'display', 'suspend'] as const) {
+  for (const reason of ['lock', 'suspend', 'session'] as const) {
     await app.evaluate(({ powerMonitor }, reason) => {
-      if (reason === 'display') globalThis.__pockymoeDesktopTest.presence.displayAwake(false);
-      else powerMonitor.emit(reason === 'lock' ? 'lock-screen' : 'suspend');
+      powerMonitor.emit(reason === 'lock' ? 'lock-screen' : reason === 'session' ? 'user-did-resign-active' : 'suspend');
     }, reason);
     await expect(web.locator('html')).toHaveAttribute('data-pockymoe-rendering', 'paused');
     await expect(pet!.locator('html')).toHaveAttribute('data-pockymoe-rendering', 'paused');
@@ -259,11 +258,83 @@ test('lock, display sleep and suspend freeze rendering while activity stays live
     expect(await web.evaluate(() => document.visibilityState)).toBe('visible');
     expect(await app.evaluate(() => globalThis.__pockymoeDesktopTest.hub.snapshot()?.accountId)).toBe('presence-probe');
     await app.evaluate(({ powerMonitor }, reason) => {
-      if (reason === 'display') globalThis.__pockymoeDesktopTest.presence.displayAwake(true);
-      else powerMonitor.emit(reason === 'lock' ? 'unlock-screen' : 'resume');
+      powerMonitor.emit(reason === 'lock' ? 'unlock-screen' : reason === 'session' ? 'user-did-become-active' : 'resume');
     }, reason);
     await expect(web.locator('html')).not.toHaveAttribute('data-pockymoe-rendering', 'paused');
     await expect.poll(async () => (await probe()).frames).toBeGreaterThan(before.frames + 2);
     await expect.poll(petTimers).toBeGreaterThan(beforePet + 2);
   }
+});
+
+test('system idle keeps streaming follow-scroll live, holds pet ambience and still plays completion reactions', async () => {
+  const web = await pageAt(origin);
+  await app.evaluate(({ screen }) => {
+    screen.getCursorScreenPoint = () => ({ x: -5000, y: -5000 });
+    globalThis.__pockymoeDesktopTest.settings.set({ petVisible: true, petEdgeHide: false, petSound: false, petVoice: false });
+    const at = new Date().toISOString();
+    globalThis.__pockymoeDesktopTest.hub.sync({ version: 1, accountId: 'idle-probe', generatedAt: at, focusedThreadKey: null, syncedDeviceIds: ['mac'], items: [] });
+    globalThis.__pockymoeDesktopTest.hub.sync({ version: 1, accountId: 'idle-probe', generatedAt: at, focusedThreadKey: null, syncedDeviceIds: ['mac'], items: [{ key: 'mac:idle', threadId: 'idle', deviceId: 'mac', deviceName: 'Fixture', workspaceId: 'fixture', workspaceLabel: 'Fixture', title: 'Idle reaction fixture', state: 'running', since: at, turnId: 'idle-turn', unread: false }] });
+  });
+  let pet: Page | undefined;
+  await expect.poll(async () => {
+    for (const page of app.windows()) if (page.url().includes('pet/index.html') && await page.locator('body').getAttribute('data-surface') === 'sprite') pet = page;
+    return !!pet;
+  }).toBe(true);
+  await pet!.emulateMedia({ reducedMotion: 'no-preference' });
+  await expect(pet!.locator('#app')).toHaveAttribute('data-mood', 'running');
+  await pet!.evaluate(() => {
+    const probe = { frameTimers: 0 }; Object.assign(window, { idlePetProbe: probe });
+    const start = window.setTimeout.bind(window);
+    window.setTimeout = ((callback: TimerHandler, ms?: number, ...args: unknown[]) => {
+      if (ms != null && ms <= 35) probe.frameTimers++;
+      return start(callback, ms, ...args);
+    }) as typeof window.setTimeout;
+  });
+  const petTimers = () => pet!.evaluate(() => (window as unknown as { idlePetProbe: { frameTimers: number } }).idlePetProbe.frameTimers);
+  await expect.poll(petTimers).toBeGreaterThan(2);
+  await web.evaluate(() => {
+    const transcript = document.createElement('div'); transcript.id = 'idle-transcript';
+    transcript.style.cssText = 'height:100px;overflow:auto'; document.body.append(transcript);
+    const probe = { frames: 0, beats: 0 }; Object.assign(window, { idleMainProbe: probe });
+    const frame = (): void => { probe.frames++; requestAnimationFrame(frame); }; requestAnimationFrame(frame);
+    // This boundary fixture follows the tail through RAF, as the real timeline
+    // does. The old idle gate would keep appending but freeze this follow step.
+    setInterval(() => {
+      probe.beats++;
+      const line = document.createElement('div'); line.style.height = '30px'; line.textContent = `Streaming line ${probe.beats}`; transcript.append(line);
+      requestAnimationFrame(() => { transcript.scrollTop = transcript.scrollHeight; });
+    }, 100);
+  });
+  const mainProbe = () => web.evaluate(() => ({ ...(window as unknown as { idleMainProbe: { frames: number; beats: number } }).idleMainProbe,
+    gap: (() => { const pane = document.getElementById('idle-transcript')!; return pane.scrollHeight - pane.clientHeight - pane.scrollTop; })() }));
+  await app.evaluate(({ powerMonitor }) => {
+    powerMonitor.getSystemIdleTime = () => 121;
+    const runtime = globalThis.__pockymoeDesktopTest;
+    const send = runtime.windows.main().webContents.send.bind(runtime.windows.main().webContents);
+    const gates: boolean[] = []; Object.assign(globalThis, { idleGateMessages: gates });
+    runtime.windows.main().webContents.send = (channel, ...args) => { if (channel === 'rcDesktop:rendering') gates.push(args[0] as boolean); send(channel, ...args); };
+    runtime.presence.refresh();
+  });
+  await expect(pet!.locator('#app')).toHaveClass(/animation-still/);
+  expect(await app.evaluate(() => ({ rendering: globalThis.__pockymoeDesktopTest.presence.get(), idle: globalThis.__pockymoeDesktopTest.presence.isIdle(), gates: (globalThis as unknown as { idleGateMessages: boolean[] }).idleGateMessages }))).toEqual({ rendering: true, idle: true, gates: [] });
+  await expect(web.locator('html')).not.toHaveAttribute('data-pockymoe-rendering', 'paused');
+  const held = await petTimers(), watching = await mainProbe();
+  await expect.poll(async () => (await mainProbe()).beats).toBeGreaterThan(watching.beats + 6);
+  expect((await mainProbe()).frames).toBeGreaterThan(watching.frames + 3);
+  await expect.poll(async () => (await mainProbe()).gap).toBeLessThanOrEqual(1);
+  expect(await petTimers()).toBe(held);
+  await app.evaluate(() => {
+    const at = new Date().toISOString();
+    globalThis.__pockymoeDesktopTest.hub.sync({ version: 1, accountId: 'idle-probe', generatedAt: at, focusedThreadKey: null, syncedDeviceIds: ['mac'], items: [{ key: 'mac:idle', threadId: 'idle', deviceId: 'mac', deviceName: 'Fixture', workspaceId: 'fixture', workspaceLabel: 'Fixture', title: 'Idle reaction fixture', state: 'completed', since: at, turnId: 'idle-turn', unread: true }] });
+  });
+  await expect(pet!.locator('#app')).toHaveAttribute('data-mood', /waving|jumping/);
+  await expect.poll(petTimers).toBeGreaterThan(held + 2);
+  await expect(pet!.locator('#app')).toHaveAttribute('data-mood', 'idle');
+  await expect(pet!.locator('#app')).toHaveClass(/animation-still/);
+  const rest = await petTimers(), afterReaction = await mainProbe();
+  await expect.poll(async () => (await mainProbe()).beats).toBeGreaterThan(afterReaction.beats + 6);
+  expect(await petTimers()).toBe(rest);
+  await app.evaluate(({ powerMonitor }) => { powerMonitor.getSystemIdleTime = () => 0; });
+  await expect.poll(() => app.evaluate(() => globalThis.__pockymoeDesktopTest.presence.isIdle()), { timeout: 1500 }).toBe(false);
+  await expect.poll(petTimers).toBeGreaterThan(rest + 2);
 });
