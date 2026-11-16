@@ -766,7 +766,7 @@ test('review: compact statuses retain the running ring and waiting bubble at 10p
   const act = (value: unknown) => sprite.evaluate(value => (window as unknown as { rcDesktop: { pet: { action(value: unknown): Promise<unknown> } } }).rcDesktop.pet.action(value), value);
   await act({ type: 'click' });
   const running = glass.locator('.running-row .pockymoe-status-mark[data-status="running"]');
-  await expect(running).toHaveCSS('width', '10px'); await expect(running.locator('circle')).toHaveCount(2); await expect(running.locator('.status-mark-orbit')).toHaveCount(1);
+  await expect(running).toHaveCSS('width', '10px'); await expect(running.locator('circle')).toHaveCount(1); await expect(running.locator('.status-mark-arc')).toHaveCount(1); await expect(running).toHaveCSS('animation-name', 'none'); await expect(running.locator('.status-mark-arc')).toHaveCSS('animation-name', 'none');
   await act({ type: 'close' });
   await sync([item({ state: 'needsInput', request: { id: 'review-mark', kind: 'approval', summary: 'Review the result' } })]);
   const waiting = glass.locator('.bubble-line .pockymoe-status-mark[data-status="waiting"]');

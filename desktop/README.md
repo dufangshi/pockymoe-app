@@ -751,3 +751,7 @@ native tray disposal. Image/menu preparation can reenter native ready/quit event
 so updates recheck liveness before touching the tray. The shutdown regression
 retires the native tray during image preparation and delivers a late window-ready
 callback before disposal; the app must still exit cleanly.
+
+Activity status marks in the quick window and pet panels are static: running is
+a fixed three-quarter open arc and agents-running is a purple ring with a centre
+dot. They schedule no animation and use the same shapes with reduced motion.
