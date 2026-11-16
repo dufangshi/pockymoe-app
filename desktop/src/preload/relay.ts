@@ -1,3 +1,4 @@
+import { installRenderingGate, setPageRendering } from '../shared/renderingGate';
 import { contextBridge, ipcRenderer } from 'electron';
 import type { HostCommand, PockymoeHost, UpdateState } from '../shared/contract';
 import { channels as c } from '../shared/channels';
@@ -8,6 +9,10 @@ const guard = (): void => { if (!allowed()) throw new Error('Desktop bridge unav
 const send = (channel: string, ...args: unknown[]): void => { guard(); ipcRenderer.send(channel, ...args); };
 const invoke = <T>(channel: string, ...args: unknown[]): Promise<T> => { guard(); return ipcRenderer.invoke(channel, ...args); };
 if (allowed()) {
+  contextBridge.executeInMainWorld({ func: installRenderingGate });
+  ipcRenderer.on('rcDesktop:rendering', (_event, visible: boolean) => {
+    if (allowed()) contextBridge.executeInMainWorld({ func: setPageRendering, args: [visible] });
+  });
   const host: PockymoeHost = {
     updates: { state: () => invoke(c.updateState), install: () => send(c.updateInstall), onChange: listener => {
       guard(); const handler = (_: Electron.IpcRendererEvent, state: UpdateState): void => { if (allowed()) listener(state); };

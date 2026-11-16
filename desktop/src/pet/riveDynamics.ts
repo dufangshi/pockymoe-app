@@ -9,7 +9,7 @@ export const RIVE_DYNAMIC_INPUTS = [
 ] as const;
 export interface RiveProcedural {
   bodyBone: string;
-  /** Legacy pack metadata; animation now follows the display's requestAnimationFrame. */
+  /** Legacy pack metadata; animation now follows the global 30 fps cap. */
   idleFps?: 15 | 24 | 30;
   activeFps?: 30 | 60;
   eyeOpen?: boolean;
@@ -57,7 +57,7 @@ export class RiveDynamics {
     drag: { x: number; y: number } = { x: 0, y: 0 },
   ): Record<(typeof RIVE_DYNAMIC_INPUTS)[number], number> {
     const dt = Math.max(0, Math.min(0.1, seconds));
-    this.time += dt;
+    this.time += Math.max(0, seconds);
     const vel =
       this.previous && dt > 0
         ? {
@@ -121,7 +121,7 @@ export class RiveGazePulse {
     }
     if (!this.point || Math.hypot(point.x - this.point.x, point.y - this.point.y) > 0.005) this.movedAt = now;
     this.point = point;
-    // Cursor IPC arrives at 10 Hz; interpolate its target on every display frame.
+    // Cursor IPC arrives at 10 Hz; interpolate its target on the capped presentation cadence.
     const mix = 1 - Math.exp(-elapsed / 45);
     this.current.x += (point.x - this.current.x) * mix;
     this.current.y += (point.y - this.current.y) * mix;

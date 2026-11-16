@@ -61,6 +61,12 @@ export class SpeechTracker {
     else if (now - this.speech.endedAt >= SPEECH_LINGER_MS) this.speech = null;
   }
 
+  hold(now: number): void { if (this.speech && !this.speech.playing) this.speech.endedAt = now; }
+  deadline(holding: boolean): number {
+    if (!this.speech) return Infinity;
+    return this.speech.playing ? this.speech.startedAt + SPEECH_MAX_MS : holding ? Infinity : this.speech.endedAt + SPEECH_LINGER_MS;
+  }
+
   /** The thread was opened, so its name no longer needs showing. A queued line for another stays. */
   dismiss(item: Pick<ActivityItem, 'key'>): void {
     if (this.speech && (this.speech.item.key === item.key || conversationKey(this.speech.item) === item.key))

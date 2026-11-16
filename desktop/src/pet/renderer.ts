@@ -1,3 +1,4 @@
+import { PetFrameScheduler, petAnimationRuns } from './frameScheduler';
 import { riveBackingSize } from './riveRouting';
 import { RiveMotionClock } from './riveMotion';
 import { RiveDynamics, RiveGazePulse } from './riveDynamics';
@@ -286,7 +287,9 @@ function renderSprite(): void {
   if (hold !== dockClipHeld) { dockClipHeld = hold; if (!moodChanged) playClips(); }
   paintSprite();
   if (clipPlayer && (dockClipHeld || motion.matches)) { clipPlayer.drawn = 0; drawClip(0); }
-  videoPlayer?.invalidate();
+  const videoSurface = root.querySelector<HTMLCanvasElement>('#clip');
+  if (videoPlayer?.playing && videoSurface && (videoSurface.width !== Math.round(state.pet.width * devicePixelRatio) || videoSurface.height !== Math.round(state.pet.height * devicePixelRatio))) videoPlayer.invalidate(true);
+  syncAnimation();
   syncRive();
 }
 
@@ -338,6 +341,7 @@ function syncRive(): void {
       riveDragging = false;
       rivePokeUntil = 0;
       root.querySelector('#character')?.classList.add('rive');
+      syncAnimation();
     })
     .catch((error) => {
       console.error('Rive pet failed; using atlas', error);
@@ -375,9 +379,8 @@ function stepRive(now: number): void {
         }
       : undefined;
   const gaze = procedural?.transientFace ? riveGaze.sample(now, gazePoint) : undefined;
-  // requestAnimationFrame follows the display, including 120 Hz displays.
-  // Only tucked, reduced-motion or unchanged artboards may skip work.
-  const scheduled = Math.min(0.1, riveAt ? (now - riveAt) / 1000 : 0);
+  // The presentation timer is capped at 30 Hz. Authored clocks keep elapsed time.
+  const scheduled = riveAt ? (now - riveAt) / 1000 : 0;
   let dirty = !tucked && d.needsHitDraw;
   if (d.canvas.width !== w || d.canvas.height !== h) {
     d.canvas.width = w;
@@ -476,9 +479,10 @@ function stepRive(now: number): void {
     riveEpoch = state.moodEpoch;
   }
   if (!tucked && !motion.matches) {
-    // Advance every display frame even if a drawing is unchanged. A held key
+    // Advance on the capped cadence even if a drawing is unchanged. A held key
     // must not prevent the clock from reaching its next moving key.
-    d.advance(dt);
+    const active = d.advance(dt);
+    if (!active && !procedural && !riveClock) animation.setRunning(false);
     if (riveDynamics && procedural) {
       // Springs follow the actual animated root and the window drag velocity.
       const m = d.artboard.rootBone(procedural.bodyBone).worldTransform();
@@ -543,7 +547,7 @@ function playClips(): void {
     videoState = animationState;
     void videoPlayer.play(clip, state.clips.format.fps, motion.matches || !!docked).then(() => {
       if (token !== clipToken) return;
-      const next = docked ? null : clipSequence?.upcoming(animationState); videoPlayer?.preload(next ?? null);
+      const next = docked ? null : clipSequence?.upcoming(animationState); videoPlayer?.preload(next ?? null); syncAnimation();
     });
     return;
   }
@@ -554,6 +558,7 @@ function playClips(): void {
     clipPlayer = { clip, bitmap, start: performance.now(), drawn: -1 };
     if (docked) { clipPlayer.drawn = 0; drawClip(0); }
     root.querySelector('#character')?.classList.add('clips');
+    syncAnimation();
     const next = clipSequence?.upcoming(animationState); if (next && next !== clip) void loadClip(next.path);
   });
 }
@@ -630,7 +635,7 @@ function drawClip(index: number): void {
   clipContext.drawImage(clipPlayer.bitmap, (index % format.columns) * format.width, Math.floor(index / format.columns) * format.height, format.width, format.height, 0, 0, width, height);
 }
 function stepClip(now: number): void {
-  if (state?.clips?.format.mediaType) { videoPlayer?.tick(now, state.clips.format.fps, motion.matches || !!dockRestClip()); return; }
+  if (state?.clips?.format.mediaType) return;
   if (!clipPlayer || !state?.clips) return;
   const format = state.clips.format, { clip } = clipPlayer;
   if (dockRestClip()) { if (clipPlayer.drawn !== 0) { clipPlayer.drawn = 0; drawClip(0); updateHit(); } return; }
@@ -756,7 +761,7 @@ root.addEventListener('pointerdown', (event) => {
   drag = { id: event.pointerId, x: event.screenX, y: event.screenY, moved: false, started: true };
   root.setPointerCapture(event.pointerId);
   root.querySelector('#character')?.classList.add('dragging');
-  if (riveDrawer) stepRive(performance.now());
+  if (riveDrawer) animation.invalidate();
   void bridge.action({ type: 'dragStart', x: event.screenX, y: event.screenY });
 });
 function release(event: PointerEvent, cancelled = false): void {
@@ -774,7 +779,7 @@ function release(event: PointerEvent, cancelled = false): void {
       // between release and acknowledgement can select the old work exit.
       const now = performance.now();
       rivePokeUntil = now + 300;
-      stepRive(now);
+      animation.invalidate();
     }
     void bridge.action({ type: 'click' });
   }
@@ -809,16 +814,17 @@ bridge.onCue(cue => {
 });
 bridge.onSpeech((audio, id) => {
   if (state?.surface !== 'sprite') return;
-  const report = (playing: boolean): void => { if (id) void bridge.action({ type: 'speechState', id, playing }); };
-  void playSpeech(audio, () => report(false)).then(started => { root.dataset.lastSpeech = String(audio.byteLength); report(started); }, () => { root.dataset.lastSpeech = 'undecodable'; report(false); });
+  const report = (playing: boolean): void => { syncAnimation(); if (id) void bridge.action({ type: 'speechState', id, playing }); };
+  void playSpeech(audio, () => report(false)).then(started => { root.dataset.lastSpeech = String(audio.byteLength); report(started); syncAnimation(); }, () => { root.dataset.lastSpeech = 'undecodable'; report(false); });
 });
 bridge.onState(next => {
   const old = state, changedMode = old?.mode !== next.mode;
   if (old && old.accountId !== next.accountId) { failures.clear(); pending.clear(); draft = ''; sendState = 'idle'; selected = null; selectedRequest = null; collapsedRequests.clear(); }
-  state = next; document.documentElement.dataset.glassFallback = String(!!next.glassFallback); setLocale(next.locale); applyAppearance(next.appearance); document.title = `Pockymoe · ${t('桌宠')}`; root.setAttribute('aria-label', document.title);
+  state = { ...next, cursor: old?.packEpoch === next.packEpoch ? old.cursor : undefined }; document.documentElement.dataset.glassFallback = String(!!next.glassFallback); setLocale(next.locale); applyAppearance(next.appearance); document.title = `Pockymoe · ${t('桌宠')}`; root.setAttribute('aria-label', document.title);
   const accent = next.appearance.accent; canvas.width = 1; canvas.height = 1; context.clearRect(0, 0, 1, 1); context.fillStyle = accent; context.fillRect(0, 0, 1, 1); const [r, g, b] = context.getImageData(0, 0, 1, 1).data; document.documentElement.style.setProperty('--accent-fg', accentForeground(r, g, b));
   document.body.dataset.surface = next.surface; root.dataset.visible = String(next.near || next.mode !== 'controls');
   if (next.surface === 'sprite') {
+    root.style.visibility = next.visible ? '' : 'hidden';
     // Another pack's sheets share nothing with this one's.
     const packKey = `${next.packName}#${next.rive?.epoch ?? next.clips?.epoch ?? 0}`;
     const packChanged = packKey !== clipPack;
@@ -830,11 +836,12 @@ bridge.onState(next => {
       root.querySelector('#character')?.classList.remove('rive');
     }
     if (packKey !== clipPack) { videoPlayer?.dispose(); videoPlayer = null; clipContext = null; peekSource = null; talkBaseKey = ''; talkBitmap?.close(); talkLoading = ''; talkBitmap = null; talkFrame = -1; clipPack = packKey; for (const entry of clipCache.values()) void entry.then(bitmap => bitmap?.close()); clipCache.clear(); dockClipHeld = false; clipSequence = null; clipPlayer = null; clipToken++; lastEpoch = -1; }
-    if (next.rive && next.cursor) {
+    if (next.rive && state.cursor) {
+      const cursor = state.cursor;
       lastPointer =
-        next.cursor.x >= 0 && next.cursor.y >= 0 &&
-        next.cursor.x < next.pet.width && next.cursor.y < next.pet.height
-          ? { clientX: next.cursor.x, clientY: next.cursor.y }
+        cursor.x >= 0 && cursor.y >= 0 &&
+        cursor.x < next.pet.width && cursor.y < next.pet.height
+          ? { clientX: cursor.x, clientY: cursor.y }
           : null;
     }
     renderSprite();
@@ -848,6 +855,26 @@ bridge.onState(next => {
   const contentKey = JSON.stringify([next.accountId, next.items, next.recent, next.mode, next.pinned, next.mode === 'bubble' && next.near, next.bubble, next.speech, next.speech && next.surfaceSide, next.settings, next.locale, next.appearance, next.edgeHide]);
   if (signature !== contentKey) { signature = contentKey; renderGlass(); }
   if (changedMode && next.mode === 'menu') root.querySelector<HTMLElement>('[role^="menuitem"]')?.focus();
+});
+const animation = new PetFrameScheduler(animate);
+function syncAnimation(): void {
+  if (!state || state.surface === 'glass') { animation.setRunning(false); return; }
+  const tucked = !!state.edge && state.dockAmount > 0;
+  const running = petAnimationRuns(state.visible, state.surface, tucked, motion.matches, !!state.clips?.format.mediaType && !!videoPlayer?.playing && !speechPlaying());
+  // Reset the elapsed-time origin across a deliberate pause, never across frames.
+  if (!running) riveAt = 0;
+  videoPlayer?.setSuspended(!state.visible);
+  animation.setRunning(running);
+  root.classList.toggle('animation-still', !state.visible || tucked || motion.matches);
+  if (state.visible && !state.clips?.format.mediaType) animation.invalidate();
+}
+bridge.onCursor(cursor => {
+  if (!state || state.surface !== 'sprite') return;
+  state.cursor = cursor ?? undefined;
+  lastPointer = cursor && cursor.x >= 0 && cursor.y >= 0 && cursor.x < state.pet.width && cursor.y < state.pet.height
+    ? { clientX: cursor.x, clientY: cursor.y } : null;
+  updateHit();
+  if (state.visible && !motion.matches && state.dockAmount === 0) animation.invalidate();
 });
 function animate(now: number): void {
   if (state?.surface === 'sprite') {
@@ -863,10 +890,11 @@ function animate(now: number): void {
     let next = frameAt(animationState, animationState === 'idle' && cycle > 1100 * state.frameScale ? 0 : cycle, motion.matches, state.frameScale, ONE_SHOT.includes(animationState));
     if (animationState === 'sleeping' && state.sleeping && !motion.matches) { const durations = state.sleeping.durationsMs; let remaining = elapsedMs / state.frameScale % durations.reduce((a, b) => a + b, 0); next = 0; while (remaining >= durations[next] && next < durations.length - 1) { remaining -= durations[next]; next++; } }
     if (frame !== next) { frame = next; paintSprite(); updateHit(); }
+    const duration = ANIMATIONS[animationState].durations.reduce((sum: number, ms: number) => sum + ms, 0) * state.frameScale;
+    if ((ONE_SHOT.includes(animationState) && elapsedMs >= duration) || (animationState === 'sleeping' && !state.sleeping)) animation.setRunning(false);
   }
-  requestAnimationFrame(animate);
 }
-requestAnimationFrame(animate);
+
 function updateScrollArea(): void {
   const area = root.querySelector<HTMLElement>('[data-scroll-area]'), content = area?.querySelector<HTMLElement>('.scroll-content'), track = area?.querySelector<HTMLElement>('.scroll-track'), thumb = area?.querySelector<HTMLElement>('.scroll-thumb');
   if (!area || !content || !track || !thumb) return;
@@ -883,7 +911,7 @@ root.addEventListener('scroll', updateScrollArea, true);
 root.addEventListener('keydown', event => { if (!(event.target as HTMLElement).closest('.scroll-track')) return; const list = root.querySelector<HTMLElement>('.task-list'); if (!list) return; const delta = event.key === 'ArrowDown' ? 30 : event.key === 'ArrowUp' ? -30 : event.key === 'PageDown' ? list.clientHeight : event.key === 'PageUp' ? -list.clientHeight : 0; if (delta || ['Home', 'End'].includes(event.key)) { event.preventDefault(); list.scrollTop = event.key === 'Home' ? 0 : event.key === 'End' ? list.scrollHeight : list.scrollTop + delta; updateScrollArea(); } });
 
 bridge.ready(); void bridge.action({ type: 'reducedMotion', value: motion.matches });
-motion.addEventListener('change', () => { void bridge.action({ type: 'reducedMotion', value: motion.matches }); frame = 0; paintSprite(); });
+motion.addEventListener('change', () => { void bridge.action({ type: 'reducedMotion', value: motion.matches }); frame = 0; paintSprite(); playClips(); syncAnimation(); });
 
 // ErrorMark's shared popup gets additional room in the same glass child, never in the sprite window.
 let detailAnnounced = false;

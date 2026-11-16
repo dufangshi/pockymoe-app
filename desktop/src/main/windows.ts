@@ -131,7 +131,14 @@ export class Windows {
     let backgrounded = false;
     const webContentsId = w.webContents.id;
     this.relay.add(w);
-    w.webContents.on('did-finish-load', () => this.syncPageChrome(w));
+    // eb938940 keeps account activity/notifications alive in the hidden Web owner.
+    // Suspend CSS, Web Animations and RAF through preload, leaving network timers alone.
+    const syncRendering = (): void => {
+      if (!w.isDestroyed()) w.webContents.send('rcDesktop:rendering', w.isVisible() && !w.isMinimized());
+    };
+    w.on('show', syncRendering); w.on('hide', syncRendering);
+    w.on('minimize', syncRendering); w.on('restore', syncRendering);
+    w.webContents.on('did-finish-load', () => { this.syncPageChrome(w); syncRendering(); });
     this.secure(w, true);
     w.on('close', e => { if (!this.quitting && !this.closingForUpdate) { e.preventDefault(); backgrounded = true; w.hide(); } });
     w.on('closed', () => {

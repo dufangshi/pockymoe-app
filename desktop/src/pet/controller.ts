@@ -1,3 +1,4 @@
+import { PackImages, PetStateDelivery } from './stateDelivery';
 import { verifyRivePack } from './riveValidation';
 import { RiveHitMask } from './riveHitMask';
 import { petMedia } from './media';
@@ -102,12 +103,12 @@ export function createPetController(deps: PetControllerDeps, benchmark?: { quad:
     panel = false,
     menu = false,
     detailOpen = false;
-  let lastSprite = '',
-    lastGlass = '',
-    readySprite = false,
+  const spriteDelivery = new PetStateDelivery(), glassDelivery = new PetStateDelivery(), packImages = new PackImages();
+  let readySprite = false,
     readyGlass = false,
     glassDismissed = false;
   let moodEpoch = 0;
+  let pointerGeometry: ReturnType<typeof petLayout> | null = null;
   // How long a reaction holds: a pack's own clip decides, since its art can run for seconds.
   const reactionMs = (mood: Exclude<ClipState, 'resting'>): number => {
     const beats = pack?.manifest.remoteCodex?.rive?.motions?.[mood];
@@ -433,6 +434,7 @@ export function createPetController(deps: PetControllerDeps, benchmark?: { quad:
   }
   function emitState(): void {
     const now = Date.now();
+    speech.tick(now, near);
     const expiring =
       bubbles.current &&
       !bubbles.current.sticky &&
@@ -453,6 +455,7 @@ export function createPetController(deps: PetControllerDeps, benchmark?: { quad:
       faceBox: pack?.manifest.remoteCodex?.faceBox,
       peekArt: pack?.manifest.remoteCodex?.peek,
     });
+    pointerGeometry = layout;
     const effectiveTargets = [
       ...new Map(
         [
@@ -468,13 +471,16 @@ export function createPetController(deps: PetControllerDeps, benchmark?: { quad:
         ].map((item) => [item.key, item]),
       ).values(),
     ];
-    if (mediaPack !== pack) {
+    if (mediaPack !== (pack ?? null)) {
       media?.dispose();
       mediaPack = pack ?? null;
+      packEpoch++;
+      lastCursor = null;
       media = pack ? petMedia(pack) : null;
     }
-    const sleeping = pack?.manifest.remoteCodex?.sleeping;
     const shared = {
+      packEpoch,
+      visible,
       appearance,
       glassFallback:
         process.platform === 'win32' &&
@@ -489,21 +495,8 @@ export function createPetController(deps: PetControllerDeps, benchmark?: { quad:
           : moods.value(items, now, snoozed),
       moodEpoch,
       pinned: controlsPinned && !panel && !menu,
-      peekArt:
-        pack?.peekImage && pack.manifest.remoteCodex?.peek
-          ? {
-              ...pack.manifest.remoteCodex.peek,
-              imageUrl: `data:image/${pack.manifest.remoteCodex.peek.path.endsWith('png') ? 'png' : 'webp'};base64,${pack.peekImage.toString('base64')}`,
-            }
-          : undefined,
       rive: pack?.manifest.remoteCodex?.rive
         ? { ...pack.manifest.remoteCodex.rive, epoch: packEpoch }
-        : undefined,
-      cursor: pack?.manifest.remoteCodex?.rive
-        ? {
-            x: screen.getCursorScreenPoint().x - window.getBounds().x - layout.pet.x,
-            y: screen.getCursorScreenPoint().y - window.getBounds().y - layout.pet.y,
-          }
         : undefined,
       dragging: !!drag?.moved,
       ...(pack?.manifest.remoteCodex?.rive?.procedural
@@ -532,18 +525,6 @@ export function createPetController(deps: PetControllerDeps, benchmark?: { quad:
         petId: settings.petId,
         petMutes: settings.petMutes,
       },
-      imageUrl: pack
-        ? `data:image/${pack.manifest.spritesheetPath.endsWith('png') ? 'png' : 'webp'};base64,${pack.image.toString('base64')}`
-        : '',
-      ...(pack?.sleepingImage && sleeping
-        ? {
-            sleeping: {
-              imageUrl: `data:image/${sleeping.path.endsWith('png') ? 'png' : 'webp'};base64,${pack.sleepingImage.toString('base64')}`,
-              frames: sleeping.frames,
-              durationsMs: sleeping.durationsMs,
-            },
-          }
-        : {}),
       atlasRows: (pack?.manifest.spriteVersionNumber === 2 ? 11 : 9) as 9 | 11,
       frameScale: pack?.manifest.remoteCodex?.frameScale ?? 1,
       packName: pack?.manifest.displayName ?? '',
@@ -566,13 +547,10 @@ export function createPetController(deps: PetControllerDeps, benchmark?: { quad:
     };
     for (const view of [window, glass]) {
       if (!live()) return;
-      const state: PetViewState = { ...shared, surface: view === window ? 'sprite' : 'glass' };
-      const payload = JSON.stringify(state),
-        previous = view === window ? lastSprite : lastGlass;
-      if (payload !== previous && (view === window ? readySprite : readyGlass)) {
-        if (view === window) lastSprite = payload;
-        else lastGlass = payload;
-        view.webContents.send('rcDesktop:pet:state', state);
+      if (view === window ? readySprite : readyGlass) {
+        const delivery = view === window ? spriteDelivery : glassDelivery;
+        delivery.send(packEpoch, () => packImages.get(pack), { ...shared, surface: view === window ? 'sprite' : 'glass' },
+          (channel, value) => view.webContents.send(channel, value));
       }
     }
     if (!live()) return;
@@ -603,6 +581,8 @@ export function createPetController(deps: PetControllerDeps, benchmark?: { quad:
       glassSide = null;
     }
     glass.setFocusable(panel || menu || detailOpen);
+    scheduleDeadline(now, snoozed);
+    syncPointerPoll();
   }
   let packEpoch = 0;
   async function refreshPacks(): Promise<void> {
@@ -867,7 +847,6 @@ export function createPetController(deps: PetControllerDeps, benchmark?: { quad:
               verifyRivePack,
             );
             await refreshPacks();
-            packEpoch++;
             deps.settings.set({ petId: imported.manifest.id });
           } catch (cause) {
             return {
@@ -945,11 +924,12 @@ export function createPetController(deps: PetControllerDeps, benchmark?: { quad:
     if (!view) return;
     if (view === window) {
       readySprite = true;
-      lastSprite = '';
+      spriteDelivery.reset();
+      lastCursor = null;
       if (visible) window.showInactive();
     } else {
       readyGlass = true;
-      lastGlass = '';
+      glassDelivery.reset();
     }
     emit();
   };
@@ -1113,16 +1093,13 @@ export function createPetController(deps: PetControllerDeps, benchmark?: { quad:
   screen.on('display-removed', displayChanged);
   screen.on('display-metrics-changed', displayChanged);
   function visiblePetRect() {
-    const layout = petLayout(position, display().workArea, petHeight(settings), {
-      dockAmount,
-      faceBox: pack?.manifest.remoteCodex?.faceBox,
-      peekArt: pack?.manifest.remoteCodex?.peek,
-    });
+    const layout = pointerGeometry ?? petLayout(position, display().workArea, petHeight(settings));
     const { visible } = layout,
       bounds = window.getBounds();
     return { ...visible, x: bounds.x + visible.x, y: bounds.y + visible.y };
   }
   const pollPointer = (): void => {
+    const wasNear = near, wasPeek = peek, wasDock = dockAmount, wasPinned = controlsPinned;
     const now = Date.now(),
       cursor = screen.getCursorScreenPoint(),
       bounds = window.getBounds(),
@@ -1137,7 +1114,7 @@ export function createPetController(deps: PetControllerDeps, benchmark?: { quad:
       (tucked ? within(visiblePetRect(), 0) : within(bounds, 60)) || (glass.isVisible() && within(child, 8));
     if (controlsPinned && !close && now - awaySince >= 4000) controlsPinned = false;
     if (close) bubbles.hold(now); // Reading it keeps it there.
-    speech.tick(now, close);
+    if (close || near) speech.hold(now);
     if (close) {
       if (!near) glassDismissed = false;
       near = true;
@@ -1161,17 +1138,49 @@ export function createPetController(deps: PetControllerDeps, benchmark?: { quad:
     // A docked pet shows only its head for an alert, and tucks back in when the alert is gone.
     const alerting = !!bubbles.current && !(settings.snoozeUntil && Date.parse(settings.snoozeUntil) > now);
     dockAmount = position.edge && settings.petEdgeHide !== false && !peek ? (alerting ? HEAD_PEEK : 1) : 0;
-    if (glass.isVisible()) placeGlass();
-    emit();
-  };
-  const timer = setInterval(() => {
-    if (!live()) return;
-    try {
-      pollPointer();
-    } catch (error) {
-      retireDestroyed(error);
+    sendCursor(cursor, bounds);
+    const fading = awaySince > 0 && now - awaySince < 400 && glass.isVisible();
+    if (near !== wasNear || peek !== wasPeek || dockAmount !== wasDock || controlsPinned !== wasPinned || fading) {
+      if (glass.isVisible()) placeGlass();
+      emit();
     }
-  }, 100);
+  };
+  let lastCursor: { x: number; y: number } | null = null;
+  function sendCursor(cursor: Electron.Point, bounds: Electron.Rectangle): void {
+    if (!readySprite || !pack?.manifest.remoteCodex?.rive) return;
+    const layout = pointerGeometry;
+    if (!layout) return;
+    const x = cursor.x - bounds.x - layout.pet.x, y = cursor.y - bounds.y - layout.pet.y;
+    const inRange = dockAmount === 0 && x > -layout.pet.width / 2 && x < layout.pet.width * 1.5 && y > -layout.pet.height / 2 && y < layout.pet.height * 1.5;
+    if (!inRange) {
+      if (lastCursor) { lastCursor = null; window.webContents.send('rcDesktop:pet:cursor', null); }
+    } else if (!lastCursor || lastCursor.x !== x || lastCursor.y !== y) {
+      lastCursor = { x, y };
+      window.webContents.send('rcDesktop:pet:cursor', lastCursor);
+    }
+  }
+  let pointerTimer: ReturnType<typeof setInterval> | undefined;
+  function syncPointerPoll(): void {
+    if (!visible) { clearInterval(pointerTimer); pointerTimer = undefined; lastCursor = null; return; }
+    if (pointerTimer !== undefined) return;
+    pointerTimer = setInterval(() => {
+      if (!live()) return;
+      try { pollPointer(); } catch (error) { retireDestroyed(error); }
+    }, 100);
+  }
+  let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
+  function scheduleDeadline(now: number, snoozed: boolean): void {
+    clearTimeout(deadlineTimer);
+    const bubble = bubbles.current;
+    const deadlines = [
+      moods.deadline(items, now, snoozed),
+      !near && bubble && !bubble.sticky && bubble.shownAt !== null ? bubble.shownAt + BUBBLE_MS : Infinity,
+      speech.deadline(near),
+      snoozed ? Date.parse(settings.snoozeUntil!) : Infinity,
+    ];
+    const next = Math.min(...deadlines);
+    if (Number.isFinite(next)) deadlineTimer = setTimeout(emit, Math.max(1, next - now));
+  }
   // Stop native-window polling before Electron begins destroying those windows.
   const beforeQuit = (): void => {
     quitting = true;
@@ -1209,7 +1218,8 @@ export function createPetController(deps: PetControllerDeps, benchmark?: { quad:
   function dispose(destroyWindows = true): void {
     if (disposed) return;
     disposed = true;
-    clearInterval(timer);
+    clearInterval(pointerTimer);
+    clearTimeout(deadlineTimer);
     clearTimeout(blurTimer);
     savePosition();
     app.removeListener('before-quit', beforeQuit);
@@ -1236,7 +1246,6 @@ export function createPetController(deps: PetControllerDeps, benchmark?: { quad:
   return {
     async reloadPacks() {
       await refreshPacks();
-      packEpoch++;
       emit();
     },
     setVisible(value) {

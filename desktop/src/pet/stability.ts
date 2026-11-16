@@ -16,6 +16,15 @@ export class StableMood {
     else if (type === 'failed') this.react('failed', now, duration);
     else if (type === 'completed') this.react(completion, now, duration);
   }
+  deadline(items: ActivityItem[], now: number, snoozed = false): number {
+    if (snoozed) return Infinity;
+    const desired = moodFor(items, { now });
+    return Math.min(
+      this.reaction?.until ?? Infinity,
+      desired !== this.sustained ? Math.max(now + 1, this.entered + 2000) : Infinity,
+      ...items.filter(item => item.state === 'needsInput').map(item => Date.parse(item.since) + 60_000).filter(at => at > now),
+    );
+  }
   value(items: ActivityItem[], now: number, snoozed = false): PetMood {
     if (snoozed) return 'sleeping';
     const desired = moodFor(items, { now });
