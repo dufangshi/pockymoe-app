@@ -706,6 +706,7 @@ function updateHit(force = false): void {
     bridge.hitTest(hit, hitMotion);
   }
 }
+for (const type of ['pointerenter', 'pointerleave']) root.addEventListener(type, () => { void bridge.action({ type: 'pointerActivity' }); });
 window.addEventListener('pointermove', (event) => {
   if (scrollDrag) {
     scrollToPointer(event.clientY);

@@ -128,6 +128,11 @@ context and the same robot count, without an Agent/智能体 prefix; approvals r
 actual thread/request IDs. Tray menus continue to expose individual request actions.
 Replies, approvals and opening keep the selected member key/threadId/requestId.
 The shared `activityGroups.ts` helpers also serve the pet.
+The pet probes a far pointer every 500 ms after it has been still for a second;
+movement, nearby pointers and hover/fade/docking deadlines retain the 100 ms
+cadence. Pointer entry/exit events probe immediately, so approaching the pet does
+not wait for the slow poll. The existing hover dwell and visual transitions stay
+the same; far movement is discovered within at most 500 ms.
 Local DOM controls follow the approved Electron utility-window exception in
 upstream `docs/ui-principles.md`, including keyboard/focus behavior, ErrorMark
 feedback and custom overlay scrollbars. Local forms use drawn switches and a
