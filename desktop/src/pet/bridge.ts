@@ -16,6 +16,8 @@ export type PetStateMessage = Omit<PetViewState, keyof PetPackImages | 'cursor'>
 export interface PetViewState {
   packEpoch: number;
   visible: boolean;
+  /** False freezes the current frame without hiding it or pausing audio. */
+  rendering?: boolean;
   rive?: import('./rive').RivePack & { epoch: number };
   cursor?: { x: number; y: number };
   dragging?: boolean;

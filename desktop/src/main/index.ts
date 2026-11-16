@@ -11,6 +11,7 @@ import {
   Notification,
   session,
   protocol,
+  powerMonitor,
   shell,
   type IpcMainEvent,
   type IpcMainInvokeEvent,
@@ -38,6 +39,8 @@ import { nativeNotificationId } from './windowsToast';
 import { LocalMessages } from './messages';
 import { PetCatalog } from './petCatalog';
 import { VoiceService } from './voice';
+import { RenderingPresence } from './renderingPresence';
+import { watchDisplaySleep } from './displaySleep';
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -131,7 +134,9 @@ async function bootstrap(): Promise<void> {
           }
         }
         const hub = new ActivityHub(join(dataDir, 'delivered-alerts.json'));
-        const manager = new Windows(settings, dataDir);
+        const presence = new RenderingPresence(powerMonitor);
+        const stopDisplaySleep = watchDisplaySleep(presence.displayAwake);
+        const manager = new Windows(settings, dataDir, presence);
         windows = manager;
         const appearance = new AppearanceStore();
         let preferencesRequestId = 0;
@@ -191,6 +196,8 @@ async function bootstrap(): Promise<void> {
               petDirectories,
               appearance: appearance.get,
               onAppearance: appearance.onChange,
+              rendering: presence.get,
+              onRendering: presence.subscribe,
             });
           } catch {
             /* Shell remains usable if a pet pack cannot load. */
@@ -696,6 +703,8 @@ async function bootstrap(): Promise<void> {
         });
         app.on('before-quit', () => {
           manager.quitting = true;
+          stopDisplaySleep();
+          presence.dispose();
           messages.dispose();
           manager.dispose();
           notifications.dispose();
@@ -708,6 +717,7 @@ async function bootstrap(): Promise<void> {
         if (process.env.POCKYMOE_DESKTOP_E2E === '1')
           Object.assign(globalThis, {
             __pockymoeDesktopTest: {
+              presence,
               hub,
               settings,
               appearance,

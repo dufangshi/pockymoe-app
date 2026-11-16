@@ -35,6 +35,12 @@ test.beforeEach(async () => {
   Object.assign(env, { POCKYMOE_DESKTOP_E2E: '1', POCKYMOE_DESKTOP_USER_DATA: profile, POCKYMOE_DESKTOP_WEB_ORIGIN: origin, POCKYMOE_DESKTOP_RELAY_ORIGIN: origin });
   app = await electron.launch({ ...(process.env.POCKYMOE_PACKAGED_EXECUTABLE ? { executablePath: process.env.POCKYMOE_PACKAGED_EXECUTABLE, args: process.env.POCKYMOE_DESKTOP_SCALE ? [`--force-device-scale-factor=${process.env.POCKYMOE_DESKTOP_SCALE}`] : [] } : { args: [resolve('.')] }), env });
   await recordLifecycle(app, join(evidence, `lifecycle-${Date.now()}.jsonl`));
+  // Power-state regressions control this app's source, never the real screen or
+  // the host's idle state. Other local-surface checks start deterministically active.
+  await app.evaluate(({ powerMonitor }) => {
+    powerMonitor.getSystemIdleTime = () => 0;
+    globalThis.__pockymoeDesktopTest.presence.input();
+  });
 });
 test.afterEach(async () => { await app?.close(); rmSync(profile, { recursive: true, force: true }); });
 async function pageAt(fragment: string): Promise<Page> {
@@ -209,5 +215,55 @@ test('hidden and minimized Web pauses rendering while heartbeat and activity con
     await app.evaluate(() => { const w = globalThis.__pockymoeDesktopTest.windows.main(); w.restore(); w.show(); });
     await expect.poll(async () => (await probe()).frames).toBeGreaterThan(before.frames + 2);
     await expect.poll(() => web.locator('#render-probe').evaluate(e => getComputedStyle(e).animationPlayState)).toBe('running');
+  }
+});
+
+test('lock, display sleep and suspend freeze rendering while activity stays live', async () => {
+  const web = await pageAt(origin);
+  await app.evaluate(() => globalThis.__pockymoeDesktopTest.settings.set({ petVisible: true, petEdgeHide: false }));
+  let pet: Page | undefined;
+  await expect.poll(async () => {
+    for (const page of app.windows()) if (page.url().includes('pet/index.html') && await page.locator('body').getAttribute('data-surface') === 'sprite') pet = page;
+    return !!pet;
+  }).toBe(true);
+  await pet!.emulateMedia({ reducedMotion: 'no-preference' });
+  await pet!.evaluate(() => {
+    const probe = { frameTimers: 0 }; Object.assign(window, { petPresenceProbe: probe });
+    const start = window.setTimeout.bind(window);
+    window.setTimeout = ((callback: TimerHandler, ms?: number, ...args: unknown[]) => {
+      if (ms != null && ms <= 35) probe.frameTimers++;
+      return start(callback, ms, ...args);
+    }) as typeof window.setTimeout;
+  });
+  const petTimers = () => pet!.evaluate(() => (window as unknown as { petPresenceProbe: { frameTimers: number } }).petPresenceProbe.frameTimers);
+  await expect.poll(petTimers).toBeGreaterThan(2);
+  await web.evaluate(() => {
+    const probe = { frames: 0, beats: 0 }; Object.assign(window, { presenceProbe: probe });
+    const frame = (): void => { probe.frames++; requestAnimationFrame(frame); }; requestAnimationFrame(frame);
+    setInterval(() => { probe.beats++; window.pockymoeHost!.activity.sync({ version: 1, accountId: 'presence-probe', generatedAt: new Date().toISOString(), focusedThreadKey: null, syncedDeviceIds: [], items: [] }); }, 100);
+  });
+  const probe = () => web.evaluate(() => (window as unknown as { presenceProbe: { frames: number; beats: number } }).presenceProbe);
+  await expect.poll(async () => (await probe()).frames).toBeGreaterThan(2);
+  for (const reason of ['lock', 'display', 'suspend'] as const) {
+    await app.evaluate(({ powerMonitor }, reason) => {
+      if (reason === 'display') globalThis.__pockymoeDesktopTest.presence.displayAwake(false);
+      else powerMonitor.emit(reason === 'lock' ? 'lock-screen' : 'suspend');
+    }, reason);
+    await expect(web.locator('html')).toHaveAttribute('data-pockymoe-rendering', 'paused');
+    await expect(pet!.locator('html')).toHaveAttribute('data-pockymoe-rendering', 'paused');
+    const before = await probe();
+    const beforePet = await petTimers();
+    await expect.poll(async () => (await probe()).beats).toBeGreaterThan(before.beats + 3);
+    expect((await probe()).frames).toBe(before.frames);
+    expect(await petTimers()).toBe(beforePet);
+    expect(await web.evaluate(() => document.visibilityState)).toBe('visible');
+    expect(await app.evaluate(() => globalThis.__pockymoeDesktopTest.hub.snapshot()?.accountId)).toBe('presence-probe');
+    await app.evaluate(({ powerMonitor }, reason) => {
+      if (reason === 'display') globalThis.__pockymoeDesktopTest.presence.displayAwake(true);
+      else powerMonitor.emit(reason === 'lock' ? 'unlock-screen' : 'resume');
+    }, reason);
+    await expect(web.locator('html')).not.toHaveAttribute('data-pockymoe-rendering', 'paused');
+    await expect.poll(async () => (await probe()).frames).toBeGreaterThan(before.frames + 2);
+    await expect.poll(petTimers).toBeGreaterThan(beforePet + 2);
   }
 });

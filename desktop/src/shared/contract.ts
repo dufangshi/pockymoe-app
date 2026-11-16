@@ -280,6 +280,9 @@ export interface PetControllerDeps {
   /** Latest page appearance, so the pet matches the selected theme. */
   appearance(): Appearance | null;
   onAppearance(listener: (appearance: Appearance) => void): () => void;
+  /** Rendering presence is independent of notifications, voice and sync. */
+  rendering?(): boolean;
+  onRendering?(listener: (rendering: boolean) => void): () => void;
 }
 
 export interface PetController {

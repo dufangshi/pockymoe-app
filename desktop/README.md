@@ -49,6 +49,18 @@ the pet continue receiving changes. Hidden/minimized Web windows suspend renderi
 (RAF, CSS and Web Animations), while connection timers and activity IPC remain
 unthrottled; showing/restoring resumes rendering. Cmd/Ctrl+Q or Quit Pockymoe exits.
 
+Rendering also pauses on screen lock, system suspend, inactive login sessions,
+macOS display sleep, and two minutes of system idle. The pet holds its current
+frame; returning shows the current activity pose without replaying missed
+reactions. Network sync, native notifications and speech continue. Utility
+windows defer background snapshots and the quick window stops its elapsed clock.
+Display sleep/wake on macOS comes from a permission-free NSWorkspace listener
+running under the system JXA interpreter. Lock/suspend/display events require no
+polling; the idle threshold uses an adaptive deadline. Local input resumes
+immediately; input in another app is detected within one second while idle.
+Windows display-only sleep notifications are not yet available; lock, suspend
+and idle use Electron powerMonitor on both platforms.
+
 ## Connection discovery
 
 First run asks for **Pockymoe 地址**, accepting a Web origin or Relay origin.

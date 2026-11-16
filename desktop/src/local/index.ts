@@ -5,6 +5,7 @@ import type { ActivityItem, DesktopSettings } from '../shared/contract';
 import { mountInitialState } from './initialState';
 import { localBridge, type LocalAction, type LocalState } from '../shared/local';
 import { mountQuick } from '../quick/view';
+import { installRenderingGate, setPageRendering } from '../shared/renderingGate';
 import './style.css';
 import './themes.css';
 import { showError } from './errorMark';
@@ -30,6 +31,8 @@ export const escapeHtml = (text: string): string => text.replace(/[&<>"']/g, cha
 export const appIcon = new URL('../../build/icon.png', import.meta.url).href;
 document.documentElement.dataset.platform = navigator.userAgent.includes('Windows') ? 'win32' : '';
 const root = document.querySelector<HTMLDivElement>('#app')!;
+installRenderingGate();
+localBridge().onRendering?.(setPageRendering);
 const view = new URLSearchParams(location.search).get('view') || 'relay';
 let state: LocalState;
 let section = 'general';

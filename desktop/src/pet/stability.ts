@@ -7,6 +7,7 @@ export class StableMood {
   private reaction: { mood: 'failed' | 'waving' | 'jumping' | 'poked' | 'landing'; until: number } | null = null;
   constructor(now: number) { this.entered = now; }
   reset(now: number): void { this.sustained = 'idle'; this.entered = now; this.reaction = null; }
+  settle(items: ActivityItem[], now: number): void { this.sustained = moodFor(items, { now }); this.entered = now; this.reaction = null; }
   react(mood: 'failed' | 'waving' | 'jumping' | 'poked' | 'landing', now: number, duration = 2000): void {
     this.reaction = { mood, until: now + duration };
   }

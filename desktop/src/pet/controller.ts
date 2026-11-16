@@ -85,6 +85,7 @@ export function createPetController(deps: PetControllerDeps, benchmark?: { quad:
     targetKey: string | null = null;
   const targets = new Map<string, ActivityItem>();
   const initial = deps.hub.snapshot();
+  let rendering = deps.rendering?.() ?? true;
   if (initial) {
     items = initial.items;
     recent = initial.recent ?? [];
@@ -481,6 +482,7 @@ export function createPetController(deps: PetControllerDeps, benchmark?: { quad:
     const shared = {
       packEpoch,
       visible,
+      rendering,
       appearance,
       glassFallback:
         process.platform === 'win32' &&
@@ -555,7 +557,7 @@ export function createPetController(deps: PetControllerDeps, benchmark?: { quad:
     }
     if (!live()) return;
     const show =
-      visible &&
+      visible && rendering &&
       readyGlass &&
       (panel ||
         menu ||
@@ -961,6 +963,11 @@ export function createPetController(deps: PetControllerDeps, benchmark?: { quad:
     trusted(event) ? action(value) : { ok: false, error: t('不受信任的桌宠页面', {}, uiLocale) },
   );
   const unsubscribes = [
+    deps.onRendering?.((next) => {
+      rendering = next;
+      if (next) { moods.settle(items, Date.now()); completedConversations.clear(); }
+      emit();
+    }) ?? (() => {}),
     deps.onAppearance((next) => {
       appearance = next;
       if (next.locale) uiLocale = resolveLocale(next.locale);
@@ -1003,7 +1010,8 @@ export function createPetController(deps: PetControllerDeps, benchmark?: { quad:
         deps.shouldSpeak(event) &&
         !(settings.snoozeUntil && Date.parse(settings.snoozeUntil) > now);
       let reaction: 'waving' | 'jumping' = 'waving';
-      if (event.type === 'completed' && delivered) {
+      const react = delivered && rendering;
+      if (event.type === 'completed' && react) {
         for (const [key, at] of completedConversations)
           if (now - at > 1200) completedConversations.delete(key);
         completedConversations.set(conversationKey(event.item), now);
@@ -1036,11 +1044,11 @@ export function createPetController(deps: PetControllerDeps, benchmark?: { quad:
       moods.onEvent(
         event.type,
         now,
-        delivered,
+        react,
         reaction,
         reactionMs(event.type === 'failed' ? 'failed' : reaction),
       );
-      if (delivered && ['completed', 'failed'].includes(event.type)) moodEpoch++;
+      if (react && ['completed', 'failed'].includes(event.type)) moodEpoch++;
       if (delivered && bubbles.push(event, now)) {
         targetKey = event.item.key;
         targets.set(event.item.key, event.item);
@@ -1161,7 +1169,7 @@ export function createPetController(deps: PetControllerDeps, benchmark?: { quad:
   }
   let pointerTimer: ReturnType<typeof setInterval> | undefined;
   function syncPointerPoll(): void {
-    if (!visible) { clearInterval(pointerTimer); pointerTimer = undefined; lastCursor = null; return; }
+    if (!visible || !rendering) { clearInterval(pointerTimer); pointerTimer = undefined; lastCursor = null; return; }
     if (pointerTimer !== undefined) return;
     pointerTimer = setInterval(() => {
       if (!live()) return;
@@ -1173,7 +1181,7 @@ export function createPetController(deps: PetControllerDeps, benchmark?: { quad:
     clearTimeout(deadlineTimer);
     const bubble = bubbles.current;
     const deadlines = [
-      moods.deadline(items, now, snoozed),
+      rendering ? moods.deadline(items, now, snoozed) : Infinity,
       !near && bubble && !bubble.sticky && bubble.shownAt !== null ? bubble.shownAt + BUBBLE_MS : Infinity,
       speech.deadline(near),
       snoozed ? Date.parse(settings.snoozeUntil!) : Infinity,
