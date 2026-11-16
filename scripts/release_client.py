@@ -157,6 +157,8 @@ def verify_mac_dmg(dmg, work, signing):
     try:
         mounted_app = mount / 'Pockymoe.app'
         run('codesign', '--verify', '--deep', '--strict', '-R', '=certificate leaf = H"' + signing['certificateSha1'] + '"', mounted_app, capture=True)
+        print('Final DMG Mac signature: pinned certificate, deep/strict verification passed')
+        run('node', DESKTOP / 'scripts/release-fuses.cjs', mounted_app, cwd=DESKTOP)
         resources = mounted_app / 'Contents/Resources'
         extract_asar(resources, work / 'scan-mac-asar')
         # Include volume-root files such as .DS_Store and background artwork.
@@ -176,6 +178,8 @@ def build(version, code, output, work):
         if key.startswith(('CSC_', 'WIN_CSC_', 'APPLE_', 'POCKYMOE_UPDATER_TEST_')):
             env.pop(key)
     env['CSC_IDENTITY_AUTO_DISCOVERY'] = 'false'
+    # Both --validate and publication must exercise exactly the release fuse policy.
+    env['POCKYMOE_RELEASE_FUSES'] = '1'
     run('pnpm', 'build', cwd=DESKTOP, env=env)
     # Self-signed identities are omitted by builder's trusted-identity discovery.
     # Sign explicitly in a dedicated keychain without changing system trust.
@@ -222,6 +226,8 @@ def build(version, code, output, work):
     installed = work / 'scan-installed'
     run(seven, 'x', payloads[0], f'-o{installed}', '-y', capture=True)
     run('node', DESKTOP / 'scripts/verify-windows-package.cjs', installed, 'x64', cwd=DESKTOP)
+    print('Final NSIS extracted Windows executable:')
+    run('node', DESKTOP / 'scripts/release-fuses.cjs', installed / 'Pockymoe.exe', cwd=DESKTOP)
     extract_asar(installed / 'resources', work / 'scan-win-asar')
     scan(apk, scan_apk, artifacts / asset_names(version)[1], artifacts / asset_names(version)[2], installer, installed, work / 'scan-win-asar')
     if list(output.iterdir()):
