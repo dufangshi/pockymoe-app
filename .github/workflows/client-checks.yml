@@ -388,10 +388,7 @@ jobs:
       - run: $PSNativeCommandUseErrorActionPreference = $true; pnpm install --frozen-lockfile
       - run: $PSNativeCommandUseErrorActionPreference = $true; node test/update-roundtrip.mjs --self-test
       - run: $PSNativeCommandUseErrorActionPreference = $true; node test/update-roundtrip.mjs --diagnostics-only
-      - run: $PSNativeCommandUseErrorActionPreference = $true; node test/update-roundtrip.mjs
-      - if: always()
-        run: $PSNativeCommandUseErrorActionPreference = $true; git diff --exit-code -- src/main/index.ts package.json
-      # Keep the A-to-B fixture above unchanged and inspector-enabled for Playwright.
+      # Keep the A-to-B fixture below unchanged and inspector-enabled for Playwright.
       # Only this separate output opts into the release fuse; never feed it to Playwright.
       - name: Build release-fused Windows x64 NSIS package
         timeout-minutes: 10
@@ -425,6 +422,9 @@ jobs:
           $executable = (Resolve-Path $installed).Path
           node scripts/release-fuses.cjs $executable
           node test/inspector-fuse-smoke.mjs $executable off
+      - run: $PSNativeCommandUseErrorActionPreference = $true; node test/update-roundtrip.mjs
+      - if: always()
+        run: $PSNativeCommandUseErrorActionPreference = $true; git diff --exit-code -- src/main/index.ts package.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:
