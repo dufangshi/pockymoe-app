@@ -9,7 +9,7 @@ document.documentElement.dataset.platform = navigator.userAgent.includes('Window
 import './styles.css';
 import lucideNotice from './NOTICE?raw';
 document.head.append(document.createComment(lucideNotice));
-import { ANIMATIONS, frameAt, type SpriteState } from './animation';
+import { ANIMATIONS, frameAt, nextFrameDelay, type SpriteState } from './animation';
 import { activityStatus, statusMarkStyles, statusMarkSvg, type StatusMark } from '../shared/statusMarks';
 import { conversationTitle, alertTitle } from '../shared/activityGroups';
 import { panelConversations, petConversations, petMetadata, replyTarget as conversationReplyTarget, type PetConversation } from './conversations';
@@ -901,13 +901,13 @@ bridge.onCursor(cursor => {
   updateHit();
   if (state.visible && !motion.matches && state.dockAmount === 0) animation.invalidate();
 });
-function animate(now: number): void {
+function animate(now: number): number | void {
   if (state?.rendering === false) return;
   if (state?.surface === 'sprite') {
     if (riveDrawer) stepRive(now);
     else {
       stepClip(now);
-      paintTalk(now);
+      if (speechPlaying()) paintTalk(now);
     }
   }
   if (state?.surface === 'sprite' && !riveDrawer && !clipPlayer && !videoPlayer?.playing) {
@@ -917,6 +917,11 @@ function animate(now: number): void {
     if (animationState === 'sleeping' && state.sleeping && !motion.matches) { const durations = state.sleeping.durationsMs; let remaining = elapsedMs / state.frameScale % durations.reduce((a, b) => a + b, 0); next = 0; while (remaining >= durations[next] && next < durations.length - 1) { remaining -= durations[next]; next++; } }
     if (frame !== next) { frame = next; paintSprite(); updateHit(); }
     const duration = ANIMATIONS[animationState].durations.reduce((sum: number, ms: number) => sum + ms, 0) * state.frameScale;
+    if (!speechPlaying()) {
+      const delay = nextFrameDelay(animationState, elapsedMs, state.frameScale, ONE_SHOT.includes(animationState), animationState === 'sleeping' ? state.sleeping?.durationsMs : undefined);
+      if (!Number.isFinite(delay)) animation.setRunning(false);
+      return delay;
+    }
     if ((ONE_SHOT.includes(animationState) && elapsedMs >= duration) || (animationState === 'sleeping' && !state.sleeping)) animation.setRunning(false);
   }
 }

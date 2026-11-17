@@ -8,22 +8,44 @@ export const SOUNDS: Record<PetSound, Note[]> = {
   failed: [{ frequency: 494, at: 0, length: .2 }, { frequency: 370, at: .17, length: .34 }],
 };
 let context: AudioContext | null = null;
+let activeSources = 0, pendingAudio = 0;
+let suspendTimer: ReturnType<typeof setTimeout> | undefined;
+function idleAudio(): void {
+  clearTimeout(suspendTimer);
+  if (activeSources || pendingAudio || !context) return;
+  suspendTimer = setTimeout(() => {
+    if (!activeSources && !pendingAudio && context?.state === 'running') void context.suspend().catch(() => {});
+  }, 5000);
+}
+async function beginAudio(): Promise<AudioContext> {
+  clearTimeout(suspendTimer);
+  pendingAudio++;
+  context ??= new AudioContext();
+  await context.resume();
+  return context;
+}
+function trackSource(source: AudioScheduledSourceNode): void {
+  activeSources++;
+  source.addEventListener('ended', () => { source.disconnect(); activeSources--; idleAudio(); }, { once: true });
+}
+
 /** Resolves to the context state so callers and tests can see whether audio really started. */
 export async function playSound(sound: PetSound, gain = .2): Promise<AudioContextState> {
-  context ??= new AudioContext();
-  if (context.state !== 'running') await context.resume();
-  const start = context.currentTime + .01;
-  for (const note of SOUNDS[sound]) {
-    const oscillator = context.createOscillator(), overtone = context.createOscillator(), envelope = context.createGain(), soft = context.createGain();
-    oscillator.type = 'sine'; oscillator.frequency.value = note.frequency;
-    overtone.type = 'triangle'; overtone.frequency.value = note.frequency * 2; soft.gain.value = .12;
-    envelope.gain.setValueAtTime(.0001, start + note.at);
-    envelope.gain.exponentialRampToValueAtTime(gain, start + note.at + .012);
-    envelope.gain.exponentialRampToValueAtTime(.0001, start + note.at + note.length);
-    oscillator.connect(envelope); overtone.connect(soft).connect(envelope); envelope.connect(context.destination);
-    for (const source of [oscillator, overtone]) { source.start(start + note.at); source.stop(start + note.at + note.length + .02); }
-  }
-  return context.state;
+  try {
+    context = await beginAudio();
+    const start = context.currentTime + .01;
+    for (const note of SOUNDS[sound]) {
+      const oscillator = context.createOscillator(), overtone = context.createOscillator(), envelope = context.createGain(), soft = context.createGain();
+      oscillator.type = 'sine'; oscillator.frequency.value = note.frequency;
+      overtone.type = 'triangle'; overtone.frequency.value = note.frequency * 2; soft.gain.value = .12;
+      envelope.gain.setValueAtTime(.0001, start + note.at);
+      envelope.gain.exponentialRampToValueAtTime(gain, start + note.at + .012);
+      envelope.gain.exponentialRampToValueAtTime(.0001, start + note.at + note.length);
+      oscillator.connect(envelope); overtone.connect(soft).connect(envelope); envelope.connect(context.destination);
+      for (const source of [oscillator, overtone]) { trackSource(source); source.start(start + note.at); source.stop(start + note.at + note.length + .02); }
+    }
+    return context.state;
+  } finally { pendingAudio--; idleAudio(); }
 }
 let speech: AudioBufferSourceNode | null = null;
 let analyser: AnalyserNode | null = null, samples: Float32Array<ArrayBuffer> | null = null;
@@ -51,18 +73,19 @@ export function speechMouth(now: number): 0 | 1 | 2 {
  */
 export async function playSpeech(audio: Uint8Array, onEnd?: () => void): Promise<boolean> {
   const request = ++speechRequest;
-  context ??= new AudioContext();
-  if (context.state !== 'running') await context.resume();
-  const copy = audio.buffer.slice(audio.byteOffset, audio.byteOffset + audio.byteLength) as ArrayBuffer;
-  const buffer = await context.decodeAudioData(copy);
-  if (request !== speechRequest) return false;
-  speech?.stop();
-  analyser?.disconnect();
-  analyser = context.createAnalyser(); analyser.fftSize = 512;
-  samples = new Float32Array(analyser.fftSize); envelope = 0; sampledAt = 0;
-  const source = context.createBufferSource();
-  source.buffer = buffer; source.connect(analyser); analyser.connect(context.destination); source.start();
-  speech = source;
-  source.onended = () => { source.disconnect(); if (speech === source) { speech = null; analyser?.disconnect(); analyser = null; samples = null; envelope = 0; } onEnd?.(); };
-  return true;
+  try {
+    context = await beginAudio();
+    const copy = audio.buffer.slice(audio.byteOffset, audio.byteOffset + audio.byteLength) as ArrayBuffer;
+    const buffer = await context.decodeAudioData(copy);
+    if (request !== speechRequest) return false;
+    speech?.stop();
+    analyser?.disconnect();
+    analyser = context.createAnalyser(); analyser.fftSize = 512;
+    samples = new Float32Array(analyser.fftSize); envelope = 0; sampledAt = 0;
+    const source = context.createBufferSource();
+    source.buffer = buffer; source.connect(analyser); analyser.connect(context.destination); trackSource(source); source.start();
+    speech = source;
+    source.onended = () => { source.disconnect(); if (speech === source) { speech = null; analyser?.disconnect(); analyser = null; samples = null; envelope = 0; } onEnd?.(); };
+    return true;
+  } finally { pendingAudio--; idleAudio(); }
 }

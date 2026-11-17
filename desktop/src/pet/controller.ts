@@ -41,6 +41,7 @@ import {
 import {
   importPetPack as importPack,
   listPetPacks,
+  loadPetPack,
   imageDimensions,
   readClip,
   readRive,
@@ -597,25 +598,31 @@ export function createPetController(deps: PetControllerDeps, benchmark?: { quad:
     syncPointerPoll();
   }
   let packEpoch = 0;
-  async function refreshPacks(): Promise<void> {
-    const candidates = await listPetPacks([...deps.petDirectories, userPets]);
-    const valid = await Promise.all(
-      candidates.map(
-        async (candidate) =>
-          !(app.isPackaged && candidate.manifest.id === 'placeholder') &&
-          decodeImage(window, candidate.image),
-      ),
-    );
-    if (disposed) return;
-    packs = candidates.filter((_, index) => valid[index]);
-    pack =
-      packs.find((candidate) => candidate.manifest.id === settings.petId) ??
-      packs.find((candidate) => candidate.manifest.id === 'moe') ??
-      packs[0];
-    moodEpoch++;
-    applyPetSize();
-    error = pack ? null : t('没有可用的宠物包。', {}, uiLocale);
-    emit();
+  let packLoad = Promise.resolve();
+  function refreshPacks(): Promise<void> {
+    // Serialize scans, selection and Chromium decoding, including rapid preference changes.
+    packLoad = packLoad.catch(() => {}).then(async () => {
+      packs = (await listPetPacks([...deps.petDirectories, userPets], true))
+        .filter(candidate => !(app.isPackaged && candidate.manifest.id === 'placeholder'));
+      const preferred = [...packs].sort((a, b) =>
+        Number(b.manifest.id === settings.petId) - Number(a.manifest.id === settings.petId) ||
+        Number(b.manifest.id === 'moe') - Number(a.manifest.id === 'moe'));
+      let selected: PetPack | undefined;
+      for (const candidate of preferred) {
+        if (disposed) return;
+        try {
+          const loaded = await loadPetPack(candidate.directory);
+          if (await decodeImage(window, loaded.image)) { selected = loaded; break; }
+        } catch { /* Try the bundled fallback when the selected pack is damaged. */ }
+      }
+      if (disposed) return;
+      pack = selected;
+      moodEpoch++;
+      applyPetSize();
+      error = pack ? null : t('没有可用的宠物包。', {}, uiLocale);
+      emit();
+    });
+    return packLoad;
   }
   function acknowledgeKey(key: string, capturedItem?: ActivityItem): void {
     const item = capturedItem ?? items.find((candidate) => candidate.key === key);
@@ -1090,8 +1097,7 @@ export function createPetController(deps: PetControllerDeps, benchmark?: { quad:
       if (soundOn) cue('completed');
       if (voiceOn) cue(undefined, t('语音播报已打开', {}, uiLocale));
       if (packChanged) {
-        pack = packs.find((candidate) => candidate.manifest.id === next.petId) ?? pack;
-        if (!packs.some((candidate) => candidate.manifest.id === next.petId)) void refreshPacks();
+        void refreshPacks();
       }
       applyPetSize();
       if (visible && readySprite && !window.isVisible()) window.showInactive();
@@ -1314,7 +1320,7 @@ export async function importPetPack(deps: {
 }
 /** Bundled packs are the first directory; anything imported can be replaced by importing again. */
 async function builtInPetIds(directories: string[]): Promise<string[]> {
-  return (await listPetPacks(directories.slice(0, 1))).map((pack) => pack.manifest.id);
+  return (await listPetPacks(directories.slice(0, 1), true)).map((pack) => pack.manifest.id);
 }
 
 async function decodeImage(window: BrowserWindow, bytes: Buffer): Promise<boolean> {

@@ -764,3 +764,14 @@ dot. They schedule no animation and use the same shapes with reduced motion.
 When WebM pet speech ends, the renderer clears the speech face on the audio-end
 event without waiting for another mouth tick, revealing the playing decoder. Synthetic
 media acceptance covers this handoff as well as clip-to-reaction transitions.
+
+## Desktop resource scheduling
+
+Atlas animation timers follow frame boundaries, including ambient idle holds; Rive
+and transitions retain the 30 fps cap. Pet audio suspends five seconds after the
+last cue or speech ends and resumes before playback. Installed-pack scans read
+bounded image/media headers and file sizes; only the selected atlas is loaded and
+decoded, with fallback on failure. Imports retain full media validation.
+Delivered-alert persistence coalesces changes into asynchronous atomic writes and
+flushes on quit. Activity bursts defer tray work; unchanged menu, icon, tooltip and
+badge content skips native updates. File exports use asynchronous chunked writes.

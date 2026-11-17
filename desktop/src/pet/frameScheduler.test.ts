@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { PetFrameScheduler, petAnimationRuns } from './frameScheduler';
+import { nextFrameDelay, frameAt } from './animation';
 import { assertPresentationRate } from './presentationBudget';
 
 afterEach(() => vi.useRealTimers());
@@ -8,7 +9,7 @@ describe('pet presentation cadence', () => {
     vi.useFakeTimers();
     vi.setSystemTime(0);
     const draws: number[] = [];
-    const scheduler = new PetFrameScheduler(now => draws.push(now), () => Date.now());
+    const scheduler = new PetFrameScheduler(now => { draws.push(now); }, () => Date.now());
     scheduler.setRunning(true);
     for (let i = 0; i < hz * 10; i++) {
       scheduler.invalidate();
@@ -47,4 +48,21 @@ describe('pet presentation cadence', () => {
     expect(petAnimationRuns(true, 'sprite', false, false, false, true, true)).toBe(true);
     expect(petAnimationRuns(false, 'sprite', false, false, false, true, true)).toBe(false);
   });
+});
+
+it('sleeps between atlas frame boundaries and across ambient holds', () => {
+  vi.useFakeTimers(); vi.setSystemTime(0);
+  const draws: number[] = [], frames: number[] = [];
+  const scheduler = new PetFrameScheduler(now => {
+    draws.push(now);
+    frames.push(frameAt('running', now, false, 2.5));
+    return nextFrameDelay('running', now, 2.5);
+  }, () => Date.now());
+  scheduler.setRunning(true); vi.advanceTimersByTime(10000); scheduler.setRunning(false);
+  expect(draws.length).toBeLessThan(35);
+  expect(frames.slice(1).every((frame, i) => frame !== frames[i])).toBe(true);
+  expect(nextFrameDelay('idle', 3000, 2.5)).toBe(11000);
+  expect(nextFrameDelay('idle', 18000, 2.5)).toBe(13000);
+  expect(nextFrameDelay('sleeping', 0)).toBe(Infinity);
+  expect(nextFrameDelay('waving', 1400, 1, true)).toBe(Infinity);
 });
