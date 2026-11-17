@@ -84,6 +84,7 @@ final class ProductWebController: UIViewController, WKNavigationDelegate, WKUIDe
         web?.configuration.userContentController.removeScriptMessageHandler(forName: "remoteCodex")
         web?.configuration.websiteDataStore.httpCookieStore.remove(self)
         EventWatcher.shared.openThread = nil
+        EventWatcher.shared.webDeliversEvents = false
     }
     func cookiesDidChange(in cookieStore: WKHTTPCookieStore) {
         guard sessionReady else { return }
@@ -93,6 +94,7 @@ final class ProductWebController: UIViewController, WKNavigationDelegate, WKUIDe
             DispatchQueue.main.async {
                 guard self.store.token != token else { return }
                 self.store.token = token
+                EventWatcher.shared.webDeliversEvents = false
                 if token.isEmpty { EventWatcher.shared.stop() } else { EventWatcher.shared.start() }
             }
         }
@@ -113,7 +115,8 @@ final class ProductWebController: UIViewController, WKNavigationDelegate, WKUIDe
             if let path = value["path"] as? String, let url = URL(string: store.relayUrl + path), case .threadDetail(let device, let thread, _) = nativeRoute(for: url, deviceId: store.deviceId) {
                 EventWatcher.shared.openThread = (device, thread)
             } else { EventWatcher.shared.openThread = nil }
-            cookiesDidChange(in: web.configuration.websiteDataStore.httpCookieStore)
+        case "eventDelivery":
+            EventWatcher.shared.webDeliversEvents = value["active"] as? Bool ?? false
         case "changeRelay":
             EventWatcher.shared.stop()
             WKWebsiteDataStore.default().removeData(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(), modifiedSince: .distantPast) {
@@ -133,18 +136,34 @@ final class ProductWebController: UIViewController, WKNavigationDelegate, WKUIDe
             }
             show(sheet)
         case "download":
-            guard let raw = value["data"] as? String, raw.utf8.count <= 45 * 1024 * 1024,
-                  let encoded = raw.split(separator: ",", maxSplits: 1).last, let bytes = Data(base64Encoded: String(encoded)) else { return }
+            guard let raw = value["data"] as? String else { return }
             let name = (value["name"] as? String ?? "download").replacingOccurrences(of: "\\", with: "/").split(separator: "/").last.map(String.init) ?? "download"
             let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-            do {
-                try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-                let file = dir.appendingPathComponent(name)
-                try bytes.write(to: file)
-                let sheet = UIActivityViewController(activityItems: [file], applicationActivities: nil)
-                sheet.completionWithItemsHandler = { _, _, _, _ in try? FileManager.default.removeItem(at: dir) }
-                show(sheet)
-            } catch { showError(error.localizedDescription) }
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                do {
+                    guard raw.utf8.count <= 45 * 1024 * 1024,
+                          let comma = raw.firstIndex(of: ","),
+                          let bytes = Data(base64Encoded: String(raw[raw.index(after: comma)...])),
+                          bytes.count <= 32 * 1024 * 1024 else {
+                        throw NSError(domain: "RemoteCodexExport", code: 1, userInfo: [NSLocalizedDescriptionKey: "Invalid download or download exceeds the 32 MB mobile export limit."])
+                    }
+                    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+                    let file = dir.appendingPathComponent(name == "." || name == ".." ? "download" : name)
+                    try bytes.write(to: file)
+                    DispatchQueue.main.async { [weak self] in
+                        guard let self, self.viewIfLoaded?.window != nil else {
+                            try? FileManager.default.removeItem(at: dir)
+                            return
+                        }
+                        let sheet = UIActivityViewController(activityItems: [file], applicationActivities: nil)
+                        sheet.completionWithItemsHandler = { _, _, _, _ in try? FileManager.default.removeItem(at: dir) }
+                        self.show(sheet)
+                    }
+                } catch {
+                    try? FileManager.default.removeItem(at: dir)
+                    DispatchQueue.main.async { [weak self] in self?.showError(error.localizedDescription) }
+                }
+            }
         case "error": showError(value["message"] as? String ?? "Unable to complete action.")
         default: break
         }
@@ -158,6 +177,16 @@ final class ProductWebController: UIViewController, WKNavigationDelegate, WKUIDe
         let alert = UIAlertController(title: "Remote Codex", message: message, preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: "OK", style: .default))
         present(alert, animated: true)
+    }
+    func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+        EventWatcher.shared.webDeliversEvents = false
+    }
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        EventWatcher.shared.webDeliversEvents = false
+    }
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        // Initial snapshot covers cookies set before the observer became ready.
+        cookiesDidChange(in: webView.configuration.websiteDataStore.httpCookieStore)
     }
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
         showError(error.localizedDescription)
