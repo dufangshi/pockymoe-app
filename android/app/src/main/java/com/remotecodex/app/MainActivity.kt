@@ -608,6 +608,9 @@ class MainActivity : ComponentActivity() {
             "files.saveStart" -> {
                 require(saveReply == null)
                 withContext(Dispatchers.IO) {
+                    // A document reload can abandon its JS transfer before aborting.
+                    // No picker is active here, so a new export may replace that file.
+                    saveTransfer.clear()
                     saveTransfer.start(args.getString(0), args.getLong(1))
                 }
             }
