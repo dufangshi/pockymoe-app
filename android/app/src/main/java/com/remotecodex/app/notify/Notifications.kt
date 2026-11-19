@@ -13,12 +13,17 @@ import com.remotecodex.app.BuildConfig
 import com.remotecodex.app.MainActivity
 import com.remotecodex.app.data.SessionStore
 import com.remotecodex.app.shellLocale
+import com.remotecodex.app.shellText
 import java.time.Instant
 import org.json.JSONArray
 import org.json.JSONObject
 
 object Notifications {
     const val CHANNEL_AGENT = "account-activity"
+    /** Waiting for you and failed runs: a banner with sound, apart from the quiet stream. */
+    const val CHANNEL_ATTENTION = "account-attention"
+    private const val ATTENTION_ID = 42
+    private val ATTENTION_STATES = setOf("needsInput", "failed")
     const val WATCH_ID = 41
     const val EXTRA_DEVICE_ID = "deviceId"
     const val EXTRA_THREAD_ID = "threadId"
@@ -141,7 +146,10 @@ object Notifications {
             .edit()
             .clear()
             .apply()
-        context.getSystemService(NotificationManager::class.java).cancel(WATCH_ID)
+        context.getSystemService(NotificationManager::class.java).apply {
+            cancel(WATCH_ID)
+            cancel(ATTENTION_ID)
+        }
     }
 
     fun ensureChannel(context: Context) {
@@ -157,6 +165,15 @@ object Notifications {
         manager.createNotificationChannel(
             NotificationChannel(CHANNEL_AGENT, "Pockymoe", importance)
         )
+        // The ongoing stream stays quiet; a thread that needs the reader, or failed,
+        // alerts once on its own channel, which the reader can mute separately.
+        manager.createNotificationChannel(
+            NotificationChannel(
+                CHANNEL_ATTENTION,
+                shellText(context, "需要你处理", "Needs you"),
+                NotificationManager.IMPORTANCE_HIGH,
+            )
+        )
         manager.activeNotifications
             .filter { it.notification.channelId == "agent-runs" && it.id != WATCH_ID }
             .forEach { manager.cancel(it.id) }
@@ -167,6 +184,8 @@ object Notifications {
         if (BuildConfig.DEBUG && debugOverride && snapshot.optString("accountId") != "debug") return
         restore(context)
         val next = snapshot.getString("accountId")
+        // States before this snapshot, to alert only on a new wait or failure.
+        val previous = if (account == next) localItems.mapValues { it.value.state } else null
         if (account != next) {
             localItems.clear()
             genericBody = ""
@@ -193,6 +212,10 @@ object Notifications {
                 )
             localItems[item.key] = item
         }
+        if (previous != null && !RemoteCodexForeground.isForeground)
+            localItems.values
+                .firstOrNull { it.state in ATTENTION_STATES && previous[it.key] != it.state }
+                ?.let { alert(context, it) }
         val names = localItems.values.toMutableList()
         val recent = snapshot.optJSONArray("recent") ?: JSONArray()
         for (i in 0 until recent.length()) {
@@ -212,6 +235,39 @@ object Notifications {
         }
         metadata.remember(account, names)
         refresh(context)
+    }
+
+    private fun alert(context: Context, item: AccountItem) {
+        val copy = NotificationCopy(shellLocale(context))
+        val target = item.conversationTarget()
+        val intent =
+            Intent(context, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                putExtra(EXTRA_DEVICE_ID, target.deviceId)
+                putExtra(EXTRA_THREAD_ID, target.threadId)
+                putExtra(EXTRA_RELAY_ORIGIN, SessionStore(context).relayUrl)
+            }
+        val pending =
+            PendingIntent.getActivity(
+                context,
+                ATTENTION_ID,
+                intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
+        val failed = item.state == "failed"
+        val notification =
+            Notification.Builder(context, CHANNEL_ATTENTION)
+                .setSmallIcon(
+                    if (failed) com.remotecodex.app.R.drawable.status_failed
+                    else com.remotecodex.app.R.drawable.status_waiting
+                )
+                .setContentTitle(copy.threadTitle(item.title))
+                .setContentText(copy.stateLine(item.state, 0))
+                .setContentIntent(pending)
+                .setAutoCancel(true)
+                .setCategory(if (failed) Notification.CATEGORY_ERROR else Notification.CATEGORY_MESSAGE)
+                .build()
+        context.getSystemService(NotificationManager::class.java).notify(ATTENTION_ID, notification)
     }
 
     @Synchronized

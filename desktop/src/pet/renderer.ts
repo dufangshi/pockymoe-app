@@ -9,7 +9,7 @@ document.documentElement.dataset.platform = navigator.userAgent.includes('Window
 import './styles.css';
 import lucideNotice from './NOTICE?raw';
 document.head.append(document.createComment(lucideNotice));
-import { ANIMATIONS, frameAt, type SpriteState } from './animation';
+import { ANIMATIONS, frameAt, nextFrameDelay, type SpriteState } from './animation';
 import { activityStatus, statusMarkStyles, statusMarkSvg, type StatusMark } from '../shared/statusMarks';
 import { conversationTitle, alertTitle } from '../shared/activityGroups';
 import { panelConversations, petConversations, petMetadata, replyTarget as conversationReplyTarget, type PetConversation } from './conversations';
@@ -74,7 +74,8 @@ function middleName(value: string, label = value): string {
 function errorSlot(id: string): string { return failures.has(id) ? `<span class="pet-error-slot" data-error-id="${escape(id)}" role="alert"></span>` : ''; }
 function decisions(item: ActivityItem, surface: string): string {
   const disabled = pending.has(`${surface}:${item.key}`) ? ' disabled aria-busy="true"' : '';
-  return `<span class="decisions">${button('approve', t('批准'), icon('check'), `class="primary"${disabled}`)}${button('deny', t('拒绝'), icon('close'), disabled)}</span>`;
+  // Words, not ✓/✕: ✕ means "close" everywhere else, and here it would deny the request.
+  return `<span class="decisions">${button('approve', t('批准'), escape(t('批准')), `class="primary"${disabled}`)}${button('deny', t('拒绝'), escape(t('拒绝')), `class="deny"${disabled}`)}</span>`;
 }
 function controls(): string {
   return `<nav class="controls" aria-label="${escape(t('桌宠控制'))}">${button('toggleTray', t('活动面板'), icon('tasks') + (state?.items.length ? `<span class="task-count">${petConversations(state.items).length}</span>` : ''), `aria-expanded="${state?.mode === 'panel'}"`)}${button('openMain', t('打开主窗口'), icon('home'))}${button('openMap', t('在地图中显示'), icon('map'))}${button('more', t('更多'), icon('more'), `aria-haspopup="menu" aria-expanded="${state?.mode === 'menu'}"`)}</nav>`;
@@ -901,13 +902,13 @@ bridge.onCursor(cursor => {
   updateHit();
   if (state.visible && !motion.matches && state.dockAmount === 0) animation.invalidate();
 });
-function animate(now: number): void {
+function animate(now: number): number | void {
   if (state?.rendering === false) return;
   if (state?.surface === 'sprite') {
     if (riveDrawer) stepRive(now);
     else {
       stepClip(now);
-      paintTalk(now);
+      if (speechPlaying()) paintTalk(now);
     }
   }
   if (state?.surface === 'sprite' && !riveDrawer && !clipPlayer && !videoPlayer?.playing) {
@@ -917,6 +918,11 @@ function animate(now: number): void {
     if (animationState === 'sleeping' && state.sleeping && !motion.matches) { const durations = state.sleeping.durationsMs; let remaining = elapsedMs / state.frameScale % durations.reduce((a, b) => a + b, 0); next = 0; while (remaining >= durations[next] && next < durations.length - 1) { remaining -= durations[next]; next++; } }
     if (frame !== next) { frame = next; paintSprite(); updateHit(); }
     const duration = ANIMATIONS[animationState].durations.reduce((sum: number, ms: number) => sum + ms, 0) * state.frameScale;
+    if (!speechPlaying()) {
+      const delay = nextFrameDelay(animationState, elapsedMs, state.frameScale, ONE_SHOT.includes(animationState), animationState === 'sleeping' ? state.sleeping?.durationsMs : undefined);
+      if (!Number.isFinite(delay)) animation.setRunning(false);
+      return delay;
+    }
     if ((ONE_SHOT.includes(animationState) && elapsedMs >= duration) || (animationState === 'sleeping' && !state.sleeping)) animation.setRunning(false);
   }
 }

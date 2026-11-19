@@ -17,7 +17,7 @@ export function applyAppearance(appearance: Appearance | null): void {
     root.style.setProperty('--theme-accent-soft', `color-mix(in srgb, ${appearance.accent} 16%, transparent)`);
   } else { root.style.removeProperty('--theme-accent-solid'); root.style.removeProperty('--theme-accent-soft'); }
   if (root.dataset.platform === 'win32') {
-    const palette = windowsPanelPalette({ effective: root.dataset.themeEffective as 'light' | 'dark', pack: root.dataset.themePreset, accent: appearance?.accent || '#a57224' });
+    const palette = windowsPanelPalette({ effective: root.dataset.themeEffective as 'light' | 'dark', pack: root.dataset.themePreset, accent: appearance?.accent || (root.dataset.themeEffective === 'dark' ? '#00cc76' : '#008b53') });
     root.style.setProperty('--windows-panel-bg', palette.background);
     root.style.setProperty('--windows-panel-fg', palette.foreground);
     root.style.setProperty('--windows-panel-muted', palette.muted);

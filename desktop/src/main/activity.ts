@@ -1,5 +1,7 @@
 import type { ActivityEvent, ActivityHubLike, ActivityItem, ActivityRecent, ActivitySnapshot } from '../shared/contract';
-import { readJson, writeJson } from './store';
+import { readJson } from './store';
+import { mkdir, writeFile, rename } from 'node:fs/promises';
+import { dirname } from 'node:path';
 
 const states = new Set(['needsInput', 'failed', 'interrupted', 'completed', 'running', 'idle']);
 const text = (value: unknown, max: number): value is string => typeof value === 'string' && value.length <= max;
@@ -61,6 +63,9 @@ export class ActivityHub implements ActivityHubLike {
   private firstSeen = new Set<string>();
   private missing = new Map<string, number>();
   private announced = new Set<string>();
+  private persistedSeen = '';
+  private persistTimer?: ReturnType<typeof setTimeout>;
+  private writes = Promise.resolve();
   private expiry?: ReturnType<typeof setTimeout>;
   constructor(private seenPath?: string, private now = () => Date.now()) {
     const entries = seenPath ? readJson(seenPath) : null;
@@ -68,6 +73,7 @@ export class ActivityHub implements ActivityHubLike {
       if (Array.isArray(entry) && typeof entry[0] === 'string' && typeof entry[1] === 'number' && entry[0].length < 1200) this.seen.set(entry[0], entry[1]);
     }
     this.prune();
+    this.persistedSeen = JSON.stringify([...this.seen]);
   }
   private prune(): void {
     for (const [id, time] of this.seen) if (time < this.now() - 7 * 86400_000) this.seen.delete(id);
@@ -135,8 +141,26 @@ export class ActivityHub implements ActivityHubLike {
       this.emit(event);
     }
     this.prune();
-    if (this.seenPath) writeJson(this.seenPath, [...this.seen]);
+    this.persistSeen();
     this.scheduleExpiry();
+  }
+  private persistSeen(): void {
+    if (!this.seenPath || this.persistTimer) return;
+    const content = JSON.stringify([...this.seen]);
+    if (content === this.persistedSeen) return;
+    this.persistTimer = setTimeout(() => { this.persistTimer = undefined; void this.flush(); }, 100);
+  }
+  async flush(): Promise<void> {
+    clearTimeout(this.persistTimer); this.persistTimer = undefined;
+    const path = this.seenPath, content = JSON.stringify([...this.seen]);
+    if (!path || content === this.persistedSeen) return this.writes;
+    this.persistedSeen = content;
+    this.writes = this.writes.then(async () => {
+      await mkdir(dirname(path), { recursive: true });
+      await writeFile(`${path}.tmp`, content, { mode: 0o600 });
+      await rename(`${path}.tmp`, path);
+    }).catch(error => { this.persistedSeen = ''; console.error('Cannot persist delivered alerts', error); });
+    return this.writes;
   }
   private resolve(item: ActivityItem, at: string): void {
     const id = alertId(item);
@@ -163,7 +187,7 @@ export class ActivityHub implements ActivityHubLike {
     }, Math.max(1, deadline - this.now()));
     this.expiry.unref?.();
   }
-  dispose(): void { clearTimeout(this.expiry); this.snapshots.clear(); this.events.clear(); this.acknowledgements.clear(); }
+  dispose(): void { void this.flush(); clearTimeout(this.expiry); this.snapshots.clear(); this.events.clear(); this.acknowledgements.clear(); }
   private emit(event: ActivityEvent): void { for (const listener of this.events) listener(structuredClone(event)); }
   onSnapshot(listener: (s: ActivitySnapshot) => void): () => void { this.snapshots.add(listener); return () => this.snapshots.delete(listener); }
   onEvent(listener: (e: ActivityEvent) => void): () => void { this.events.add(listener); return () => this.events.delete(listener); }

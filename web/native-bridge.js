@@ -59,8 +59,12 @@
   if (document.documentElement) observeTheme();
   else addEventListener('DOMContentLoaded', observeTheme);
   // Fetch remains untouched: credentials, E2EE and real Service Workers belong
-  // to the website. Poll state only to synchronize native cookies/theme on login.
-  setInterval(report, 2000);
+  // to the website. Cookie changes are observed natively. Check only visible
+  // pages once a minute for localStorage theme changes missed by DOM observers.
+  addEventListener('hashchange', report);
+  addEventListener('storage', report);
+  addEventListener('visibilitychange', () => { if (!document.hidden) report(); });
+  setInterval(() => { if (!document.hidden) report(); }, 60000);
   const pending = new Map();
   // Keep the original Blob until its URL is revoked. Reading our own object
   // directly avoids a fetch(blob:) that older WebViews reject under connect-src self.
@@ -76,6 +80,8 @@
     platform: window.webkit?.messageHandlers?.remoteCodex ? 'ios' : 'android',
     changeRelay: () => send('changeRelay'),
     notificationSettings: () => send('notificationSettings'),
+    // Opt in only while the page owns account-wide notification delivery.
+    setEventDeliveryActive: active => send('eventDelivery', { active: active === true }),
     resolve: (id, error) => {
       const task = pending.get(id);
       if (!task) return;

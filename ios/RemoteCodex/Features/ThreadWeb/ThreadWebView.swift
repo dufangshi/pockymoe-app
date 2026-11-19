@@ -12,7 +12,8 @@ struct ProductRootView: View {
         }
         .preferredColorScheme(store.themeMode == .system ? nil : (store.themeMode == .dark ? .dark : .light))
         .environment(\.rcColors, store.themeMode == .dark || (store.themeMode == .system && colorScheme == .dark) ? .dark : .light)
-        .onAppear { EventWatcher.shared.requestPermission() }
+        // Notification permission is asked once signed in (EventWatcher.start), not
+        // on first launch before there is a relay or an account.
     }
 }
 
@@ -45,7 +46,16 @@ final class ProductWebController: UIViewController, WKNavigationDelegate, WKUIDe
         web = WKWebView(frame: .zero, configuration: config)
         web.navigationDelegate = self
         web.uiDelegate = self
-        web.allowsBackForwardNavigationGestures = true
+        // The page owns back: an edge swipe walking WebView history jumped between
+        // threads instead of closing the open panel, and fought the Web's drawer swipe.
+        web.allowsBackForwardNavigationGestures = false
+        // Until the page paints, and in the status bar and home indicator strips, show
+        // the launch colour (light/dark), then the page's own chrome colour.
+        let launch = UIColor(named: "LaunchBackground") ?? .systemBackground
+        view.backgroundColor = launch
+        web.isOpaque = false
+        web.backgroundColor = launch
+        web.scrollView.backgroundColor = launch
         web.scrollView.contentInsetAdjustmentBehavior = .never
         web.scrollView.bounces = false
         web.scrollView.showsHorizontalScrollIndicator = false
@@ -84,6 +94,7 @@ final class ProductWebController: UIViewController, WKNavigationDelegate, WKUIDe
         web?.configuration.userContentController.removeScriptMessageHandler(forName: "remoteCodex")
         web?.configuration.websiteDataStore.httpCookieStore.remove(self)
         EventWatcher.shared.openThread = nil
+        EventWatcher.shared.webDeliversEvents = false
     }
     func cookiesDidChange(in cookieStore: WKHTTPCookieStore) {
         guard sessionReady else { return }
@@ -93,6 +104,7 @@ final class ProductWebController: UIViewController, WKNavigationDelegate, WKUIDe
             DispatchQueue.main.async {
                 guard self.store.token != token else { return }
                 self.store.token = token
+                EventWatcher.shared.webDeliversEvents = false
                 if token.isEmpty { EventWatcher.shared.stop() } else { EventWatcher.shared.start() }
             }
         }
@@ -113,12 +125,11 @@ final class ProductWebController: UIViewController, WKNavigationDelegate, WKUIDe
             if let path = value["path"] as? String, let url = URL(string: store.relayUrl + path), case .threadDetail(let device, let thread, _) = nativeRoute(for: url, deviceId: store.deviceId) {
                 EventWatcher.shared.openThread = (device, thread)
             } else { EventWatcher.shared.openThread = nil }
-            cookiesDidChange(in: web.configuration.websiteDataStore.httpCookieStore)
+            followPageChrome()
+        case "eventDelivery":
+            EventWatcher.shared.webDeliversEvents = value["active"] as? Bool ?? false
         case "changeRelay":
-            EventWatcher.shared.stop()
-            WKWebsiteDataStore.default().removeData(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(), modifiedSince: .distantPast) {
-                DispatchQueue.main.async { self.store.clearSession(); self.store.relayUrl = "" }
-            }
+            changeRelay()
         case "notificationSettings":
             if let url = URL(string: UIApplication.openNotificationSettingsURLString) { UIApplication.shared.open(url) }
         case "share":
@@ -133,18 +144,34 @@ final class ProductWebController: UIViewController, WKNavigationDelegate, WKUIDe
             }
             show(sheet)
         case "download":
-            guard let raw = value["data"] as? String, raw.utf8.count <= 45 * 1024 * 1024,
-                  let encoded = raw.split(separator: ",", maxSplits: 1).last, let bytes = Data(base64Encoded: String(encoded)) else { return }
+            guard let raw = value["data"] as? String else { return }
             let name = (value["name"] as? String ?? "download").replacingOccurrences(of: "\\", with: "/").split(separator: "/").last.map(String.init) ?? "download"
             let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-            do {
-                try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-                let file = dir.appendingPathComponent(name)
-                try bytes.write(to: file)
-                let sheet = UIActivityViewController(activityItems: [file], applicationActivities: nil)
-                sheet.completionWithItemsHandler = { _, _, _, _ in try? FileManager.default.removeItem(at: dir) }
-                show(sheet)
-            } catch { showError(error.localizedDescription) }
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                do {
+                    guard raw.utf8.count <= 45 * 1024 * 1024,
+                          let comma = raw.firstIndex(of: ","),
+                          let bytes = Data(base64Encoded: String(raw[raw.index(after: comma)...])),
+                          bytes.count <= 32 * 1024 * 1024 else {
+                        throw NSError(domain: "RemoteCodexExport", code: 1, userInfo: [NSLocalizedDescriptionKey: "Invalid download or download exceeds the 32 MB mobile export limit."])
+                    }
+                    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+                    let file = dir.appendingPathComponent(name == "." || name == ".." ? "download" : name)
+                    try bytes.write(to: file)
+                    DispatchQueue.main.async { [weak self] in
+                        guard let self, self.viewIfLoaded?.window != nil else {
+                            try? FileManager.default.removeItem(at: dir)
+                            return
+                        }
+                        let sheet = UIActivityViewController(activityItems: [file], applicationActivities: nil)
+                        sheet.completionWithItemsHandler = { _, _, _, _ in try? FileManager.default.removeItem(at: dir) }
+                        self.show(sheet)
+                    }
+                } catch {
+                    try? FileManager.default.removeItem(at: dir)
+                    DispatchQueue.main.async { [weak self] in self?.showError(error.localizedDescription) }
+                }
+            }
         case "error": showError(value["message"] as? String ?? "Unable to complete action.")
         default: break
         }
@@ -155,12 +182,66 @@ final class ProductWebController: UIViewController, WKNavigationDelegate, WKUIDe
         present(sheet, animated: true)
     }
     private func showError(_ message: String) {
-        let alert = UIAlertController(title: "Remote Codex", message: message, preferredStyle: .alert)
+        let alert = UIAlertController(title: "Pockymoe", message: message, preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: "OK", style: .default))
         present(alert, animated: true)
     }
+    private func changeRelay() {
+        EventWatcher.shared.stop()
+        WKWebsiteDataStore.default().removeData(ofTypes: WKWebsiteDataStore.allWebsiteDataTypes(), modifiedSince: .distantPast) {
+            DispatchQueue.main.async { self.store.clearSession(); self.store.relayUrl = "" }
+        }
+    }
+    /// The status bar and home indicator strips take the page's chrome colour.
+    private func followPageChrome() {
+        web.evaluateJavaScript("document.querySelector('meta[name=\"theme-color\"]')?.content || ''") { [weak self] value, _ in
+            guard let self, let hex = value as? String, let color = UIColor(pageHex: hex) else { return }
+            self.view.backgroundColor = color
+            self.web.backgroundColor = color
+            self.web.scrollView.backgroundColor = color
+        }
+    }
+    /// A page that cannot load says why and offers Retry and another relay, instead of
+    /// an alert over a blank WebView. A relay outside the app's bound domains says so.
+    private func loadFailed(_ error: Error) {
+        let ns = error as NSError
+        if ns.domain == NSURLErrorDomain && ns.code == NSURLErrorCancelled { return }
+        if ns.domain == WKErrorDomain && ns.code == 102 { return } // Frame load interrupted by a policy change.
+        let unbound = (error as? WKError)?.code == .navigationAppBoundDomain
+        let message = unbound
+            ? shellText("这个 iOS 版本只能打开内置列表里的 Relay 地址（WKAppBoundDomains）。请换用列表里的地址，或在 ios/project.yml 里加入这个地址后重新构建。",
+                        "This iOS build only opens relay addresses in its built-in list (WKAppBoundDomains). Use a listed address, or add this one to ios/project.yml and rebuild.")
+            : error.localizedDescription
+        let alert = UIAlertController(title: "Pockymoe", message: message, preferredStyle: .alert)
+        if !unbound {
+            alert.addAction(UIAlertAction(title: shellText("重试", "Retry"), style: .default) { [weak self] _ in
+                guard let self else { return }
+                if self.web.url != nil { self.web.reload() }
+                else if let url = URL(string: self.store.relayUrl + self.target) { self.web.load(URLRequest(url: url)) }
+            })
+        }
+        alert.addAction(UIAlertAction(title: shellText("更换 Relay", "Change relay"), style: unbound ? .default : .cancel) { [weak self] _ in self?.changeRelay() })
+        present(alert, animated: true)
+    }
+    private func shellText(_ chinese: String, _ english: String) -> String {
+        (Locale.preferredLanguages.first ?? "").hasPrefix("zh") ? chinese : english
+    }
+    func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+        EventWatcher.shared.webDeliversEvents = false
+    }
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        EventWatcher.shared.webDeliversEvents = false
+    }
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
-        showError(error.localizedDescription)
+        loadFailed(error)
+    }
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        loadFailed(error)
+    }
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        // Initial snapshot covers cookies set before the observer became ready.
+        cookiesDidChange(in: webView.configuration.websiteDataStore.httpCookieStore)
+        followPageChrome()
     }
     func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
         guard action.targetFrame?.isMainFrame != false, let url = action.request.url else { decisionHandler(.allow); return }
@@ -632,4 +713,13 @@ func nativeRoute(for url: URL, deviceId: String) -> AppRoute? {
     if path == "/relay-settings" { return .settings }
     if path == "/" || path == "/relay-portal" { return .home }
     return nil
+}
+
+private extension UIColor {
+    /// `#rrggbb` from the page's theme-color meta.
+    convenience init?(pageHex: String) {
+        let hex = pageHex.trimmingCharacters(in: .whitespaces)
+        guard hex.hasPrefix("#"), hex.count == 7, let value = UInt32(hex.dropFirst(), radix: 16) else { return nil }
+        self.init(red: CGFloat(value >> 16 & 0xFF) / 255, green: CGFloat(value >> 8 & 0xFF) / 255, blue: CGFloat(value & 0xFF) / 255, alpha: 1)
+    }
 }

@@ -55,7 +55,7 @@ for (const profile of ['fresh', 'legacy', 'saved', 'relay-only', 'relay-failed']
       const page = readyPage;
       await expect(page.locator('#origin')).toHaveValue(profile === 'relay-failed' ? origin : '');
       await expect(page.locator('#origin')).toHaveAttribute('placeholder', 'https://app.example.com');
-      await expect(page.locator('.hint').first()).toContainText(/default address|不再提供默认地址/);
+      await expect(page.locator('.hint').first()).toContainText(/https:\/\/ is added|自动补上/);
       await page.evaluate(async () => {
         const bridge = (window as unknown as { pockymoeDesktop: LocalBridge }).pockymoeDesktop;
         await bridge.action({ type: 'checkUpdate' });

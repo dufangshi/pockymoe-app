@@ -604,7 +604,7 @@ function validateSleeping(bytes: Buffer, manifest: PetManifest): void {
   if (size.width !== 192 * strip.frames || size.height !== 208 || !strip.path.endsWith(size.format))
     fail('invalid sleeping strip dimensions or format');
 }
-async function safeRead(path: string, limit: number): Promise<Buffer> {
+async function safeRead(path: string, limit: number, headerBytes?: number): Promise<Buffer> {
   const stat = await lstat(path);
   if (!stat.isFile() || stat.isSymbolicLink()) fail('symlinks and non-regular files are not allowed');
   if (stat.size > limit) fail(`${basename(path)} exceeds its size limit`);
@@ -612,36 +612,42 @@ async function safeRead(path: string, limit: number): Promise<Buffer> {
   try {
     const opened = await handle.stat();
     if (!opened.isFile() || opened.size > limit) fail('file changed during import or exceeds its size limit');
-    const data = await handle.readFile();
+    let data: Buffer;
+    if (headerBytes === undefined) data = await handle.readFile();
+    else {
+      const { buffer, bytesRead } = await handle.read(Buffer.alloc(headerBytes), 0, headerBytes, 0);
+      data = buffer.subarray(0, bytesRead);
+    }
     if (data.length > limit) fail(`${basename(path)} exceeds its size limit`);
     return data;
   } finally {
     await handle.close();
   }
 }
-export async function loadPetPack(directory: string): Promise<PetPack> {
+/** Header-only results are catalog metadata; load the selected pack before rendering its images. */
+export async function loadPetPack(directory: string, headersOnly = false): Promise<PetPack> {
   const stat = await lstat(directory);
   if (!stat.isDirectory() || stat.isSymbolicLink()) fail('pack must be a regular directory');
   const manifest = parseManifest(await safeRead(join(directory, 'pet.json'), MAX_MANIFEST_BYTES));
-  const image = await safeRead(join(directory, manifest.spritesheetPath), MAX_PACK_BYTES);
+  const image = await safeRead(join(directory, manifest.spritesheetPath), MAX_PACK_BYTES, headersOnly ? 64 : undefined);
   validateAtlas(image, manifest);
   const sleepingImage = manifest.remoteCodex?.sleeping
-    ? await safeRead(join(directory, manifest.remoteCodex.sleeping.path), MAX_PACK_BYTES)
+    ? await safeRead(join(directory, manifest.remoteCodex.sleeping.path), MAX_PACK_BYTES, headersOnly ? 64 : undefined)
     : undefined;
   if (sleepingImage) validateSleeping(sleepingImage, manifest);
-  if (image.length + (sleepingImage?.length ?? 0) > MAX_PACK_BYTES) fail('combined spritesheets exceed 8 MB');
+  if ((await lstat(join(directory, manifest.spritesheetPath))).size + (manifest.remoteCodex?.sleeping ? (await lstat(join(directory, manifest.remoteCodex.sleeping.path))).size : 0) > MAX_PACK_BYTES) fail('combined spritesheets exceed 8 MB');
   const peekImage = manifest.remoteCodex?.peek
-    ? await safeRead(join(directory, manifest.remoteCodex.peek.path), MAX_PACK_BYTES)
+    ? await safeRead(join(directory, manifest.remoteCodex.peek.path), MAX_PACK_BYTES, headersOnly ? 64 : undefined)
     : undefined;
   if (peekImage) validatePeek(peekImage, manifest);
   await checkClips(directory, manifest);
-  if (manifest.remoteCodex?.rive) checkRive(await safeRead(join(directory, 'pet.riv'), MAX_RIVE_BYTES));
+  if (manifest.remoteCodex?.rive) checkRive(await safeRead(join(directory, 'pet.riv'), MAX_RIVE_BYTES, 8));
   if (
     manifest.remoteCodex?.clipFormat?.mediaType &&
     (await lstat(join(directory, 'pet.json'))).size +
-      image.length +
-      (sleepingImage?.length ?? 0) +
-      (peekImage?.length ?? 0) +
+      (await lstat(join(directory, manifest.spritesheetPath))).size +
+      (manifest.remoteCodex?.sleeping ? (await lstat(join(directory, manifest.remoteCodex.sleeping.path))).size : 0) +
+      (manifest.remoteCodex?.peek ? (await lstat(join(directory, manifest.remoteCodex.peek.path))).size : 0) +
       (
         await Promise.all(clipPaths(manifest).map(async (p) => (await lstat(join(directory, p))).size))
       ).reduce((a, b) => a + b, 0) >
@@ -708,19 +714,14 @@ async function checkClips(directory: string, manifest: PetManifest): Promise<voi
     total += stat.size;
     const handle = await open(join(directory, path), constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
     try {
-      const { buffer, bytesRead } = path.endsWith('.webm')
-        ? { buffer: await handle.readFile(), bytesRead: stat.size }
-        : await handle.read(Buffer.alloc(64), 0, 64, 0);
-      checkClipHeader(
-        buffer.subarray(0, bytesRead),
-        format,
-        path,
-        Math.max(
-          ...declaredClips(manifest)
-            .filter((c) => c.path === path)
-            .map((c) => c.frames),
-        ),
-      );
+      const opened = await handle.stat();
+      if (!opened.isFile() || opened.size > clipLimit(manifest, path)) fail('clip changed or exceeds size limit');
+      const { buffer, bytesRead } = await handle.read(Buffer.alloc(64), 0, 64, 0);
+      const header = buffer.subarray(0, bytesRead);
+      if (path.endsWith('.webm')) {
+        // Full EBML/track/frame validation runs at import; playback handles later corruption.
+        if (header.length < 4 || header.readUInt32BE(0) !== 0x1a45dfa3) fail('invalid WebM header');
+      } else checkClipHeader(header, format, path, Math.max(...declaredClips(manifest).filter(c => c.path === path).map(c => c.frames)));
     } finally {
       await handle.close();
     }
@@ -885,8 +886,11 @@ export async function importPetPack(
           fail('folder must contain only pet.json and the files it declares');
       }
     }
-    for (const path of clipPaths(manifest))
-      clips.set(path, await safeRead(join(source, path), clipLimit(manifest, path)));
+    for (const path of clipPaths(manifest)) {
+      const bytes = await safeRead(join(source, path), clipLimit(manifest, path));
+      checkClipHeader(bytes, manifest.remoteCodex!.clipFormat!, path, Math.max(...declaredClips(manifest).filter(c => c.path === path).map(c => c.frames)));
+      clips.set(path, bytes);
+    }
   } else {
     if (!source.toLowerCase().endsWith('.zip')) fail('choose a pet folder or .zip');
     const files = unpackPetZip(await safeRead(source, MAX_ZIP_BYTES));
@@ -1010,14 +1014,14 @@ export async function importPetPack(
     await rm(staging, { recursive: true, force: true });
   }
 }
-export async function listPetPacks(directories: string[]): Promise<PetPack[]> {
+export async function listPetPacks(directories: string[], headersOnly = false): Promise<PetPack[]> {
   const packs = new Map<string, PetPack>();
   for (const root of directories) {
     const entries = await readdir(root, { withFileTypes: true }).catch(() => []);
     for (const entry of entries) {
       if (!entry.isDirectory() || entry.name.startsWith('.')) continue;
       try {
-        const pack = await loadPetPack(join(root, entry.name));
+        const pack = await loadPetPack(join(root, entry.name), headersOnly);
         if (!packs.has(pack.manifest.id)) packs.set(pack.manifest.id, pack);
       } catch {
         /* A malformed user pack must not prevent the bundled pet from loading. */

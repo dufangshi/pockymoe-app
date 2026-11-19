@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, rm, truncate } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { inspectWebM } from './webm';
-import { parseManifest, importPetPack, type PetPack } from './packs';
+import { parseManifest, importPetPack, loadPetPack, type PetPack } from './packs';
 import { petMedia, petMediaResponse } from './media';
 import { DEFAULT_FACE_BOX, dockedPose, peekPose, surfaceLayout, type PeekArt, type DockEdge } from './geometry';
 import { structuralVideo } from './mediaFixture';
@@ -107,4 +107,22 @@ for (const edge of ['top','bottom'] as const) for (const amount of [1,.6]) it(`s
   expect(pose.visible.height).toBeLessThan(height*.36);
   if(amount===.6){if(edge==='top')expect(pose.visible.y).toBeCloseTo(0);else expect(pose.visible.y+pose.visible.height).toBeCloseTo(height);}
   expect(dockedPose(width,height,edge,amount,DEFAULT_FACE_BOX).clip).toBeNull();
+});
+
+it('scans only installed media headers while import still rejects broken media bodies', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'pet-headers-'));
+  try {
+    await mkdir(join(root, 'clips'));
+    await writeFile(join(root, 'pet.json'), JSON.stringify({ ...base, remoteCodex: extension }));
+    const png = Buffer.alloc(1024); Buffer.from([137,80,78,71,13,10,26,10]).copy(png);
+    png.write('IHDR',12); png.writeUInt32BE(1536,16); png.writeUInt32BE(1872,20);
+    await writeFile(join(root, 'spritesheet.png'), png);
+    await writeFile(join(root, 'clips/a.webm'), Buffer.from([0x1a, 0x45, 0xdf, 0xa3]));
+    await truncate(join(root, 'clips/a.webm'), 32 * 1024 * 1024);
+    const pack = await loadPetPack(root, true);
+    expect(pack.image.length).toBe(64);
+    await expect(importPetPack(root, join(root, 'dest'))).rejects.toThrow('WebM');
+    await truncate(join(root, 'clips/a.webm'), 32 * 1024 * 1024 + 1);
+    await expect(loadPetPack(root, true)).rejects.toThrow('size limit');
+  } finally { await rm(root, { recursive: true, force: true }); }
 });

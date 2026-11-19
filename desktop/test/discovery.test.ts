@@ -1,6 +1,6 @@
 import { setLocale } from '../src/shared/i18n';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { discoverOrigins, type Fetcher } from '../src/main/discovery';
+import { discoverOrigins, withScheme, type Fetcher } from '../src/main/discovery';
 beforeEach(() => setLocale('zh-CN'));
 const web = 'https://app.example.test', relay = 'https://relay.example.test';
 const fixture = (routes: Record<string, [string, number?, Record<string, string>?]>): Fetcher => async (url, init) => {
@@ -8,6 +8,14 @@ const fixture = (routes: Record<string, [string, number?, Record<string, string>
   const route = routes[url]; return new Response(route?.[0] || '', { status: route?.[1] || 404, headers: route?.[2] });
 };
 describe('origin discovery', () => {
+  it('adds the scheme people leave out', async () => {
+    expect(withScheme('app.example.test')).toBe('https://app.example.test');
+    expect(withScheme(' localhost:8080 ')).toBe('http://localhost:8080');
+    expect(withScheme('127.0.0.1:19970/')).toBe('http://127.0.0.1:19970/');
+    expect(withScheme('http://app.example.test')).toBe('http://app.example.test');
+    expect(withScheme('')).toBe('');
+    expect(await discoverOrigins('app.example.test', fixture({ [`${web}/`]: ['<html>Pockymoe<script></script></html>', 200], [`${web}/healthz`]: ['{"status":"ok"}', 200] }))).toEqual({ webOrigin: web, relayOrigin: web });
+  });
   it('reads the Pages build metadata and validates the separate relay health', async () => {
     expect(await discoverOrigins(web, fixture({ [`${web}/`]: ['<html>Pockymoe<script type="module"></script></html>', 200], [`${web}/STATIC_HOSTING.txt`]: [`Relay API origin: ${relay}\n`, 200], [`${relay}/healthz`]: ['{"status":"ok"}', 200] }))).toEqual({ webOrigin: web, relayOrigin: relay });
   });

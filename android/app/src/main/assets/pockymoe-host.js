@@ -14,7 +14,8 @@
     observer.observe(document, {childList: true, subtree: true});
   }
   const pending = new Map(), listeners = new Set();
-  let serial = 0;
+  let serial = 0, saving = false;
+  const maxSaveBytes = 64 * 1024 * 1024, chunkBytes = 48 * 1024;
   const call = (method, ...args) => new Promise((resolve, reject) => {
     const id = String(++serial);
     pending.set(id, {resolve, reject});
@@ -34,10 +35,28 @@
     window: {openThread: path => { void call('window.openThread', path); }, setTitle: title => { void call('window.setTitle', title); }, openPreferences: () => {}},
     shell: {openExternal: url => { void call('shell.openExternal', url); }},
     auth: {openExternal: url => call('auth.openExternal', url)},
-    files: {saveAs: (name, data) => {
-      const bytes = new Uint8Array(data); let binary = '';
-      for (let i = 0; i < bytes.length; i += 8192) binary += String.fromCharCode(...bytes.subarray(i, i + 8192));
-      return call('files.saveAs', name, btoa(binary));
+    files: {saveAs: async (name, data) => {
+      const bytes = new Uint8Array(data);
+      if (bytes.byteLength > maxSaveBytes) throw new Error('File exceeds 64 MiB');
+      if (saving) throw new Error('A save is already in progress');
+      saving = true;
+      let started = false;
+      try {
+        await call('files.saveStart', name, bytes.byteLength);
+        started = true;
+        // Await every acknowledgement: only one bounded chunk crosses the bridge.
+        for (let i = 0; i < bytes.length; i += chunkBytes) {
+          const chunk = bytes.subarray(i, i + chunkBytes);
+          let binary = '';
+          for (let j = 0; j < chunk.length; j += 8192)
+            binary += String.fromCharCode(...chunk.subarray(j, j + 8192));
+          await call('files.saveChunk', btoa(binary));
+        }
+        return await call('files.saveFinish');
+      } catch (error) {
+        if (started) await call('files.saveAbort').catch(() => {});
+        throw error;
+      } finally { saving = false; }
     }},
     settings: {get: () => call('settings.get'), set: patch => call('settings.set', patch)},
     pet: {setVisible: () => {}, isVisible: () => Promise.resolve(false)},

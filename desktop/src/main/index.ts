@@ -9,6 +9,7 @@ import {
   ipcMain,
   nativeTheme,
   Notification,
+  net,
   session,
   protocol,
   powerMonitor,
@@ -17,10 +18,13 @@ import {
   type IpcMainInvokeEvent,
 } from 'electron';
 import { localFileMatches } from './platform';
+import { createWriteStream } from 'node:fs';
+import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import { release } from 'node:os';
 import { saveName, windowsGlassMaterial } from '../shared/platform';
 import { basename, join } from 'node:path';
-import { mkdirSync, writeFileSync, existsSync, copyFileSync } from 'node:fs';
+import { mkdirSync, existsSync, copyFileSync } from 'node:fs';
 import type { HostCapabilities, PetController, PetControllerDeps } from '../shared/contract';
 import type { LocalAction, LocalState } from '../shared/local';
 import { channels as c } from '../shared/channels';
@@ -34,7 +38,7 @@ import { Notifications, itemPath } from './notifications';
 import { DesktopTray } from './tray';
 import { installMenu } from './menu';
 import { apnsEnabled, registerApns } from './apns';
-import { checkUpdate, configureUpdates, createUpdates, type ShowMessage } from './updates';
+import { checkUpdate, configureUpdates, createUpdates, nativeMessageOptions, type ShowMessage } from './updates';
 import { nativeNotificationId } from './windowsToast';
 import { LocalMessages } from './messages';
 import { PetCatalog } from './petCatalog';
@@ -370,7 +374,12 @@ async function bootstrap(): Promise<void> {
                 : basename(name).slice(0, 255) || 'download',
           });
           if (result.canceled || !result.filePath) return { saved: false };
-          writeFileSync(result.filePath, Buffer.from(data));
+          // Chunked writes retain the IPC buffer without copying or blocking the main loop.
+          const bytes = new Uint8Array(data);
+          await pipeline(Readable.from((function* () {
+            for (let offset = 0; offset < bytes.length; offset += 256 * 1024)
+              yield bytes.subarray(offset, offset + 256 * 1024);
+          })()), createWriteStream(result.filePath));
           savedNotification(result.filePath);
           return { saved: true, path: result.filePath };
         });
@@ -419,8 +428,11 @@ async function bootstrap(): Promise<void> {
         function applySettings(patch: unknown): ReturnType<SettingsStore['get']> {
           const next = validateSettings(patch);
           if (next?.quickWindowShortcut && next.quickWindowShortcut !== settings.get().quickWindowShortcut) {
-            if (!globalShortcut.register(next.quickWindowShortcut, () => manager.toggleQuick()))
-              throw new Error(t('快捷键已被占用或无效'));
+            let registered: boolean;
+            // Electron throws for a malformed accelerator and returns false when another app owns it.
+            try { registered = globalShortcut.register(next.quickWindowShortcut, () => manager.toggleQuick()); }
+            catch { throw new Error(t('这个组合键无效，请换一个')); }
+            if (!registered) throw new Error(t('这个组合键已被其他应用占用，请换一个'));
             globalShortcut.unregister(settings.get().quickWindowShortcut);
           }
           return settings.set(next);
@@ -429,11 +441,12 @@ async function bootstrap(): Promise<void> {
         const showMessageBox: ShowMessage = (options) =>
           process.platform === 'win32'
             ? messages.show(options, manager.createLocal('preferences'))
-            : dialog.showMessageBox(options);
+            : dialog.showMessageBox(nativeMessageOptions(options));
         let stateRevision = 0;
         const localState = (window?: BrowserWindow): LocalState => ({
           revision: stateRevision,
           connectionError,
+          offlineReason: manager.offlineReason,
           message: window ? messages.view(window.id) : null,
           platform: process.platform,
           glassFallback:
@@ -515,6 +528,16 @@ async function bootstrap(): Promise<void> {
                 w.close();
                 manager.retryConnection();
                 break;
+              case 'probeConnection': {
+                // A quiet check from the offline page: reopen the main window only once the
+                // address answers, so a lasting outage does not keep opening and closing windows.
+                const origin = settings.get().webOrigin;
+                const answered = await net.fetch(origin, { method: 'HEAD', signal: AbortSignal.timeout(5000) }).then(() => true, () => false);
+                if (!answered) return { ok: false };
+                w.close();
+                manager.retryConnection();
+                break;
+              }
               case 'hide':
                 w.hide();
                 break;
@@ -524,7 +547,7 @@ async function bootstrap(): Promise<void> {
               case 'connectionSize': {
                 if (manager.local.get(w) === 'relay' && typeof action.expanded === 'boolean') {
                   const [width, height] = w.getContentSize(),
-                    next = action.expanded ? 500 : 320;
+                    next = action.expanded ? 540 : 360; // Matches the relay window's initial height in windows.ts.
                   if (height !== next) w.setContentSize(width, next);
                 }
                 break;
@@ -584,6 +607,7 @@ async function bootstrap(): Promise<void> {
                   buttons: [t('取消'), t('删除')],
                   defaultId: 0,
                   cancelId: 0,
+                  dangerId: 1,
                 });
                 if (response !== 1) break;
                 // Stop using its files first, so that removal cannot pull them from under the pet.
@@ -600,6 +624,9 @@ async function bootstrap(): Promise<void> {
                 await shell.openExternal(safe);
                 break;
               }
+              case 'openAbout':
+                manager.createLocal('about');
+                break;
               case 'checkUpdate':
                 if (hasConnection(settings.get())) await checkUpdate(showMessageBox);
                 break;
@@ -701,7 +728,16 @@ async function bootstrap(): Promise<void> {
           if (manager.relay.size) manager.focusMain();
           else manager.createLocal('relay');
         });
-        app.on('before-quit', () => {
+        let alertsFlushed = false, flushingAlerts = false;
+        app.on('before-quit', event => {
+          if (!alertsFlushed) {
+            event.preventDefault();
+            if (!flushingAlerts) {
+              flushingAlerts = true;
+              void hub.flush().finally(() => { alertsFlushed = true; app.quit(); });
+            }
+            return;
+          }
           manager.quitting = true;
           presence.dispose();
           messages.dispose();

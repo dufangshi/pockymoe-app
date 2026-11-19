@@ -2,6 +2,9 @@ package com.remotecodex.app
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.app.Activity
+import android.app.DownloadManager
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.res.Configuration
 import android.graphics.Color
@@ -9,6 +12,7 @@ import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Environment
 import android.util.Base64
 import android.view.HapticFeedbackConstants
 import android.view.View
@@ -33,7 +37,10 @@ import com.remotecodex.app.data.SessionStore
 import com.remotecodex.app.data.ShellOrigins
 import com.remotecodex.app.notify.*
 import java.util.UUID
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -51,7 +58,9 @@ class MainActivity : ComponentActivity() {
     private var reply: JavaScriptReplyProxy? = null
     private var authReply: Pair<JavaScriptReplyProxy, String>? = null
     private var saveReply: Pair<JavaScriptReplyProxy, String>? = null
-    private var saveBytes: ByteArray? = null
+    private val saveTransfer by lazy { SaveTransfer(cacheDir) }
+    // Bound queued bridge memory and serialize requests (including picker completion).
+    private val bridgeCalls = Channel<suspend () -> Unit>(8)
     private var backId: String? = null
     private var failed = false
     private var authStopped = false
@@ -68,27 +77,39 @@ class MainActivity : ComponentActivity() {
     private val permission =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) {}
     private val chooser =
-        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
-            fileCallback?.onReceiveValue(
-                WebChromeClient.FileChooserParams.parseResult(it.resultCode, it.data)
-            )
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            // Several picked files arrive as clip data, one as the intent's data.
+            val data = result.data
+            val uris =
+                if (result.resultCode != Activity.RESULT_OK || data == null) null
+                else
+                    data.clipData?.let { clip -> Array(clip.itemCount) { clip.getItemAt(it).uri } }
+                        ?: data.data?.let { arrayOf(it) }
+            fileCallback?.onReceiveValue(uris)
             fileCallback = null
         }
     private val save =
         registerForActivityResult(
             ActivityResultContracts.CreateDocument("application/octet-stream")
         ) { uri ->
-            val saved =
-                uri != null &&
-                    runCatching {
-                            contentResolver.openOutputStream(uri!!)?.use {
-                                it.write(saveBytes!!)
-                            } != null
+            lifecycleScope.launch {
+                bridgeCalls.send {
+                    val pending = saveReply
+                    saveReply = null
+                    try {
+                        if (uri != null) withContext(Dispatchers.IO) {
+                            contentResolver.openOutputStream(uri)?.use { saveTransfer.copyTo(it) }
+                                ?: error("Cannot open destination")
                         }
-                        .getOrDefault(false)
-            saveReply?.let { respond(it.first, it.second, JSONObject().put("saved", saved)) }
-            saveReply = null
-            saveBytes = null
+                        pending?.let { respond(it.first, it.second, JSONObject().put("saved", uri != null)) }
+                    } catch (error: Exception) {
+                        if (error is CancellationException) throw error
+                        pending?.let { respond(it.first, it.second, null, actionError()) }
+                    } finally {
+                        withContext(NonCancellable + Dispatchers.IO) { saveTransfer.clear() }
+                    }
+                }
+            }
         }
 
     override fun onCreate(state: Bundle?) {
@@ -98,6 +119,13 @@ class MainActivity : ComponentActivity() {
         super.onCreate(state)
         enableEdgeToEdge()
         store = SessionStore(this)
+        lifecycleScope.launch {
+            try {
+                for (call in bridgeCalls) call()
+            } finally {
+                withContext(NonCancellable + Dispatchers.IO) { saveTransfer.clear() }
+            }
+        }
         if (BuildConfig.DEBUG) {
             debugAuthUrl = intent.getStringExtra("e2eAuthUrl")
             debugWebOrigin = intent.getStringExtra(EXTRA_WEB_URL)
@@ -307,22 +335,25 @@ class MainActivity : ComponentActivity() {
                     source,
                     main,
                     proxy ->
-                    if (main && sameOrigin(source))
-                        runCatching { handle(JSONObject(message.data ?: "{}"), proxy) }
-                            .onFailure {
-                                runCatching {
-                                    respond(
-                                        proxy,
-                                        JSONObject(message.data!!).optString("id"),
-                                        null,
-                                        shellText(
-                                            this@MainActivity,
-                                            "无法完成操作",
-                                            "Unable to complete the action",
-                                        ),
-                                    )
-                                }
+                    if (main && sameOrigin(source)) {
+                        val raw = message.data ?: "{}"
+                        // The injected bridge puts its decimal id first. Read only a bounded
+                        // prefix for rejection; never parse a failed payload a second time.
+                        val id = Regex("\"id\":\"([0-9]{1,20})\"")
+                            .find(raw.take(96))?.groupValues?.get(1).orEmpty()
+                        if (raw.length > 1024 * 1024) {
+                            respond(proxy, id, null, actionError())
+                        } else if (bridgeCalls.trySend {
+                            var parsed: JSONObject? = null
+                            try {
+                                parsed = withContext(Dispatchers.IO) { JSONObject(raw) }
+                                handle(checkNotNull(parsed), proxy)
+                            } catch (error: Exception) {
+                                if (error is CancellationException) throw error
+                                respond(proxy, parsed?.optString("id") ?: id, null, actionError())
                             }
+                        }.isFailure) respond(proxy, id, null, actionError())
+                    }
                 }
                 WebViewCompat.addDocumentStartJavaScript(
                     this,
@@ -409,6 +440,19 @@ class MainActivity : ComponentActivity() {
                                 root.findViewWithTag<View>("offline")?.let(root::removeView)
                                 firstPaint.documentCommitted()
                                 revealPaintedPage(view)
+                                // A page that never reports its appearance (an older Web, a
+                                // script error, a captive portal) still shows after a few
+                                // seconds instead of leaving a blank, unexplained screen.
+                                val document = firstPaint.generation
+                                view.postDelayed(
+                                    {
+                                        if (!failed && !isDestroyed && firstPaint.forceReveal(document)) {
+                                            StartupTrace.event("webRevealTimeout", pageBackground, view.alpha)
+                                            view.animate().alpha(1f).setDuration(120).start()
+                                        }
+                                    },
+                                    REVEAL_TIMEOUT_MS,
+                                )
                             }
                         }
 
@@ -453,8 +497,32 @@ class MainActivity : ComponentActivity() {
                         ): Boolean {
                             fileCallback?.onReceiveValue(null)
                             fileCallback = callback
-                            chooser.launch(params.createIntent())
-                            return true
+                            // The page's accept types and `multiple` reach the picker;
+                            // without a picker app the page gets an empty answer.
+                            val types =
+                                params.acceptTypes
+                                    .flatMap { it.split(',') }
+                                    .map { it.trim() }
+                                    .filter { '/' in it }
+                            val pick =
+                                Intent(Intent.ACTION_GET_CONTENT).apply {
+                                    addCategory(Intent.CATEGORY_OPENABLE)
+                                    type = types.singleOrNull() ?: "*/*"
+                                    if (types.size > 1)
+                                        putExtra(Intent.EXTRA_MIME_TYPES, types.toTypedArray())
+                                    putExtra(
+                                        Intent.EXTRA_ALLOW_MULTIPLE,
+                                        params.mode == FileChooserParams.MODE_OPEN_MULTIPLE,
+                                    )
+                                }
+                            return try {
+                                chooser.launch(Intent.createChooser(pick, params.title))
+                                true
+                            } catch (_: ActivityNotFoundException) {
+                                fileCallback?.onReceiveValue(null)
+                                fileCallback = null
+                                false
+                            }
                         }
                     }
                 setOnLongClickListener {
@@ -463,6 +531,25 @@ class MainActivity : ComponentActivity() {
                             WebView.HitTestResult.SRC_ANCHOR_TYPE,
                             WebView.HitTestResult.SRC_IMAGE_ANCHOR_TYPE,
                         )
+                }
+                // A plain download link (not the bridge's saveAs) goes to the system's
+                // Downloads with this page's cookies, instead of doing nothing.
+                setDownloadListener { url, userAgent, disposition, mimeType, _ ->
+                    val uri = Uri.parse(url)
+                    if (uri.scheme != "https" && uri.scheme != "http") return@setDownloadListener
+                    val name = URLUtil.guessFileName(url, disposition, mimeType)
+                    val request =
+                        DownloadManager.Request(uri).apply {
+                            setMimeType(mimeType)
+                            CookieManager.getInstance().getCookie(url)?.let { addRequestHeader("Cookie", it) }
+                            addRequestHeader("User-Agent", userAgent)
+                            setTitle(name)
+                            setNotificationVisibility(
+                                DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED
+                            )
+                            setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, name)
+                        }
+                    runCatching { getSystemService(DownloadManager::class.java).enqueue(request) }
                 }
             }
         // The deployed Web UI and its Relay are distinct origins. Session cookies
@@ -530,7 +617,9 @@ class MainActivity : ComponentActivity() {
         )
     }
 
-    private fun handle(value: JSONObject, proxy: JavaScriptReplyProxy) {
+    private fun actionError() = shellText(this, "无法完成操作", "Unable to complete the action")
+
+    private suspend fun handle(value: JSONObject, proxy: JavaScriptReplyProxy) {
         reply = proxy
         val id = value.getString("id")
         val args = value.optJSONArray("args") ?: JSONArray()
@@ -546,6 +635,7 @@ class MainActivity : ComponentActivity() {
                         .put("liveActivity", Build.VERSION.SDK_INT >= 36)
                         .put("nativePush", false)
                         .put("haptics", true)
+                        .put("maxSaveBytes", SaveTransfer.MAX_BYTES)
             "activity.sync" -> {
                 HostDiagnostics.activity(args.getJSONObject(0))
                 syncSession()
@@ -581,13 +671,34 @@ class MainActivity : ComponentActivity() {
                 }
                 return
             }
-            "files.saveAs" -> {
+            "files.saveStart" -> {
                 require(saveReply == null)
-                val encoded = args.getString(1)
-                require(encoded.length <= 45 * 1024 * 1024)
-                saveBytes = Base64.decode(encoded, Base64.DEFAULT)
+                withContext(Dispatchers.IO) {
+                    // A document reload can abandon its JS transfer before aborting.
+                    // No picker is active here, so a new export may replace that file.
+                    saveTransfer.clear()
+                    saveTransfer.start(args.getString(0), args.getLong(1))
+                }
+            }
+            "files.saveChunk" -> {
+                require(saveReply == null)
+                withContext(Dispatchers.IO) { saveTransfer.append(args.getString(0)) }
+            }
+            "files.saveAbort" -> {
+                require(saveReply == null)
+                withContext(Dispatchers.IO) { saveTransfer.clear() }
+            }
+            "files.saveFinish" -> {
+                require(saveReply == null)
+                val name = withContext(Dispatchers.IO) { saveTransfer.finish() }
                 saveReply = proxy to id
-                save.launch(args.getString(0).substringAfterLast('/').substringAfterLast('\\'))
+                try {
+                    save.launch(name)
+                } catch (error: Exception) {
+                    saveReply = null
+                    withContext(NonCancellable + Dispatchers.IO) { saveTransfer.clear() }
+                    throw error
+                }
                 return
             }
             "settings.get",
@@ -750,6 +861,9 @@ class MainActivity : ComponentActivity() {
             localPage(true)
             return
         }
+        ViewCompat.requestApplyInsets(root)
+        // Resources and WebView receive the new configuration via super. Local
+        // pages above rebuild their density, locale and theme dependent controls.
         // System theme changes must not recreate the retained WebView.
         // A first-run local page, with no saved paint, continues to follow the OS.
         if (::root.isInitialized && !prefs.contains("background")) {
@@ -804,8 +918,11 @@ class MainActivity : ComponentActivity() {
             store.token = token
         }
         if (token.isNotBlank() && RemoteCodexForeground.isForeground) {
-            if (Build.VERSION.SDK_INT >= 33 && !permissionAsked) {
+            // Asked once after sign-in, remembered across launches: a later change
+            // goes through the notification settings the page opens.
+            if (Build.VERSION.SDK_INT >= 33 && !permissionAsked && !prefs.getBoolean("notificationsAsked", false)) {
                 permissionAsked = true
+                prefs.edit().putBoolean("notificationsAsked", true).apply()
                 permission.launch(Manifest.permission.POST_NOTIFICATIONS)
             }
             AgentEventService.start(this)
@@ -880,6 +997,9 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        // The service stops while notifications are off; resume it after the permission dialog
+        // or system settings allowed them again.
+        if (store.isSignedIn) AgentEventService.start(this)
         if (authStopped)
             root.postDelayed(
                 {
@@ -900,6 +1020,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        bridgeCalls.close()
         fileCallback?.onReceiveValue(null)
         if (::web.isInitialized) {
             reply = null
@@ -912,6 +1033,8 @@ class MainActivity : ComponentActivity() {
     }
 
     companion object {
+        /** How long a committed page may stay hidden waiting for its appearance. */
+        private const val REVEAL_TIMEOUT_MS = 4_000L
         const val EXTRA_RELAY_URL = "e2eRelayUrl"
         const val EXTRA_WEB_URL = "e2eWebUrl"
         const val EXTRA_TOKEN = "e2eToken"

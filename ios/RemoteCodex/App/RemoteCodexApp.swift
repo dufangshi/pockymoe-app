@@ -66,7 +66,7 @@ final class AppModel: ObservableObject {
 
     func apply(url: URL) {
         let parts = url.path.split(separator: "/").map(String.init)
-        if url.scheme == "remotecodex", url.host == "devices", parts.count == 3, parts[1] == "threads" {
+        if ["pockymoe", "remotecodex"].contains(url.scheme ?? ""), url.host == "devices", parts.count == 3, parts[1] == "threads" {
             openThread(parts[0], parts[2])
         }
     }

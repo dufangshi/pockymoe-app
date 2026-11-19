@@ -48,3 +48,25 @@ export function frameAt(state: SpriteState, elapsed: number, reducedMotion = fal
   }
   return 0;
 }
+
+/** Milliseconds to the next atlas boundary, including the long ambient idle holds. */
+export function nextFrameDelay(state: SpriteState, elapsed: number, scale = 1, once = false, sleeping?: readonly number[]): number {
+  let local = Math.max(0, elapsed);
+  if (state === 'idle') {
+    const phase = local % 46000;
+    const start = phase >= 31000 ? 31000 : phase >= 14000 ? 14000 : 0;
+    local = phase - start;
+    if (local >= 1100 * scale) return (start === 0 ? 14000 : start === 14000 ? 31000 : 46000) - phase;
+  }
+  const durations: readonly number[] = sleeping ?? ANIMATIONS[state].durations;
+  if (durations.length === 1) return Infinity;
+  const total = durations.reduce((a, b) => a + b, 0) * scale;
+  if (once && local >= total) return Infinity;
+  let remainder = local % total;
+  for (const duration of durations) {
+    const ms = duration * scale;
+    if (remainder < ms) return ms - remainder;
+    remainder -= ms;
+  }
+  return total;
+}

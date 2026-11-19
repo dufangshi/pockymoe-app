@@ -25,6 +25,8 @@ export class Windows {
   private positionTimer?: ReturnType<typeof setTimeout>;
   private signInWindow?: BrowserWindow;
   private failedPath = '/';
+  /** Why the last main window could not load, shown on the offline page. */
+  offlineReason = '';
   retryConnection(): BrowserWindow {
     for (const window of [...this.relay]) window.destroy();
     return this.createMain(this.failedPath);
@@ -133,7 +135,9 @@ export class Windows {
     const w = new BrowserWindow({
       ...this.currentBounds(), minWidth: 900, minHeight: 600, show: false, title: 'Pockymoe',
       backgroundColor: process.platform === 'darwin' ? '#00000000' : this.palette().background,
-      ...(process.platform === 'darwin' ? { titleBarStyle: 'hiddenInset' as const, trafficLightPosition: { x: 14, y: 13 }, vibrancy: 'sidebar' as const, visualEffectState: 'followWindow' as const, transparent: true } : { titleBarStyle: 'hidden' as const, titleBarOverlay: this.overlay(), backgroundMaterial: windowsMaterial(release()) }),
+      // titleBarOverlay on macOS adds no bar; it exposes navigator.windowControlsOverlay so the
+      // page can keep its traffic-light reserve aligned when zoomed (Web desktop/windowControls.ts).
+      ...(process.platform === 'darwin' ? { titleBarStyle: 'hiddenInset' as const, titleBarOverlay: true, trafficLightPosition: { x: 14, y: 13 }, vibrancy: 'sidebar' as const, visualEffectState: 'followWindow' as const, transparent: true } : { titleBarStyle: 'hidden' as const, titleBarOverlay: this.overlay(), backgroundMaterial: windowsMaterial(release()) }),
       // The Web window owns account activity even when hidden. Keep its timers
       // and visibility state active so close-to-tray cannot pause native alerts.
       // Keep the persisted session partition name across the product rename.
@@ -165,17 +169,18 @@ export class Windows {
       }, 250);
     };
     w.on('move', savePosition); w.on('resize', savePosition);
-    const offline = (): void => {
+    const offline = (reason = ''): void => {
       if (this.quitting || w.isDestroyed() || !this.relay.has(w)) return;
       backgrounded = true;
       this.failedPath = path;
+      this.offlineReason = reason.slice(0, 120);
       w.hide();
       this.createLocal('offline');
     };
-    w.webContents.on('did-fail-load', (_event, code, _description, _url, mainFrame) => {
-      if (mainFrame && code !== -3) offline(); // An intentional navigation abort is not an outage.
+    w.webContents.on('did-fail-load', (_event, code, description, _url, mainFrame) => {
+      if (mainFrame && code !== -3) offline(description); // An intentional navigation abort is not an outage.
     });
-    void w.loadURL(`${this.settings.get().webOrigin}${threadPath(path)}`).catch(error => { if (error.code !== 'ERR_ABORTED') offline(); });
+    void w.loadURL(`${this.settings.get().webOrigin}${threadPath(path)}`).catch(error => { if (error.code !== 'ERR_ABORTED') offline(typeof error.code === 'string' ? error.code : ''); });
     return w;
   }
   secure(w: BrowserWindow, remote: boolean): void {
@@ -232,7 +237,7 @@ export class Windows {
     if (existing) { existing.show(); existing.focus(); return existing; }
     const quick = role === 'quick';
     const acrylic = process.platform === 'win32' && windowsGlassMaterial(release(), process.env.POCKYMOE_WINDOWS_GLASS === 'solid') === 'acrylic';
-    const w = new BrowserWindow({ width: quick ? 560 : role === 'preferences' ? 660 : 460, height: quick ? 340 : role === 'preferences' ? 500 : role === 'about' ? 330 : 320,
+    const w = new BrowserWindow({ width: quick ? 560 : role === 'preferences' ? 660 : 460, height: quick ? 340 : role === 'preferences' ? 500 : role === 'about' ? 330 : role === 'relay' ? 360 : 320,
       minWidth: quick ? 360 : 380, minHeight: quick ? 100 : 300,
       show: false, resizable: !quick, maximizable: false, minimizable: false, frame: !quick,
       title: role === 'preferences' ? t('设置 — Pockymoe') : role === 'relay' ? t('连接 — Pockymoe') : 'Pockymoe',

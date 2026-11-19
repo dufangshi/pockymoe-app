@@ -63,4 +63,20 @@ class StartupPaintTest {
         assertEquals(StartupPaint.dark, paint.color)
         assertTrue(paint.confirm(paint.generation, paint.revision))
     }
+
+    @Test
+    fun aPageWithoutAppearanceIsShownOnceByTheTimeout() {
+        val paint = FirstPaintState(StartupPaint.dark)
+        paint.begin()
+        assertFalse(paint.forceReveal(paint.generation))
+        paint.documentCommitted()
+        val old = paint.generation
+        assertTrue(paint.forceReveal(old))
+        assertTrue(paint.ready)
+        assertEquals(StartupPaint.dark, paint.color)
+        assertFalse(paint.forceReveal(old))
+        paint.begin()
+        paint.documentCommitted()
+        assertFalse(paint.forceReveal(old))
+    }
 }

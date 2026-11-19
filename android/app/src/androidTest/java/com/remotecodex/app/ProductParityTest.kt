@@ -264,6 +264,25 @@ class ProductParityTest {
                 ) == "true"
             }
             js("window.systemThemeMarker='same-document'")
+            var retainedActivity: MainActivity? = null
+            var retainedWeb: WebView? = null
+            scenario.onActivity {
+                retainedActivity = it
+                retainedWeb = find(it.window.decorView)
+            }
+            try {
+                for (landscape in listOf(true, false)) {
+                    if (landscape) device.setOrientationLeft() else device.setOrientationNatural()
+                    eventually("viewport follows rotation") {
+                        js("innerWidth > innerHeight") == landscape.toString()
+                    }
+                    scenario.onActivity {
+                        assertSame("rotation retained activity", retainedActivity, it)
+                        assertSame("rotation retained WebView", retainedWeb, find(it.window.decorView))
+                    }
+                    assertEquals("same-document", js("window.systemThemeMarker"))
+                }
+            } finally { device.unfreezeRotation() }
             for (mode in listOf("dark", "light")) {
                 device.executeShellCommand(
                     "cmd uimode night ${if (mode == "dark") "yes" else "no"}"

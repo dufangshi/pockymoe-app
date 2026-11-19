@@ -42,8 +42,12 @@ Use **Pockymoe → Preferences…** (Cmd/Ctrl+,) or the tray's Preferences entry
 change the connection, launch at login, alerts, pet and shortcut. In Pet settings,
 Import… accepts a Codex pet folder or ZIP containing `pet.json` and its sprite
 sheet. Show pet, size, mini mode and sound take effect immediately. Alt+Space
-opens the quick window by default; choose another accelerator in Shortcuts if
-that key is already used. Closing the main window keeps the app in the menu bar
+opens the quick window by default; in Shortcuts, click the field and press a new
+combination (Esc cancels, Restore default returns to Alt+Space). A combination
+another app owns or Electron rejects is refused with that reason and the field
+keeps the working shortcut. The in-app shortcut list is generated from the same
+table as the native menu (`src/shared/shortcuts.ts`); Actual Size is Cmd/Ctrl+Shift+0
+because Cmd/Ctrl+0 opens the map. Closing the main window keeps the app in the menu bar
 or tray. Its Web activity source keeps running while hidden; native alerts and
 the pet continue receiving changes. Hidden/minimized Web windows suspend rendering
 (RAF, CSS and Web Animations), while connection timers and activity IPC remain
@@ -82,9 +86,13 @@ requests, validates every redirect and never executes returned HTML/scripts.
 The response must identify Pockymoe. **高级** overrides the Relay while the
 main field supplies the Web address (or a Relay redirecting to it). Invalid or
 unreachable addresses remain on setup with one inline explanation, without
-saving the pair or opening an offline window. An outage after connection opens
-the local offline page with **Retry** and **Change address**; Change address
-returns to setup with the current address filled in. Preferences displays the current pair and opens the same form for
+saving the pair or opening an offline window. An address typed without a scheme
+gets `https://` (`http://` for loopback). Until a connection exists, Esc does not
+hide the setup window, and a line under Connect says where to reopen it. An outage
+after connection opens the local offline page naming the address and Chromium's
+error, with **Retry now** and **Change address**; it checks the address again by
+itself (15 s, then doubling up to 2 min) and reopens the main window once it
+answers. Change address returns to setup with the current address filled in. Preferences displays the current pair and opens the same form for
 changes. No new backend endpoint is required.
 
 The app is `Pockymoe` (`com.pockymoe.desktop`); `pockymoe://` is the primary
@@ -112,17 +120,25 @@ palettes and Windows titlebar controls follow the effective mode; tray variants 
 and pet dependencies expose `appearance()` and `onAppearance()`. The shared
 `statusMarks.ts` mirrors upstream shapes; running uses a complete faint track
 with a rotating arc, waiting a filled speech bubble, interruption an amber
-square and failure a red diamond. Quick-window rows are 34 px with live timers, without group headings. The
+square and failure a red diamond. Running and unread use each pack's run/unread
+colours (as the Web marks do), so in Plum Pocket they never share the amber of
+"waiting for you". Quick-window rows are 34 px, without group headings; each shows
+the root's device · workspace and a running time as a duration ("12 分", "3 小时 5 分"),
+never a clock-like mm:ss. Selection follows the pointer and the arrow keys, so only
+one row is highlighted. The
 560 px quick window fits one to seven rows, then scrolls; it shows recent threads
 when there is no activity. Native HUD vibrancy/acrylic remains visible through
 the transparent renderer.
 Activity snapshots preserve optional `rootThreadKey` / `rootThreadTitle`. Tray, quick
 window and badges count conversations (`rootThreadKey ?? key`) per activity group.
 The quick window shows exactly one row per conversation across all activity states.
-A small robot and count represent its active child threads; location context is
-available on hover, instead of repeated device/workspace text. Search matches any
+A small robot and count represent its active child threads; the root's device ·
+workspace follows the title as muted text (ui-principles §8: hover only enhances). Search matches any
 member while keeping its conversation/count intact. Replies and opening use the
 most urgent actual member (waiting first, then failure, completion, running).
+Tray rows read `title · device`, middle-truncated at 48 characters; empty groups
+are omitted and an idle tray says "Nothing needs you". Agent threads are named
+`conversation › agent`.
 Native notifications use the root conversation group/title, deduplicated location
 context and the same robot count, without an Agent/智能体 prefix; approvals retain
 actual thread/request IDs. Tray menus continue to expose individual request actions.
@@ -764,3 +780,14 @@ dot. They schedule no animation and use the same shapes with reduced motion.
 When WebM pet speech ends, the renderer clears the speech face on the audio-end
 event without waiting for another mouth tick, revealing the playing decoder. Synthetic
 media acceptance covers this handoff as well as clip-to-reaction transitions.
+
+## Desktop resource scheduling
+
+Atlas animation timers follow frame boundaries, including ambient idle holds; Rive
+and transitions retain the 30 fps cap. Pet audio suspends five seconds after the
+last cue or speech ends and resumes before playback. Installed-pack scans read
+bounded image/media headers and file sizes; only the selected atlas is loaded and
+decoded, with fallback on failure. Imports retain full media validation.
+Delivered-alert persistence coalesces changes into asynchronous atomic writes and
+flushes on quit. Activity bursts defer tray work; unchanged menu, icon, tooltip and
+badge content skips native updates. File exports use asynchronous chunked writes.

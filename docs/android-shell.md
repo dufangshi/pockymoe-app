@@ -85,7 +85,26 @@ surface instead of an unconfigurable light preview.
 `WindowInsets` passes IME occlusion to modern WebView’s visual viewport without native panning; system bars are transparent.
 AndroidX's predictive-back dispatcher sends the `back` host command. The Web owns
 overlay/route handling; an unhandled or unresponsive page returns to the launcher.
-A warm resume retains the WebView and route; recreation restores its history.
+A warm resume retains the WebView and route. Rotation, window resizing,
+fold/unfold, keyboard/navigation attachment, density, locale/layout direction and
+system night-mode changes are handled in place: WebView receives configuration
+and fresh insets without reloading its document. Native connection/offline pages
+rebuild using current resources. Process/activity recreation still restores only
+Web history, not JavaScript memory.
+
+`files.saveAs` accepts up to 64 MiB, matching the Web native-save cutoff. The
+injected host sends sequential acknowledged 48 KiB chunks, never a file-sized
+base64/JSON message. A bounded native queue parses each message once on IO;
+chunks decode into an app-cache temporary file there. Only the document picker
+runs on the UI thread; copying to its URI also streams on IO. Cancellation,
+errors and activity destruction clear temporary data; the next activity removes
+leftovers after process death. Picker cancellation resolves `{saved:false}`;
+write failures reject instead of masquerading as cancellation. Larger Web exports
+continue through the Web's existing download path. No Web change is required.
+
+JVM-free bridge regression checks: `node --test android/tests/android-host.test.mjs`.
+`SaveTransferTest` checks streamed contents at the 64 MiB boundary and rejects
+invalid/incomplete transfers in the Android unit-check lane.
 
 ## One account notification
 

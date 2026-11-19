@@ -5,7 +5,7 @@ import vm from 'node:vm';
 
 const source = readFileSync(new URL('../web/native-bridge.js', import.meta.url), 'utf8');
 function fixture(platform = 'android') {
-  const messages = [], handlers = {};
+  const messages = [], handlers = {}, intervals = [];
   const fetch = async () => ({ blob: async () => ({ size: 20, type: 'text/html' }) });
   const serviceWorker = {};
   const ctx = { location: { pathname: '/devices/a/threads/b', search: '', hash: '' },
@@ -13,7 +13,7 @@ function fixture(platform = 'android') {
     history: { pushState() {}, replaceState() {} },
     addEventListener: (key, handler) => { handlers[key] = handler; },
     document: { addEventListener: (key, handler) => { handlers[key] = handler; } },
-    setInterval() {}, FileReader: class { readAsDataURL() { this.result = 'data:text/html;base64,YQ=='; this.onload(); } },
+    setInterval(handler, delay) { intervals.push({ handler, delay }); }, FileReader: class { readAsDataURL() { this.result = 'data:text/html;base64,YQ=='; this.onload(); } },
   };
   ctx.window = ctx;
   ctx.URL = { createObjectURL: () => 'blob:owned', revokeObjectURL() {} };
@@ -21,7 +21,7 @@ function fixture(platform = 'android') {
   if (platform === 'android') ctx.RemoteCodexHost = host;
   else ctx.webkit = { messageHandlers: { remoteCodex: host } };
   vm.runInNewContext(source, ctx);
-  return { ctx, messages, handlers, fetch, serviceWorker };
+  return { ctx, messages, handlers, intervals, fetch, serviceWorker };
 }
 test('native bridge preserves authenticated fetch and real Service Workers on both platforms', () => {
   for (const platform of ['android', 'ios']) {
@@ -60,4 +60,30 @@ test('owned blob downloads work when CSP blocks fetching object URLs', async () 
   await handlers.click({ target: { closest: () => ({ href, download: 'thread.html' }) }, preventDefault() {} });
   assert.equal(messages.at(-1).type, 'download');
   ctx.URL.revokeObjectURL(href);
+});
+
+test('state checks are slow and pause while hidden; resume reports immediately', () => {
+  const { ctx, handlers, intervals, messages } = fixture('ios');
+  assert.equal(intervals.length, 1);
+  assert.equal(intervals[0].delay, 60000);
+  const initial = messages.length;
+  ctx.document.hidden = true;
+  intervals[0].handler();
+  handlers.visibilitychange();
+  assert.equal(messages.length, initial);
+  ctx.document.hidden = false;
+  handlers.visibilitychange();
+  assert.equal(messages.length, initial + 1);
+  ctx.location.hash = '#next';
+  handlers.hashchange();
+  assert.equal(messages.at(-1).path, '/devices/a/threads/b#next');
+});
+test('page can explicitly transfer notification ownership and release it on disconnect', () => {
+  const { ctx, messages } = fixture('ios');
+  assert.equal(messages.some(message => message.type === 'eventDelivery'), false);
+  ctx.remoteCodexNative.setEventDeliveryActive(true);
+  assert.equal(messages.at(-1).type, 'eventDelivery');
+  assert.equal(messages.at(-1).active, true);
+  ctx.remoteCodexNative.setEventDeliveryActive(false);
+  assert.equal(messages.at(-1).active, false);
 });
