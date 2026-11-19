@@ -734,7 +734,9 @@ async function bootstrap(): Promise<void> {
             event.preventDefault();
             if (!flushingAlerts) {
               flushingAlerts = true;
-              void hub.flush().finally(() => { alertsFlushed = true; app.quit(); });
+              // An already-settled flush resolves inside this dispatch, and Electron drops a quit that is
+              // nested in a prevented one: windows and tray close but the process stays. Quit on a later turn.
+              void hub.flush().finally(() => { alertsFlushed = true; setImmediate(() => app.quit()); });
             }
             return;
           }
