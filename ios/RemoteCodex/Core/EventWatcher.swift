@@ -28,6 +28,8 @@ final class EventWatcher {
         try? BGTaskScheduler.shared.submit(task)
     }
     func start() {
+        // First signed-in start asks for notifications; later calls return at once.
+        requestPermission()
         NativePush.shared.register()
         guard polling == nil else { return }
         polling = Task { @MainActor [weak self] in

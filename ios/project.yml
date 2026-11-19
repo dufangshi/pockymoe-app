@@ -36,19 +36,23 @@ targets:
     info:
       path: RemoteCodex/Info.plist
       properties:
+        # The bundle keeps its old identifiers (docs/rename-pockymoe.md); people see Pockymoe.
+        CFBundleDisplayName: Pockymoe
         CFBundleURLTypes:
           - CFBundleURLName: com.remotecodex.app
             CFBundleURLSchemes:
+              - pockymoe
               - remotecodex
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
           NSAllowsArbitraryLoadsInWebContent: true
           NSAllowsLocalNetworking: true
-        NSLocalNetworkUsageDescription: Remote Codex connects to your relay on the local network.
+        NSLocalNetworkUsageDescription: Pockymoe connects to your relay on the local network.
         NSCameraUsageDescription: Take a photo to attach to your prompt.
         NSPhotoLibraryUsageDescription: Select images to attach to your prompt.
         WKAppBoundDomains: [app.example.com, localhost, 127.0.0.1]
-        UILaunchScreen: {}
+        UILaunchScreen:
+          UIColorName: LaunchBackground
         UIBackgroundModes:
           - fetch
           - processing
