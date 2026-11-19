@@ -958,6 +958,9 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        // The service stops while notifications are off; resume it after the permission dialog
+        // or system settings allowed them again.
+        if (store.isSignedIn) AgentEventService.start(this)
         if (authStopped)
             root.postDelayed(
                 {
