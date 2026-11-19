@@ -2,6 +2,9 @@ package com.remotecodex.app
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.app.Activity
+import android.app.DownloadManager
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.res.Configuration
 import android.graphics.Color
@@ -9,6 +12,7 @@ import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Environment
 import android.util.Base64
 import android.view.HapticFeedbackConstants
 import android.view.View
@@ -60,6 +64,7 @@ class MainActivity : ComponentActivity() {
     private var authRecovery = false
     private var debugAuthUrl: String? = null
     private var permissionAsked = false
+    private var nightMode = Configuration.UI_MODE_NIGHT_UNDEFINED
     private var origin = ""
     private var debugWebOrigin: String? = null
     private var pageBackground = Color.TRANSPARENT
@@ -68,10 +73,15 @@ class MainActivity : ComponentActivity() {
     private val permission =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) {}
     private val chooser =
-        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
-            fileCallback?.onReceiveValue(
-                WebChromeClient.FileChooserParams.parseResult(it.resultCode, it.data)
-            )
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            // Several picked files arrive as clip data, one as the intent's data.
+            val data = result.data
+            val uris =
+                if (result.resultCode != Activity.RESULT_OK || data == null) null
+                else
+                    data.clipData?.let { clip -> Array(clip.itemCount) { clip.getItemAt(it).uri } }
+                        ?: data.data?.let { arrayOf(it) }
+            fileCallback?.onReceiveValue(uris)
             fileCallback = null
         }
     private val save =
@@ -92,6 +102,7 @@ class MainActivity : ComponentActivity() {
         }
 
     override fun onCreate(state: Bundle?) {
+        nightMode = resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
         pageBackground = StartupTheme.background(this)
         firstPaint = FirstPaintState(pageBackground)
         window.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(pageBackground))
@@ -409,6 +420,19 @@ class MainActivity : ComponentActivity() {
                                 root.findViewWithTag<View>("offline")?.let(root::removeView)
                                 firstPaint.documentCommitted()
                                 revealPaintedPage(view)
+                                // A page that never reports its appearance (an older Web, a
+                                // script error, a captive portal) still shows after a few
+                                // seconds instead of leaving a blank, unexplained screen.
+                                val document = firstPaint.generation
+                                view.postDelayed(
+                                    {
+                                        if (!failed && !isDestroyed && firstPaint.forceReveal(document)) {
+                                            StartupTrace.event("webRevealTimeout", pageBackground, view.alpha)
+                                            view.animate().alpha(1f).setDuration(120).start()
+                                        }
+                                    },
+                                    REVEAL_TIMEOUT_MS,
+                                )
                             }
                         }
 
@@ -453,8 +477,32 @@ class MainActivity : ComponentActivity() {
                         ): Boolean {
                             fileCallback?.onReceiveValue(null)
                             fileCallback = callback
-                            chooser.launch(params.createIntent())
-                            return true
+                            // The page's accept types and `multiple` reach the picker;
+                            // without a picker app the page gets an empty answer.
+                            val types =
+                                params.acceptTypes
+                                    .flatMap { it.split(',') }
+                                    .map { it.trim() }
+                                    .filter { '/' in it }
+                            val pick =
+                                Intent(Intent.ACTION_GET_CONTENT).apply {
+                                    addCategory(Intent.CATEGORY_OPENABLE)
+                                    type = types.singleOrNull() ?: "*/*"
+                                    if (types.size > 1)
+                                        putExtra(Intent.EXTRA_MIME_TYPES, types.toTypedArray())
+                                    putExtra(
+                                        Intent.EXTRA_ALLOW_MULTIPLE,
+                                        params.mode == FileChooserParams.MODE_OPEN_MULTIPLE,
+                                    )
+                                }
+                            return try {
+                                chooser.launch(Intent.createChooser(pick, params.title))
+                                true
+                            } catch (_: ActivityNotFoundException) {
+                                fileCallback?.onReceiveValue(null)
+                                fileCallback = null
+                                false
+                            }
                         }
                     }
                 setOnLongClickListener {
@@ -463,6 +511,25 @@ class MainActivity : ComponentActivity() {
                             WebView.HitTestResult.SRC_ANCHOR_TYPE,
                             WebView.HitTestResult.SRC_IMAGE_ANCHOR_TYPE,
                         )
+                }
+                // A plain download link (not the bridge's saveAs) goes to the system's
+                // Downloads with this page's cookies, instead of doing nothing.
+                setDownloadListener { url, userAgent, disposition, mimeType, _ ->
+                    val uri = Uri.parse(url)
+                    if (uri.scheme != "https" && uri.scheme != "http") return@setDownloadListener
+                    val name = URLUtil.guessFileName(url, disposition, mimeType)
+                    val request =
+                        DownloadManager.Request(uri).apply {
+                            setMimeType(mimeType)
+                            CookieManager.getInstance().getCookie(url)?.let { addRequestHeader("Cookie", it) }
+                            addRequestHeader("User-Agent", userAgent)
+                            setTitle(name)
+                            setNotificationVisibility(
+                                DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED
+                            )
+                            setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, name)
+                        }
+                    runCatching { getSystemService(DownloadManager::class.java).enqueue(request) }
                 }
             }
         // The deployed Web UI and its Relay are distinct origins. Session cookies
@@ -738,6 +805,14 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {
+        // Rotation, folding and split screen keep the WebView, its drafts and open
+        // panels: the page relayouts itself. Only a light/dark switch repaints here.
+        val night = newConfig.uiMode and Configuration.UI_MODE_NIGHT_MASK
+        if (night == nightMode) {
+            super.onConfigurationChanged(newConfig)
+            return
+        }
+        nightMode = night
         if (Build.VERSION.SDK_INT >= 29) theme.rebase()
         else theme.applyStyle(R.style.Theme_RemoteCodex, true)
         super.onConfigurationChanged(newConfig)
@@ -804,8 +879,11 @@ class MainActivity : ComponentActivity() {
             store.token = token
         }
         if (token.isNotBlank() && RemoteCodexForeground.isForeground) {
-            if (Build.VERSION.SDK_INT >= 33 && !permissionAsked) {
+            // Asked once after sign-in, remembered across launches: a later change
+            // goes through the notification settings the page opens.
+            if (Build.VERSION.SDK_INT >= 33 && !permissionAsked && !prefs.getBoolean("notificationsAsked", false)) {
                 permissionAsked = true
+                prefs.edit().putBoolean("notificationsAsked", true).apply()
                 permission.launch(Manifest.permission.POST_NOTIFICATIONS)
             }
             AgentEventService.start(this)
@@ -912,6 +990,8 @@ class MainActivity : ComponentActivity() {
     }
 
     companion object {
+        /** How long a committed page may stay hidden waiting for its appearance. */
+        private const val REVEAL_TIMEOUT_MS = 4_000L
         const val EXTRA_RELAY_URL = "e2eRelayUrl"
         const val EXTRA_WEB_URL = "e2eWebUrl"
         const val EXTRA_TOKEN = "e2eToken"

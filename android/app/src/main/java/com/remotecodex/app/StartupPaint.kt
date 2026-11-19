@@ -58,6 +58,15 @@ internal class FirstPaintState(initial: Int) {
         if (!ready) this.color = color
     }
 
+    /** Shows a committed page that never reported its appearance; false if already shown. */
+    fun forceReveal(request: Long): Boolean {
+        if (request != generation || ready || !committed) return false
+        pending?.let { color = it }
+        pending = null
+        ready = true
+        return true
+    }
+
     fun confirm(request: Long, appearance: Int = revision): Boolean {
         if (request != generation || appearance != revision || !canReveal) return false
         color = pending!!
