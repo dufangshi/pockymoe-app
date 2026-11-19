@@ -37,7 +37,10 @@ import com.remotecodex.app.data.SessionStore
 import com.remotecodex.app.data.ShellOrigins
 import com.remotecodex.app.notify.*
 import java.util.UUID
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -55,7 +58,9 @@ class MainActivity : ComponentActivity() {
     private var reply: JavaScriptReplyProxy? = null
     private var authReply: Pair<JavaScriptReplyProxy, String>? = null
     private var saveReply: Pair<JavaScriptReplyProxy, String>? = null
-    private var saveBytes: ByteArray? = null
+    private val saveTransfer by lazy { SaveTransfer(cacheDir) }
+    // Bound queued bridge memory and serialize requests (including picker completion).
+    private val bridgeCalls = Channel<suspend () -> Unit>(8)
     private var backId: String? = null
     private var failed = false
     private var authStopped = false
@@ -64,7 +69,6 @@ class MainActivity : ComponentActivity() {
     private var authRecovery = false
     private var debugAuthUrl: String? = null
     private var permissionAsked = false
-    private var nightMode = Configuration.UI_MODE_NIGHT_UNDEFINED
     private var origin = ""
     private var debugWebOrigin: String? = null
     private var pageBackground = Color.TRANSPARENT
@@ -88,27 +92,40 @@ class MainActivity : ComponentActivity() {
         registerForActivityResult(
             ActivityResultContracts.CreateDocument("application/octet-stream")
         ) { uri ->
-            val saved =
-                uri != null &&
-                    runCatching {
-                            contentResolver.openOutputStream(uri!!)?.use {
-                                it.write(saveBytes!!)
-                            } != null
+            lifecycleScope.launch {
+                bridgeCalls.send {
+                    val pending = saveReply
+                    saveReply = null
+                    try {
+                        if (uri != null) withContext(Dispatchers.IO) {
+                            contentResolver.openOutputStream(uri)?.use { saveTransfer.copyTo(it) }
+                                ?: error("Cannot open destination")
                         }
-                        .getOrDefault(false)
-            saveReply?.let { respond(it.first, it.second, JSONObject().put("saved", saved)) }
-            saveReply = null
-            saveBytes = null
+                        pending?.let { respond(it.first, it.second, JSONObject().put("saved", uri != null)) }
+                    } catch (error: Exception) {
+                        if (error is CancellationException) throw error
+                        pending?.let { respond(it.first, it.second, null, actionError()) }
+                    } finally {
+                        withContext(NonCancellable + Dispatchers.IO) { saveTransfer.clear() }
+                    }
+                }
+            }
         }
 
     override fun onCreate(state: Bundle?) {
-        nightMode = resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
         pageBackground = StartupTheme.background(this)
         firstPaint = FirstPaintState(pageBackground)
         window.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(pageBackground))
         super.onCreate(state)
         enableEdgeToEdge()
         store = SessionStore(this)
+        lifecycleScope.launch {
+            try {
+                for (call in bridgeCalls) call()
+            } finally {
+                withContext(NonCancellable + Dispatchers.IO) { saveTransfer.clear() }
+            }
+        }
         if (BuildConfig.DEBUG) {
             debugAuthUrl = intent.getStringExtra("e2eAuthUrl")
             debugWebOrigin = intent.getStringExtra(EXTRA_WEB_URL)
@@ -318,22 +335,25 @@ class MainActivity : ComponentActivity() {
                     source,
                     main,
                     proxy ->
-                    if (main && sameOrigin(source))
-                        runCatching { handle(JSONObject(message.data ?: "{}"), proxy) }
-                            .onFailure {
-                                runCatching {
-                                    respond(
-                                        proxy,
-                                        JSONObject(message.data!!).optString("id"),
-                                        null,
-                                        shellText(
-                                            this@MainActivity,
-                                            "无法完成操作",
-                                            "Unable to complete the action",
-                                        ),
-                                    )
-                                }
+                    if (main && sameOrigin(source)) {
+                        val raw = message.data ?: "{}"
+                        // The injected bridge puts its decimal id first. Read only a bounded
+                        // prefix for rejection; never parse a failed payload a second time.
+                        val id = Regex("\"id\":\"([0-9]{1,20})\"")
+                            .find(raw.take(96))?.groupValues?.get(1).orEmpty()
+                        if (raw.length > 1024 * 1024) {
+                            respond(proxy, id, null, actionError())
+                        } else if (bridgeCalls.trySend {
+                            var parsed: JSONObject? = null
+                            try {
+                                parsed = withContext(Dispatchers.IO) { JSONObject(raw) }
+                                handle(checkNotNull(parsed), proxy)
+                            } catch (error: Exception) {
+                                if (error is CancellationException) throw error
+                                respond(proxy, parsed?.optString("id") ?: id, null, actionError())
                             }
+                        }.isFailure) respond(proxy, id, null, actionError())
+                    }
                 }
                 WebViewCompat.addDocumentStartJavaScript(
                     this,
@@ -597,7 +617,9 @@ class MainActivity : ComponentActivity() {
         )
     }
 
-    private fun handle(value: JSONObject, proxy: JavaScriptReplyProxy) {
+    private fun actionError() = shellText(this, "无法完成操作", "Unable to complete the action")
+
+    private suspend fun handle(value: JSONObject, proxy: JavaScriptReplyProxy) {
         reply = proxy
         val id = value.getString("id")
         val args = value.optJSONArray("args") ?: JSONArray()
@@ -613,6 +635,7 @@ class MainActivity : ComponentActivity() {
                         .put("liveActivity", Build.VERSION.SDK_INT >= 36)
                         .put("nativePush", false)
                         .put("haptics", true)
+                        .put("maxSaveBytes", SaveTransfer.MAX_BYTES)
             "activity.sync" -> {
                 HostDiagnostics.activity(args.getJSONObject(0))
                 syncSession()
@@ -648,13 +671,34 @@ class MainActivity : ComponentActivity() {
                 }
                 return
             }
-            "files.saveAs" -> {
+            "files.saveStart" -> {
                 require(saveReply == null)
-                val encoded = args.getString(1)
-                require(encoded.length <= 45 * 1024 * 1024)
-                saveBytes = Base64.decode(encoded, Base64.DEFAULT)
+                withContext(Dispatchers.IO) {
+                    // A document reload can abandon its JS transfer before aborting.
+                    // No picker is active here, so a new export may replace that file.
+                    saveTransfer.clear()
+                    saveTransfer.start(args.getString(0), args.getLong(1))
+                }
+            }
+            "files.saveChunk" -> {
+                require(saveReply == null)
+                withContext(Dispatchers.IO) { saveTransfer.append(args.getString(0)) }
+            }
+            "files.saveAbort" -> {
+                require(saveReply == null)
+                withContext(Dispatchers.IO) { saveTransfer.clear() }
+            }
+            "files.saveFinish" -> {
+                require(saveReply == null)
+                val name = withContext(Dispatchers.IO) { saveTransfer.finish() }
                 saveReply = proxy to id
-                save.launch(args.getString(0).substringAfterLast('/').substringAfterLast('\\'))
+                try {
+                    save.launch(name)
+                } catch (error: Exception) {
+                    saveReply = null
+                    withContext(NonCancellable + Dispatchers.IO) { saveTransfer.clear() }
+                    throw error
+                }
                 return
             }
             "settings.get",
@@ -805,14 +849,6 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {
-        // Rotation, folding and split screen keep the WebView, its drafts and open
-        // panels: the page relayouts itself. Only a light/dark switch repaints here.
-        val night = newConfig.uiMode and Configuration.UI_MODE_NIGHT_MASK
-        if (night == nightMode) {
-            super.onConfigurationChanged(newConfig)
-            return
-        }
-        nightMode = night
         if (Build.VERSION.SDK_INT >= 29) theme.rebase()
         else theme.applyStyle(R.style.Theme_RemoteCodex, true)
         super.onConfigurationChanged(newConfig)
@@ -825,6 +861,9 @@ class MainActivity : ComponentActivity() {
             localPage(true)
             return
         }
+        ViewCompat.requestApplyInsets(root)
+        // Resources and WebView receive the new configuration via super. Local
+        // pages above rebuild their density, locale and theme dependent controls.
         // System theme changes must not recreate the retained WebView.
         // A first-run local page, with no saved paint, continues to follow the OS.
         if (::root.isInitialized && !prefs.contains("background")) {
@@ -981,6 +1020,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        bridgeCalls.close()
         fileCallback?.onReceiveValue(null)
         if (::web.isInitialized) {
             reply = null

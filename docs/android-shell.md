@@ -49,10 +49,7 @@ Host case and default ports are canonicalized before origin comparisons.
 platform and `liveActivity`, `nativePush`, `haptics`. Android has no APNs/FCM
 registration: `push.register()` returns null. `window.openThread` sends navigation
 to the same page; preferences and pet methods are inert. Files use the system
-picker (`ACTION_GET_CONTENT` with the page's accept types; `multiple` allows
-several files; without a picker app the page receives no files), and external
-links use system handlers. A plain download link goes to the system Downloads
-with the page's cookies; the bridge's save-as remains for generated files. Settings are local shell
+picker, and external links use system handlers. Settings are local shell
 preferences. Native connection-origin changes require a successful probe and a
 new WebView. Network failures and main-frame 5xx show offline; Pages-style 404
 HTML remains the application, including restored routes and notification taps.
@@ -75,9 +72,6 @@ night setting selects `#17171A` or `#FAFAF8`. The WebView remains at alpha zero
 until its document has committed, the page has supplied appearance paint and a
 visual-state callback confirms that appearance revision. Only then does it fade
 in over 120 ms. Stale navigation/appearance callbacks cannot reveal a newer page.
-A committed page that never supplies its appearance (an older Web, a script
-error, a captive portal) is revealed anyway after 4 seconds, so the screen is
-never left blank without explanation.
 
 On Android 12+, `SplashScreen.setSplashScreenTheme` persists one of the stable
 `Theme.RemoteCodex.StartupDark` / `StartupLight` resource names as the page paints.
@@ -91,10 +85,26 @@ surface instead of an unconfigurable light preview.
 `WindowInsets` passes IME occlusion to modern WebView’s visual viewport without native panning; system bars are transparent.
 AndroidX's predictive-back dispatcher sends the `back` host command. The Web owns
 overlay/route handling; an unhandled or unresponsive page returns to the launcher.
-A warm resume retains the WebView and route; recreation restores its history.
-Rotation, folding, split screen and keyboard changes do not recreate the
-activity (`configChanges`): the WebView keeps its drafts, scroll and open panels
-and the page relayouts itself. Only a light/dark switch repaints native surfaces.
+A warm resume retains the WebView and route. Rotation, window resizing,
+fold/unfold, keyboard/navigation attachment, density, locale/layout direction and
+system night-mode changes are handled in place: WebView receives configuration
+and fresh insets without reloading its document. Native connection/offline pages
+rebuild using current resources. Process/activity recreation still restores only
+Web history, not JavaScript memory.
+
+`files.saveAs` accepts up to 64 MiB, matching the Web native-save cutoff. The
+injected host sends sequential acknowledged 48 KiB chunks, never a file-sized
+base64/JSON message. A bounded native queue parses each message once on IO;
+chunks decode into an app-cache temporary file there. Only the document picker
+runs on the UI thread; copying to its URI also streams on IO. Cancellation,
+errors and activity destruction clear temporary data; the next activity removes
+leftovers after process death. Picker cancellation resolves `{saved:false}`;
+write failures reject instead of masquerading as cancellation. Larger Web exports
+continue through the Web's existing download path. No Web change is required.
+
+JVM-free bridge regression checks: `node --test android/tests/android-host.test.mjs`.
+`SaveTransferTest` checks streamed contents at the 64 MiB boundary and rejects
+invalid/incomplete transfers in the Android unit-check lane.
 
 ## One account notification
 
@@ -130,13 +140,6 @@ remains for 15 minutes, including across service/process reconstruction. A timer
 then removes the promoted state; the unpromoted watcher remains while the
 foreground service receives events. Android's foreground-service time limit,
 force-stop or denied notification permission can prevent delivery.
-
-The ongoing channel stays quiet. A thread that starts waiting for the reader or
-fails while the app is in the background also posts one alert (ID 42) on its own
-high-importance channel, "Needs you" / 「需要你处理」, which opens that
-conversation and can be muted separately. Notification permission is requested
-once after sign-in and the request is remembered across launches; later changes
-go through the notification settings the page opens.
 
 `NotificationCopy` resolves the three display lines from the current page locale
 at render time (English and Chinese). The title is the page-owned thread title,
