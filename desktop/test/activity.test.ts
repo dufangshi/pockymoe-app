@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { ActivityHub, alertId, validateSnapshot } from '../src/main/activity';
@@ -44,31 +44,36 @@ describe('ActivityHub', () => {
     hub.sync(snapshot([item({ state: 'interrupted', unread: true })]));
     expect(events[0]).toMatchObject({ type: 'failed', item: { state: 'interrupted' } });
   });
-  it('persists alert deduplication across restarts and expires after seven days', () => {
+  it('persists alert deduplication across restarts and expires after seven days', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'rc-alerts-'));
     try {
       const path = join(dir, 'seen.json'), now = Date.now();
-      connected(new ActivityHub(path, () => now)).sync(snapshot([item({ state: 'completed', unread: true })]));
+      const initial = connected(new ActivityHub(path, () => now));
+      initial.sync(snapshot([item({ state: 'completed', unread: true })]));
+      await initial.flush(); initial.dispose();
       const restart = connected(new ActivityHub(path, () => now + 60_000)), events: ActivityEvent[] = [];
       restart.onEvent(e => events.push(e)); restart.sync(snapshot([item({ state: 'completed', unread: true })]));
       expect(events).toHaveLength(0);
       const expired = connected(new ActivityHub(path, () => now + 8 * 86400_000));
       expired.onEvent(e => events.push(e)); expired.sync(snapshot([item({ state: 'completed', unread: true })]));
       expect(events.map(e => e.alertId)).toEqual(['mac:turn-1']);
+      await expired.flush(); expired.dispose(); restart.dispose();
     } finally { rmSync(dir, { recursive: true }); }
   });
-  it('bounds dedupe history to 500 ids and namespaces accounts', () => {
+  it('bounds dedupe history to 500 ids and namespaces accounts', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'rc-bounded-'));
     try {
       const path = join(dir, 'seen.json');
       const many = Array.from({ length: 501 }, (_, i) => item({ key: `mac:t${i}`, threadId: `t${i}`, turnId: `turn${i}`, state: 'completed', unread: true }));
-      connected(new ActivityHub(path)).sync(snapshot(many));
+      const initial = connected(new ActivityHub(path)); initial.sync(snapshot(many));
+      await initial.flush(); initial.dispose();
       const restarted = connected(new ActivityHub(path)), events: ActivityEvent[] = [];
       restarted.onEvent(e => events.push(e)); restarted.sync(snapshot(many));
       expect(events.map(e => e.alertId)).toEqual(['mac:turn0']);
       restarted.sync(snapshot([], { accountId: 'another', generatedAt: '2026-11-01T05:59:00.000Z', syncedDeviceIds: ['mac'] }));
       restarted.sync(snapshot([many[1]], { accountId: 'another' }));
       expect(events.at(-1)?.alertId).toBe('mac:turn1');
+      await restarted.flush(); restarted.dispose();
     } finally { rmSync(dir, { recursive: true }); }
   });
   it('acknowledges read state and does not leak mutable snapshots', () => {
@@ -94,4 +99,18 @@ describe('ActivityHub', () => {
     expect(alertId(item())).toBe('mac:turn-1');
     expect(alertId(item({ turnId: null }))).toBe('mac:thread-1:2026-11-01T06:00:00.000Z');
   });
+});
+
+it('does not rewrite delivered alerts when only the snapshot changes', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'rc-unchanged-'));
+  const path = join(dir, 'seen.json'), hub = connected(new ActivityHub(path));
+  try {
+    hub.sync(snapshot([item({ state: 'completed', unread: true })]));
+    await hub.flush();
+    const before = statSync(path);
+    hub.sync(snapshot([item({ state: 'completed', unread: true, title: 'New title' })]));
+    await hub.flush();
+    const after = statSync(path);
+    expect([after.ino, after.mtimeMs]).toEqual([before.ino, before.mtimeMs]);
+  } finally { hub.dispose(); rmSync(dir, { recursive: true }); }
 });

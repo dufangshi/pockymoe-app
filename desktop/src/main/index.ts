@@ -18,10 +18,13 @@ import {
   type IpcMainInvokeEvent,
 } from 'electron';
 import { localFileMatches } from './platform';
+import { createWriteStream } from 'node:fs';
+import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import { release } from 'node:os';
 import { saveName, windowsGlassMaterial } from '../shared/platform';
 import { basename, join } from 'node:path';
-import { mkdirSync, writeFileSync, existsSync, copyFileSync } from 'node:fs';
+import { mkdirSync, existsSync, copyFileSync } from 'node:fs';
 import type { HostCapabilities, PetController, PetControllerDeps } from '../shared/contract';
 import type { LocalAction, LocalState } from '../shared/local';
 import { channels as c } from '../shared/channels';
@@ -371,7 +374,12 @@ async function bootstrap(): Promise<void> {
                 : basename(name).slice(0, 255) || 'download',
           });
           if (result.canceled || !result.filePath) return { saved: false };
-          writeFileSync(result.filePath, Buffer.from(data));
+          // Chunked writes retain the IPC buffer without copying or blocking the main loop.
+          const bytes = new Uint8Array(data);
+          await pipeline(Readable.from((function* () {
+            for (let offset = 0; offset < bytes.length; offset += 256 * 1024)
+              yield bytes.subarray(offset, offset + 256 * 1024);
+          })()), createWriteStream(result.filePath));
           savedNotification(result.filePath);
           return { saved: true, path: result.filePath };
         });
@@ -720,7 +728,16 @@ async function bootstrap(): Promise<void> {
           if (manager.relay.size) manager.focusMain();
           else manager.createLocal('relay');
         });
-        app.on('before-quit', () => {
+        let alertsFlushed = false, flushingAlerts = false;
+        app.on('before-quit', event => {
+          if (!alertsFlushed) {
+            event.preventDefault();
+            if (!flushingAlerts) {
+              flushingAlerts = true;
+              void hub.flush().finally(() => { alertsFlushed = true; app.quit(); });
+            }
+            return;
+          }
           manager.quitting = true;
           presence.dispose();
           messages.dispose();
