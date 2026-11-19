@@ -12,15 +12,19 @@ export function renderMessage(message: LocalMessage | null | undefined, respond:
   if (!message) return;
   const dialog = document.createElement('dialog'); dialog.className = 'local-message';
   dialog.setAttribute('aria-labelledby', 'message-title'); dialog.setAttribute('aria-describedby', 'message-body');
-  const title = document.createElement('h1'); title.id = 'message-title'; title.textContent = localizeMessage(message.title);
+  // The app name says nothing the window doesn't; the question itself is the heading then.
+  const generic = !message.title || message.title === 'Pockymoe';
+  const title = document.createElement('h1'); title.id = 'message-title'; title.textContent = localizeMessage(generic ? message.message : message.title);
   const content = document.createElement('div'); content.id = 'message-body'; content.setAttribute('data-scroll', '');
   const body = document.createElement('p'); body.textContent = localizeMessage(message.message);
   const detail = document.createElement('p'); detail.textContent = localizeMessage(message.detail);
-  content.append(body, detail);
+  if (!generic) content.append(body);
+  if (message.detail) content.append(detail);
   const buttons = document.createElement('div'); buttons.className = 'message-buttons';
   message.buttons.forEach((label, index) => {
     const button = document.createElement('button'); button.textContent = localizeMessage(label);
-    if (index !== message.cancelId) button.className = 'primary';
+    if (index === message.dangerId) button.className = 'danger';
+    else if (index !== message.cancelId) button.className = 'primary';
     button.onclick = () => respond(message.id, index); buttons.append(button);
   });
   dialog.addEventListener('cancel', event => { event.preventDefault(); respond(message.id, message.cancelId); });

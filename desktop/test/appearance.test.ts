@@ -16,7 +16,9 @@ it('uses static upstream shapes and accessible labels in every motion preference
   expect(statusMarkSvg('idle', '<unsafe>')).toContain('&lt;unsafe&gt;'); expect(statusMarkStyles).not.toMatch(/animation|keyframes|transition/); expect(statusMarkSvg('agents-running').match(/<circle/g)).toHaveLength(2);
   expect(activityStatus({ state: 'interrupted', unread: true })).toBe('interrupted'); expect(activityStatus({ state: 'completed', unread: true })).toBe('unread');
 });
-it('renders elapsed running time as stable tabular timer text', () => {
-  expect(elapsed('2026-11-01T00:00:00Z', Date.parse('2026-11-01T00:01:05Z'))).toBe('01:05');
-  expect(elapsed('2026-11-02T00:00:00Z', Date.parse('2026-11-01T00:00:00Z'))).toBe('00:00');
+it('renders elapsed running time as a duration, never a clock reading', () => {
+  expect(elapsed('2026-11-01T00:00:00Z', Date.parse('2026-11-01T00:00:45Z'))).toBe('45s');
+  expect(elapsed('2026-11-01T00:00:00Z', Date.parse('2026-11-01T00:12:21Z'))).toBe('12m');
+  expect(elapsed('2026-11-01T00:00:00Z', Date.parse('2026-11-01T03:05:21Z'))).toBe('3h 5m');
+  expect(elapsed('2026-11-02T00:00:00Z', Date.parse('2026-11-01T00:00:00Z'))).toBe('0s');
 });

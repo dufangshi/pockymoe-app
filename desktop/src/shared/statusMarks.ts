@@ -33,11 +33,22 @@ export function statusMarkSvg(status: StatusMark, label?: string): string {
   };
   return `<svg class="pockymoe-status-mark" data-status="${kind}" width="16" height="16" viewBox="0 0 16 16" role="img" aria-label="${escape(label || t(labels[kind]))}">${shapes[kind]}</svg>`;
 }
+/* Status colors mirror each pack's Web marks (thread-ui matter-workbench.css and
+   themes/<pack>/styles): running uses the run color, not the accent, so in a pack whose
+   accent is amber (Plum Pocket) running and unread never match "waiting for you". */
 export const statusMarkStyles = `
+:root{--status-running:oklch(.48 .19 255);--status-waiting:#b77915;--status-agents:#8066cd}
+:root[data-theme-effective=dark]{--status-running:oklch(.8 .12 245);--status-waiting:#edb75d;--status-agents:#b39af2}
+:root[data-theme-preset=plum-pocket]{--status-running:#2f6fd6;--status-unread:#a87200;--status-agents:#7a52c8;--status-interrupted:#a8701f}
+:root[data-theme-preset=plum-pocket][data-theme-effective=dark]{--status-running:#8fc3ff;--status-unread:#f2c15c;--status-agents:#c7a6ff;--status-interrupted:#f0b46a}
+:root[data-theme-preset=terminal]{--status-running:var(--theme-accent-solid);--status-waiting:#c08a3e;--status-interrupted:#c08a3e}
+:root[data-theme-preset=terminal][data-theme-effective=dark]{--status-waiting:#edb75d}
 .pockymoe-status-mark{display:inline-block;flex:0 0 16px;vertical-align:middle;color:var(--theme-fg-muted,#888)}
-.pockymoe-status-mark[data-status=running],.pockymoe-status-mark[data-status=unread]{color:var(--theme-accent-solid,#bd8a3d)}
+.pockymoe-status-mark[data-status=running]{color:var(--status-running)}
+.pockymoe-status-mark[data-status=unread]{color:var(--status-unread,var(--theme-accent-solid,#008b53))}
 .pockymoe-status-mark[data-status=failed]{color:var(--theme-danger,#d8524f)}
-.pockymoe-status-mark[data-status=interrupted],.pockymoe-status-mark[data-status=waiting]{color:var(--theme-warning,#c58b24)}
+.pockymoe-status-mark[data-status=waiting]{color:var(--status-waiting)}
+.pockymoe-status-mark[data-status=interrupted]{color:var(--status-interrupted,var(--status-waiting))}
 .pockymoe-status-mark[data-status=unknown]{opacity:.55}
-.pockymoe-status-mark[data-status=agents-running]{color:var(--theme-agent-running,#9870cb)}
+.pockymoe-status-mark[data-status=agents-running]{color:var(--theme-agent-running,var(--status-agents))}
 `;

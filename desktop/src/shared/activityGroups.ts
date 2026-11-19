@@ -14,7 +14,7 @@ export function agentActivityName(item: ActivityItem): string { return item.agen
 export function alertTitle(items: ActivityItem[], allItems: ActivityItem[] = [], compact = false): string {
   const item = items[0], conversation = conversationTitle(item, allItems);
   const agents = new Set(items.filter(isAgentActivity).map(item => item.key)).size;
-  const suffix = agents > 1 ? ` · ${t('{count} 个子线程', { count: agents })}` : isAgentActivity(item) ? `.${agentActivityName(item)}` : '';
+  const suffix = agents > 1 ? ` · ${t('{count} 个子线程', { count: agents })}` : isAgentActivity(item) ? ` › ${agentActivityName(item)}` : ''; // "root.agent" read like a filename
   // Only the conversation is shortened; the agent name remains intact on narrow surfaces.
   const chars = Array.from(conversation), limit = 32;
   const name = compact && chars.length > limit ? `${chars.slice(0, 16).join('')}…${chars.slice(-15).join('')}` : conversation;

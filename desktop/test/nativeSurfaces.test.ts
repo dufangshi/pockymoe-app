@@ -22,7 +22,7 @@ vi.mock('electron', () => ({
 }));
 import { Notifications } from '../src/main/notifications';
 import { nativeNotificationId } from '../src/main/windowsToast';
-import { activityCounts, taskbarBadge, trayTemplate } from '../src/main/tray';
+import { activityCounts, middleTruncate, taskbarBadge, trayTemplate } from '../src/main/tray';
 beforeEach(() => { setLocale('zh-CN'); vi.useFakeTimers(); notices.length = 0; });
 afterEach(() => vi.useRealTimers());
 it('uses stable native IDs, includes map actions and labels interruptions', async () => {
@@ -46,6 +46,10 @@ it('adds open/reveal submenus for tray items and an open-map entry', () => {
   const row = template.find(i => i.label?.startsWith('修复登录'))!;
   const submenu = row.submenu as MenuItemConstructorOptions[];
   expect(submenu.map(i => i.label)).toEqual(['打开线程', '在地图中显示']);
+  expect(template.map(i => i.label)).not.toContain('进行中 · 0');
+  const idle = trayTemplate(snapshot([]), defaults, open, { reveal, map, pet: vi.fn(), snooze: vi.fn(), main: vi.fn(), settings: vi.fn(), quit: vi.fn() });
+  expect(idle[0].label).toBe('没有需要你处理的线程');
+  expect(middleTruncate('a'.repeat(30) + 'b'.repeat(30), 48)).toBe('a'.repeat(24) + '…' + 'b'.repeat(23));
 });
 
 it('counts root conversations and nests tray agents without retargeting actions', () => {
@@ -68,7 +72,7 @@ it('groups native notices by root title while approvals retain actual request ID
   const notifications = new Notifications(hub, settings, { relay: new Set(), dispatch } as unknown as Windows, () => undefined, () => null);
   hub.sync(snapshot([item({ key: 'mac:agent', threadId: 'agent', state: 'needsInput', agentName: 'Planner', rootThreadKey: 'mac:root', rootThreadTitle: '根对话', request: { id: 'own-request', kind: 'approval', summary: '运行测试' } })]));
   vi.advanceTimersByTime(1500);
-  expect(notices[0].options).toMatchObject({ id: 'mac:own-request', groupId: 'pockymoe:mac:root', title: '根对话.Planner', subtitle: 'MacBook Pro · remoteCodex · 🤖 1' });
+  expect(notices[0].options).toMatchObject({ id: 'mac:own-request', groupId: 'pockymoe:mac:root', title: '根对话 › Planner', subtitle: 'MacBook Pro · remoteCodex · 🤖 1' });
   expect(String(notices[0].options.subtitle)).not.toMatch(/智能体|Agent|Planner/);
   notices[0].emit('action', {}, 0); await Promise.resolve();
   expect(dispatch).toHaveBeenCalledWith({ type: 'resolveRequest', deviceId: 'mac', threadId: 'agent', requestId: 'own-request', decision: 'approve' });

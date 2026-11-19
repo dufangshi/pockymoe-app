@@ -1,10 +1,12 @@
 import type { ActivitySnapshot, Appearance, DesktopSettings, HostCommandResult } from './contract';
 import type { SummaryStatus, VoiceStatus } from './voice';
 export interface LocalMessage {
-  id: number; title: string; message: string; detail: string; buttons: string[]; cancelId: number; defaultId: number;
+  id: number; title: string; message: string; detail: string; buttons: string[]; cancelId: number; defaultId: number; dangerId?: number;
 }
 export interface LocalState {
   revision?: number; connectionError?: string;
+  /** Chromium's error name for the last failed main-window load (e.g. ERR_CONNECTION_REFUSED). */
+  offlineReason?: string;
   message?: LocalMessage | null;
   glassFallback?: boolean; platform?: string; locale: string; preferencesRequestId: number; preferencesSection: 'general' | 'pet' | 'shortcuts'; settings: DesktopSettings; appearance: Appearance | null; snapshot: ActivitySnapshot | null;
   petAvailable: boolean; petPacks: { id: string; name: string; thumbnail?: string; rows?: number; imported?: boolean; author?: string; source?: string; license?: string; licenseUrl?: string }[]; version: string; voice: VoiceStatus; summary: SummaryStatus;
@@ -16,6 +18,7 @@ export type LocalAction =
   | { type: 'reply'; key: string; text: string }
   | { type: 'changeConnection' }
   | { type: 'retryConnection' }
+  | { type: 'probeConnection' }
   | { type: 'hide' }
   | { type: 'importPet' }
   | { type: 'deletePet'; id: string }
@@ -23,6 +26,7 @@ export type LocalAction =
   | { type: 'quickSize'; height: number }
   | { type: 'connectionSize'; expanded: boolean }
   | { type: 'checkUpdate' }
+  | { type: 'openAbout' }
   | { type: 'messageResponse'; id: number; response: number }
   | { type: 'voiceModel'; command: 'download' | 'cancel' | 'remove' }
   | { type: 'voiceKey'; key: string | null }

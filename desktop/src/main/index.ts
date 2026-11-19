@@ -9,6 +9,7 @@ import {
   ipcMain,
   nativeTheme,
   Notification,
+  net,
   session,
   protocol,
   powerMonitor,
@@ -34,7 +35,7 @@ import { Notifications, itemPath } from './notifications';
 import { DesktopTray } from './tray';
 import { installMenu } from './menu';
 import { apnsEnabled, registerApns } from './apns';
-import { checkUpdate, configureUpdates, createUpdates, type ShowMessage } from './updates';
+import { checkUpdate, configureUpdates, createUpdates, nativeMessageOptions, type ShowMessage } from './updates';
 import { nativeNotificationId } from './windowsToast';
 import { LocalMessages } from './messages';
 import { PetCatalog } from './petCatalog';
@@ -419,8 +420,11 @@ async function bootstrap(): Promise<void> {
         function applySettings(patch: unknown): ReturnType<SettingsStore['get']> {
           const next = validateSettings(patch);
           if (next?.quickWindowShortcut && next.quickWindowShortcut !== settings.get().quickWindowShortcut) {
-            if (!globalShortcut.register(next.quickWindowShortcut, () => manager.toggleQuick()))
-              throw new Error(t('快捷键已被占用或无效'));
+            let registered: boolean;
+            // Electron throws for a malformed accelerator and returns false when another app owns it.
+            try { registered = globalShortcut.register(next.quickWindowShortcut, () => manager.toggleQuick()); }
+            catch { throw new Error(t('这个组合键无效，请换一个')); }
+            if (!registered) throw new Error(t('这个组合键已被其他应用占用，请换一个'));
             globalShortcut.unregister(settings.get().quickWindowShortcut);
           }
           return settings.set(next);
@@ -429,11 +433,12 @@ async function bootstrap(): Promise<void> {
         const showMessageBox: ShowMessage = (options) =>
           process.platform === 'win32'
             ? messages.show(options, manager.createLocal('preferences'))
-            : dialog.showMessageBox(options);
+            : dialog.showMessageBox(nativeMessageOptions(options));
         let stateRevision = 0;
         const localState = (window?: BrowserWindow): LocalState => ({
           revision: stateRevision,
           connectionError,
+          offlineReason: manager.offlineReason,
           message: window ? messages.view(window.id) : null,
           platform: process.platform,
           glassFallback:
@@ -515,6 +520,16 @@ async function bootstrap(): Promise<void> {
                 w.close();
                 manager.retryConnection();
                 break;
+              case 'probeConnection': {
+                // A quiet check from the offline page: reopen the main window only once the
+                // address answers, so a lasting outage does not keep opening and closing windows.
+                const origin = settings.get().webOrigin;
+                const answered = await net.fetch(origin, { method: 'HEAD', signal: AbortSignal.timeout(5000) }).then(() => true, () => false);
+                if (!answered) return { ok: false };
+                w.close();
+                manager.retryConnection();
+                break;
+              }
               case 'hide':
                 w.hide();
                 break;
@@ -524,7 +539,7 @@ async function bootstrap(): Promise<void> {
               case 'connectionSize': {
                 if (manager.local.get(w) === 'relay' && typeof action.expanded === 'boolean') {
                   const [width, height] = w.getContentSize(),
-                    next = action.expanded ? 500 : 320;
+                    next = action.expanded ? 540 : 360; // Matches the relay window's initial height in windows.ts.
                   if (height !== next) w.setContentSize(width, next);
                 }
                 break;
@@ -584,6 +599,7 @@ async function bootstrap(): Promise<void> {
                   buttons: [t('取消'), t('删除')],
                   defaultId: 0,
                   cancelId: 0,
+                  dangerId: 1,
                 });
                 if (response !== 1) break;
                 // Stop using its files first, so that removal cannot pull them from under the pet.
@@ -600,6 +616,9 @@ async function bootstrap(): Promise<void> {
                 await shell.openExternal(safe);
                 break;
               }
+              case 'openAbout':
+                manager.createLocal('about');
+                break;
               case 'checkUpdate':
                 if (hasConnection(settings.get())) await checkUpdate(showMessageBox);
                 break;

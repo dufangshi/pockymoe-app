@@ -30,7 +30,14 @@ async function healthy(fetcher: Fetcher, base: string): Promise<boolean> {
 }
 /** Pages staticHosting.ts publishes VITE_POCKYMOE_RELAY_ORIGIN in this text file
  * and the HTML meta CSP. API-only relay roots redirect to POCKYMOE_WEB_ORIGIN. */
+/** People type "pockymoe.example" or "localhost:8080": loopback gets http://, everything else https://. */
+export function withScheme(input: string): string {
+  const value = input.trim();
+  if (!value || /^[a-z][a-z\d+.-]*:\/\//i.test(value)) return value;
+  return `${/^(?:localhost|127(?:\.\d{1,3}){3}|\[::1\])(?::\d+)?(?:\/|$)/i.test(value) ? 'http' : 'https'}://${value}`;
+}
 export async function discoverOrigins(input: string, fetcher: Fetcher = fetch, relayOverride?: string): Promise<OriginPair> {
+  input = withScheme(input); relayOverride = relayOverride ? withScheme(relayOverride) : relayOverride;
   const entered = origin(input);
   const page = await read(fetcher, `${entered}/`);
   if (!page || !/<(?:html|script|head)\b/i.test(page.text) || !/Pockymoe/i.test(page.text)) throw new Error(t('无法连接此 Pockymoe 地址，请检查后重试。'));

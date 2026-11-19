@@ -5,8 +5,11 @@ import { prepareInstall, ManualInstall, InsufficientSpace } from './updateInstal
 import { UpdateCancelled } from './updateWindows';
 import { t } from '../shared/i18n';
 export { isNewerVersion, parseVersion } from './updateCore';
-export type ShowMessage = (options: MessageBoxOptions) => Promise<MessageBoxReturnValue>;
-const nativeMessage: ShowMessage = options => dialog.showMessageBox(options);
+/** `dangerId` marks a destructive button; the local (Windows) dialog paints it red. */
+export type ShowMessage = (options: MessageBoxOptions & { dangerId?: number }) => Promise<MessageBoxReturnValue>;
+/** Native dialogs have no destructive style; drop the local-only hint before handing it to Electron. */
+export function nativeMessageOptions(options: Parameters<ShowMessage>[0]): MessageBoxOptions { const native = { ...options }; delete native.dangerId; return native; }
+const nativeMessage: ShowMessage = options => dialog.showMessageBox(nativeMessageOptions(options));
 declare const __UPDATER_TEST_BUILD__: boolean;
 declare const __UPDATER_FEED__: string;
 declare const __UPDATER_PUBLIC_KEY__: string;

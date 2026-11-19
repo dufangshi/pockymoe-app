@@ -146,7 +146,7 @@ test('split origins bridge, activity delivery, tray and quick-window command rou
   const running = item({ key: 'pc:thread-2', deviceId: 'pc', deviceName: 'Windows Studio', threadId: 'thread-2', turnId: 'turn-2', title: '完善设备统计视图', workspaceLabel: 'supervisor-web' });
   const completed = item({ key: 'mac:thread-3', threadId: 'thread-3', turnId: 'turn-3', title: '优化工作区树形导航', state: 'completed', unread: true, resultSummary: '键盘导航与过滤已完成' });
   await page.evaluate(s => { window.pockymoeHost!.activity.sync({ ...s, items: [], generatedAt: '2026-11-01T05:59:00.000Z', syncedDeviceIds: ['mac', 'pc'] }); window.pockymoeHost!.activity.sync(s); }, snapshot([active, running, completed]));
-  await expect.poll(() => app.evaluate(() => globalThis.__pockymoeDesktopTest.tray.menuLabels)).toContain('修复登录状态同步 — MacBook Pro');
+  await expect.poll(() => app.evaluate(() => globalThis.__pockymoeDesktopTest.tray.menuLabels)).toContain('修复登录状态同步 · MacBook Pro');
   expect(await app.evaluate(() => globalThis.__pockymoeDesktopTest.notifications.decisions)).toEqual(expect.arrayContaining([expect.objectContaining({ alertId: 'mac:req-1', system: true })]));
   await app.evaluate(({ globalShortcut }) => { if (!globalShortcut.isRegistered('Alt+Space')) throw new Error('Quick shortcut not registered'); globalThis.__pockymoeDesktopTest.windows.toggleQuick(); });
   const quick = await pageAt(app, 'view=quick');
@@ -244,14 +244,14 @@ for (const pack of packs) for (const theme of ['light', 'dark'] as const) test(`
   await capture(app, preferences, 'preferences-pet', pack, theme);
   await preferences.getByRole('button', { name: '快捷键', exact: true }).click();
   await capture(app, preferences, 'preferences-shortcuts', pack, theme);
-  await preferences.getByRole('textbox', { name: '快捷窗口快捷键' }).fill('CommandOrControl+Shift+Space'); await preferences.getByRole('button', { name: '保存', exact: true }).click();
+  await preferences.getByRole('button', { name: '快捷窗口快捷键' }).click(); await preferences.keyboard.press(`${process.platform === 'darwin' ? 'Meta' : 'Control'}+Shift+Space`);
   await expect.poll(() => app.evaluate(({ globalShortcut }) => globalShortcut.isRegistered('CommandOrControl+Shift+Space'))).toBe(true);
   const items = [item({ state: 'needsInput', request: { id: `request-${theme}`, kind: 'input', summary: '请选择部署环境' } }), item({ key: 'mac:thread-2', threadId: 'thread-2', turnId: `run-${theme}`, title: '完善桌面端交互细节', since: new Date(Date.now() - 65_000).toISOString() }), item({ key: 'mac:thread-3', threadId: 'thread-3', turnId: `done-${theme}`, title: '检查跨设备索引缓存', state: 'completed', unread: true, resultSummary: '离线恢复验证通过' })];
   // Wait for this frame's IPC before another renderer queries the seeded activity.
   await page.evaluate(async s => { window.pockymoeHost!.activity.sync({ ...s, items: [], generatedAt: '2026-11-01T05:59:00.000Z', syncedDeviceIds: ['mac', 'pc'] }); window.pockymoeHost!.activity.sync(s); await window.pockymoeHost!.capabilities(); }, snapshot(items));
   await app.evaluate(() => globalThis.__pockymoeDesktopTest.windows.createLocal('quick'));
   const quick = await pageAt(app, 'view=quick'); await expect(quick.getByRole('option')).toHaveCount(3);
-  await expect(quick.locator('.elapsed')).toHaveText(/^01:0[5-9]$/);
+  await expect(quick.locator('.elapsed')).toHaveText(/^(1 分|1m)$/);
   expect((await quick.getByRole('option').first().boundingBox())!.height).toBe(34);
   expect(await quick.locator('svg[data-status=running] circle').count()).toBe(2);
   await capture(app, quick, 'quick', pack, theme);
@@ -276,9 +276,10 @@ for (const pack of packs) for (const theme of ['light', 'dark'] as const) test(`
   await expect(quick.locator('.conversation-count')).toHaveText('2');
   await expect(quick.locator('.conversation-count svg')).toHaveCount(1);
   await expect(quick.locator('.conversation-toggle')).toHaveCount(0);
-  await expect(quick.locator('.row-copy>span')).toHaveCount(0);
+  // One row per conversation: the root's device and workspace tell same-named threads apart, agent names stay out.
+  expect(await quick.locator('.row-copy>span').allInnerTexts()).toEqual(Array(await quick.getByRole('option').count()).fill('MacBook Pro · remoteCodex'));
   await expect(quick.locator('#reply')).not.toHaveAttribute('placeholder', /智能体|Agent/);
-  expect(await quick.locator('#quick-list').innerText()).not.toMatch(/智能体|Agent|MacBook Pro|remoteCodex/);
+  expect(await quick.locator('#quick-list').innerText()).not.toMatch(/智能体|Agent/);
   await capture(app, quick, 'conversation-row', pack, theme, [560, 380]);
   // Searching a member keeps the conversation intact and targets its waiting request.
   await quick.getByLabel('搜索活动线程').fill('Planner');
@@ -497,7 +498,8 @@ test('native menu accelerators have no collisions, including role defaults', asy
   const normalized = shortcuts.map(item => item.accelerator.toLowerCase().replace(/commandorcontrol|cmdorctrl|command|control/g, 'primary').replace(/cmd/g, 'primary'));
   expect(new Set(normalized).size, JSON.stringify(shortcuts)).toBe(normalized.length);
   expect(shortcuts.find(item => item.label === 'pockymoe-open-map')?.accelerator).toBe('CommandOrControl+0');
-  expect(shortcuts.find(item => item.label === 'resetzoom')).toBeUndefined();
+  // Cmd/Ctrl+0 belongs to the map, so actual size moves to Shift+0 rather than disappearing.
+  expect(shortcuts.find(item => item.label === 'resetzoom')?.accelerator).toBe('CommandOrControl+Shift+0');
   await app.evaluate(() => globalThis.__pockymoeDesktopTest.windows.focusMain());
   await page.getByRole('heading', { name: 'Pockymoe fixture', exact: true }).click();
   await expect.poll(() => page.evaluate(() => document.hasFocus())).toBe(true);
