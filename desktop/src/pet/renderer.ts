@@ -74,7 +74,8 @@ function middleName(value: string, label = value): string {
 function errorSlot(id: string): string { return failures.has(id) ? `<span class="pet-error-slot" data-error-id="${escape(id)}" role="alert"></span>` : ''; }
 function decisions(item: ActivityItem, surface: string): string {
   const disabled = pending.has(`${surface}:${item.key}`) ? ' disabled aria-busy="true"' : '';
-  return `<span class="decisions">${button('approve', t('批准'), icon('check'), `class="primary"${disabled}`)}${button('deny', t('拒绝'), icon('close'), disabled)}</span>`;
+  // Words, not ✓/✕: ✕ means "close" everywhere else, and here it would deny the request.
+  return `<span class="decisions">${button('approve', t('批准'), escape(t('批准')), `class="primary"${disabled}`)}${button('deny', t('拒绝'), escape(t('拒绝')), `class="deny"${disabled}`)}</span>`;
 }
 function controls(): string {
   return `<nav class="controls" aria-label="${escape(t('桌宠控制'))}">${button('toggleTray', t('活动面板'), icon('tasks') + (state?.items.length ? `<span class="task-count">${petConversations(state.items).length}</span>` : ''), `aria-expanded="${state?.mode === 'panel'}"`)}${button('openMain', t('打开主窗口'), icon('home'))}${button('openMap', t('在地图中显示'), icon('map'))}${button('more', t('更多'), icon('more'), `aria-haspopup="menu" aria-expanded="${state?.mode === 'menu'}"`)}</nav>`;

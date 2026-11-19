@@ -9,7 +9,7 @@ export class LocalMessages {
   private current?: { window: BrowserWindow; message: LocalMessage; finish(response: number): void };
   constructor(private changed: () => void) {}
   view(windowId: number): LocalMessage | null { return this.current?.window.id === windowId ? this.current.message : null; }
-  show(options: MessageBoxOptions, window: BrowserWindow): Promise<MessageBoxReturnValue> {
+  show(options: MessageBoxOptions & { dangerId?: number }, window: BrowserWindow): Promise<MessageBoxReturnValue> {
     const buttons = options.buttons?.length ? [...options.buttons] : ['OK'];
     const cancelId = options.cancelId ?? buttons.length - 1;
     const result = this.queue.then(() => new Promise<MessageBoxReturnValue>(resolve => {
@@ -19,7 +19,7 @@ export class LocalMessages {
         this.current = undefined; this.changed(); resolve({ response, checkboxChecked: false });
       };
       const cancel = (): void => finish(cancelId);
-      this.current = { window, finish, message: { id: ++this.nextId, title: options.title || 'Pockymoe', message: options.message, detail: options.detail || '', buttons, cancelId, defaultId: options.defaultId ?? 0 } };
+      this.current = { window, finish, message: { id: ++this.nextId, title: options.title || 'Pockymoe', message: options.message, detail: options.detail || '', buttons, cancelId, defaultId: options.defaultId ?? 0, ...(options.dangerId === undefined ? {} : { dangerId: options.dangerId }) } };
       window.once('closed', cancel); window.once('hide', cancel);
       window.show(); window.focus(); this.changed();
     }));

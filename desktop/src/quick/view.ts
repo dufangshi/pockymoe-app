@@ -74,6 +74,9 @@ export function mountQuick(root: HTMLElement, initial: LocalState): void {
       const dot = document.createElement('span'); dot.className = 'row-status'; dot.innerHTML = statusMarkSvg(activityStatus(item));
       const copy = document.createElement('div'); copy.className = 'row-copy';
       const name = document.createElement('strong'); name.textContent = conversation.title; copy.append(name);
+      // Device and workspace tell same-named threads apart; the tooltip is not the only place they appear.
+      const place = [...new Set(conversation.items.map(entry => [entry.deviceName, entry.workspaceLabel].filter(Boolean).join(' · ')))][0];
+      if (place) { const where = document.createElement('span'); where.textContent = place; copy.append(where); }
       row.append(dot, copy);
       if (conversation.agentCount) {
         const count = document.createElement('span'); count.className = 'conversation-count';
@@ -127,8 +130,11 @@ export function mountQuick(root: HTMLElement, initial: LocalState): void {
   clock();
 }
 
+/** Running time as a duration, never a clock reading: "45 秒", "12 分", "3 小时 5 分". */
 export function elapsed(since: string, now = Date.now()): string {
   const seconds = Math.max(0, Math.floor((now - Date.parse(since)) / 1000)) || 0;
+  if (seconds < 60) return t('{seconds} 秒', { seconds });
   const minutes = Math.floor(seconds / 60);
-  return `${minutes.toString().padStart(2, '0')}:${(seconds % 60).toString().padStart(2, '0')}`;
+  if (minutes < 60) return t('{minutes} 分', { minutes });
+  return t('{hours} 小时 {minutes} 分', { hours: Math.floor(minutes / 60), minutes: minutes % 60 });
 }

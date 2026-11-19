@@ -18,8 +18,30 @@ export function windowsMaterial(release: string): 'mica' | 'none' {
 export function windowsGlassMaterial(release: string, forceSolid = false): 'acrylic' | 'solid' {
   return !forceSolid && windowsMaterial(release) === 'mica' ? 'acrylic' : 'solid';
 }
-export function shortcutLabel(platform: string, key: string, shift = false): string {
-  return platform === 'darwin' ? `⌘ / Ctrl ${shift ? '⇧ ' : ''}${key}` : `Ctrl+${shift ? 'Shift+' : ''}${key}`;
+const codeKeys: Record<string, string> = { Space: 'Space', Enter: 'Enter', Tab: 'Tab', Backspace: 'Backspace', Delete: 'Delete', Insert: 'Insert', Home: 'Home', End: 'End', PageUp: 'PageUp', PageDown: 'PageDown',
+  ArrowUp: 'Up', ArrowDown: 'Down', ArrowLeft: 'Left', ArrowRight: 'Right', Comma: ',', Period: '.', Slash: '/', Semicolon: ';', Quote: "'", BracketLeft: '[', BracketRight: ']', Backslash: '\\', Minus: '-', Equal: '=', Backquote: '`' };
+/** The Electron accelerator for a pressed combination, or null while it is incomplete.
+ * Uses the physical key (event.code) so Alt/Option combinations on any layout still name the key. */
+export function acceleratorFromKey(event: Pick<KeyboardEvent, 'code' | 'ctrlKey' | 'metaKey' | 'altKey' | 'shiftKey'>, platform: string): string | null {
+  const code = event.code;
+  const key = /^Key[A-Z]$/.test(code) ? code.slice(3) : /^Digit\d$/.test(code) ? code.slice(5) : /^F([1-9]|1\d|2[0-4])$/.test(code) ? code : codeKeys[code];
+  if (!key) return null;
+  const mac = platform === 'darwin';
+  const modifiers = [
+    ...(mac ? [event.metaKey ? 'CommandOrControl' : '', event.ctrlKey ? 'Control' : ''] : [event.ctrlKey ? 'CommandOrControl' : '', event.metaKey ? 'Super' : '']),
+    event.altKey ? 'Alt' : '', event.shiftKey ? 'Shift' : ''
+  ].filter(Boolean);
+  // A global shortcut without a modifier would swallow ordinary typing everywhere; F-keys are the exception.
+  if (!modifiers.length && !/^F\d+$/.test(key)) return null;
+  return [...modifiers, key].join('+');
+}
+/** Key caps for an accelerator, in the platform's own names. */
+export function acceleratorKeys(accelerator: string, platform: string): string[] {
+  const mac = platform === 'darwin';
+  const names: Record<string, string> = mac
+    ? { commandorcontrol: '⌘', cmdorctrl: '⌘', command: '⌘', cmd: '⌘', control: '⌃', ctrl: '⌃', alt: '⌥', option: '⌥', shift: '⇧', super: '⌘' }
+    : { commandorcontrol: 'Ctrl', cmdorctrl: 'Ctrl', control: 'Ctrl', ctrl: 'Ctrl', alt: 'Alt', shift: 'Shift', super: 'Win', meta: 'Win' };
+  return accelerator.split('+').map(part => part.trim()).filter(Boolean).map(part => names[part.toLowerCase()] ?? part);
 }
 /** Windows paths are untrusted filenames too, even when supplied by a Unix server. */
 export function windowsReservedName(name: string): boolean {

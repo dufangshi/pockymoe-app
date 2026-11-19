@@ -25,12 +25,12 @@ it('names agent alerts and speech in both languages, preserves root titles and w
   const a = { ...agent('terminal'), rootThreadTitle: 'app' }, b = { ...agent('tests'), rootThreadTitle: 'app' };
   for (const locale of ['zh-CN', 'en']) {
     setLocale(locale);
-    expect(alertTitle([a])).toBe('app.terminal');
-    expect(alertTitle([{ ...a, agentName: null }])).toBe(locale === 'en' ? 'app.agent' : 'app.智能体');
+    expect(alertTitle([a])).toBe('app › terminal');
+    expect(alertTitle([{ ...a, agentName: null }])).toBe(locale === 'en' ? 'app › agent' : 'app › 智能体');
     expect(alertTitle([a, b])).toBe(locale === 'en' ? 'app · 2 child threads' : 'app · 2 个子线程');
-    expect(alertTitle([a, a])).toBe('app.terminal');
+    expect(alertTitle([a, a])).toBe('app › terminal');
     expect(alertTitle([item({ title: 'app' })])).toBe('app');
     expect(spokenActivityTitle(a)).toBe(locale === 'en' ? "app's agent thread terminal" : 'app 的子线程 terminal');
-    expect(alertTitle([{ ...a, rootThreadTitle: 'a'.repeat(80) }], [], true)).toBe('a'.repeat(16) + '…' + 'a'.repeat(15) + '.terminal');
+    expect(alertTitle([{ ...a, rootThreadTitle: 'a'.repeat(80) }], [], true)).toBe('a'.repeat(16) + '…' + 'a'.repeat(15) + ' › terminal');
   }
 });

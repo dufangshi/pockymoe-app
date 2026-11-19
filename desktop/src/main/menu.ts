@@ -1,5 +1,6 @@
 import { BrowserWindow, Menu, shell, type MenuItemConstructorOptions } from 'electron';
 import { t } from '../shared/i18n';
+import { accelerator } from '../shared/shortcuts';
 import type { SettingsStore } from './store';
 import type { Windows } from './windows';
 export function installMenu(windows: Windows, settings: SettingsStore): void {
@@ -13,22 +14,22 @@ export function installMenu(windows: Windows, settings: SettingsStore): void {
   };
   const application: MenuItemConstructorOptions = { label: 'Pockymoe', submenu: [
     { label: t('关于 Pockymoe'), click: available(() => { windows.createLocal('about'); }) }, { type: 'separator' },
-    { label: t('设置…'), accelerator: 'CommandOrControl+,', click: available(() => { windows.createLocal('preferences'); }) },
+    { label: t('设置…'), accelerator: accelerator('preferences'), click: available(() => { windows.createLocal('preferences'); }) },
     { label: t('更改 Pockymoe 地址…'), click: available(() => { windows.createLocal('relay'); }) }, { type: 'separator' },
     ...(process.platform === 'darwin' ? [{ role: 'services' as const, label: t('服务') }, { type: 'separator' as const },
       { role: 'hide' as const, label: t('隐藏 Pockymoe') }, { role: 'hideOthers' as const, label: t('隐藏其他') },
       { role: 'unhide' as const, label: t('全部显示') }, { type: 'separator' as const }] : []),
-    { role: 'quit', label: t('退出 Pockymoe'), accelerator: 'CommandOrControl+Q' }
+    { role: 'quit', label: t('退出 Pockymoe'), accelerator: accelerator('quit') }
   ] };
   const navigation: MenuItemConstructorOptions[] = [
     // The Web owns Cmd/Ctrl+F, including terminal/editor exclusions; K is an alias.
-    { id: 'pockymoe-search', label: t('搜索'), accelerator: 'CommandOrControl+K', click: search },
-    { id: 'pockymoe-open-map', label: t('打开地图'), accelerator: 'CommandOrControl+0', click: command('openMap') },
-    { label: t('新线程'), accelerator: 'CommandOrControl+N', click: command('newThread') },
+    { id: 'pockymoe-search', label: t('搜索'), accelerator: accelerator('search'), click: search },
+    { id: 'pockymoe-open-map', label: t('打开地图'), accelerator: accelerator('openMap'), click: command('openMap') },
+    { label: t('新线程'), accelerator: accelerator('newThread'), click: command('newThread') },
     { label: t('设备总览'), click: command('openDevices') }, { type: 'separator' },
-    { label: t('显示 / 隐藏桌宠'), accelerator: 'CommandOrControl+Shift+P', click: () => settings.set({ petVisible: !settings.get().petVisible }) },
-    { label: t('后退'), accelerator: 'CommandOrControl+[', click: () => { if (windows.closingForUpdate) return; const h = windows.focusMain().webContents.navigationHistory; if (h.canGoBack()) h.goBack(); } },
-    { label: t('前进'), accelerator: 'CommandOrControl+]', click: () => { if (windows.closingForUpdate) return; const h = windows.focusMain().webContents.navigationHistory; if (h.canGoForward()) h.goForward(); } }
+    { label: t('显示 / 隐藏桌宠'), accelerator: accelerator('togglePet'), click: () => settings.set({ petVisible: !settings.get().petVisible }) },
+    { label: t('后退'), accelerator: accelerator('back'), click: () => { if (windows.closingForUpdate) return; const h = windows.focusMain().webContents.navigationHistory; if (h.canGoBack()) h.goBack(); } },
+    { label: t('前进'), accelerator: accelerator('forward'), click: () => { if (windows.closingForUpdate) return; const h = windows.focusMain().webContents.navigationHistory; if (h.canGoForward()) h.goForward(); } }
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate([application, { label: t('文件'), submenu: navigation },
     { label: t('编辑'), submenu: [
@@ -38,7 +39,9 @@ export function installMenu(windows: Windows, settings: SettingsStore): void {
     ] },
     { label: t('视图'), submenu: [
       { role: 'reload', label: t('重新载入') }, { role: 'forceReload', label: t('强制重新载入') }, { role: 'toggleDevTools', label: t('开发者工具') },
-      { type: 'separator' }, { role: 'resetZoom', label: t('实际大小'), accelerator: '' }, { role: 'zoomIn', label: t('放大') }, { role: 'zoomOut', label: t('缩小') },
+      { type: 'separator' }, { role: 'resetZoom', label: t('实际大小'), accelerator: accelerator('resetZoom') }, { role: 'zoomIn', label: t('放大'), accelerator: accelerator('zoomIn') }, { role: 'zoomOut', label: t('缩小'), accelerator: accelerator('zoomOut') },
+      // Hidden alias: Ctrl/Cmd with the + key (Shift+= or numpad) zooms in too.
+      { role: 'zoomIn', accelerator: 'CommandOrControl+Plus', visible: false, acceleratorWorksWhenHidden: true },
       { type: 'separator' }, { role: 'togglefullscreen', label: t('切换全屏') }
     ] },
     { role: 'windowMenu', label: t('窗口'), submenu: [

@@ -603,7 +603,7 @@ test('agent alerts: picker, names and six theme appearances', async () => {
   await expect.poll(() => app.evaluate(() => globalThis.__pockymoeDesktopTest.settings.get().petAgentAlerts)).toBe('silent');
   const a = item({ key: 'mac:agent-a', threadId: 'agent-a', rootThreadKey: 'mac:root', rootThreadTitle: 'A long conversation title with a meaningful ending', agentName: 'terminal' });
   await sync([a]); await sync([{ ...a, state: 'completed', unread: true }]);
-  await expect(glass.locator('.bubble-title')).toContainText('.terminal');
+  await expect(glass.locator('.bubble-title')).toContainText(' › terminal');
   for (const pack of ['classic', 'plum-pocket', 'terminal'] as const) for (const effective of ['light', 'dark'] as const) {
     await app.evaluate((_e, value) => globalThis.__pockymoeDesktopTest.appearance.sync(value), { pack, effective, accent: '#8f5a9e', locale: 'zh-CN' });
     await glass.screenshot({ path: join(evidence, `agent-bubble-${pack}-${effective}.png`), animations: 'disabled' });
@@ -619,7 +619,7 @@ test('agent alerts: picker, names and six theme appearances', async () => {
   await sync([b]); await sync([{ ...b, state: 'failed', unread: true }]);
   await expect(glass.locator('.bubble')).toHaveCount(0);
   await sync([{ ...b, state: 'needsInput', request: { id: 'agent-input', kind: 'input', summary: 'Please choose' } }]);
-  await expect(glass.locator('.bubble-title')).toContainText('.tests');
+  await expect(glass.locator('.bubble-title')).toContainText(' › tests');
 });
 
 test('clips: speech uses the audio envelope on the fixed rest face and resumes the action', async () => {

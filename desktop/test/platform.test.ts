@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { localFileMatches, modelTar, windowsVoiceAvailable } from '../src/main/platform';
-import { windowsPanelPalette, saveName, shortcutLabel, windowPalette, windowsMaterial, windowsGlassMaterial, windowsReservedName } from '../src/shared/platform';
+import { windowsPanelPalette, saveName, acceleratorFromKey, acceleratorKeys, windowPalette, windowsMaterial, windowsGlassMaterial, windowsReservedName } from '../src/shared/platform';
 import { toastActivation, toastXml } from '../src/main/windowsToast';
 import { dockPosition, petLayout, restorePosition } from '../src/pet/geometry';
 import { pageChrome } from '../src/main/pageChrome';
@@ -28,8 +28,15 @@ describe('Windows platform decisions', () => {
     expect(localFileMatches('file:///tmp/local.html', '/tmp/local.html', 'darwin')).toBe(true);
   });
   it('keeps shortcuts and filenames native to their platform', () => {
-    expect(shortcutLabel('win32', 'P', true)).toBe('Ctrl+Shift+P');
-    expect(shortcutLabel('darwin', 'P', true)).toBe('⌘ / Ctrl ⇧ P');
+    const key = (code: string, mods: Partial<Record<'ctrlKey' | 'metaKey' | 'altKey' | 'shiftKey', boolean>> = {}) => ({ code, ctrlKey: false, metaKey: false, altKey: false, shiftKey: false, ...mods });
+    expect(acceleratorFromKey(key('Space', { altKey: true }), 'win32')).toBe('Alt+Space');
+    expect(acceleratorFromKey(key('KeyK', { ctrlKey: true, shiftKey: true }), 'win32')).toBe('CommandOrControl+Shift+K');
+    expect(acceleratorFromKey(key('KeyK', { metaKey: true }), 'darwin')).toBe('CommandOrControl+K');
+    expect(acceleratorFromKey(key('KeyK'), 'win32')).toBeNull();
+    expect(acceleratorFromKey(key('ShiftLeft', { shiftKey: true }), 'win32')).toBeNull();
+    expect(acceleratorFromKey(key('F9'), 'win32')).toBe('F9');
+    expect(acceleratorKeys('CommandOrControl+Shift+P', 'win32')).toEqual(['Ctrl', 'Shift', 'P']);
+    expect(acceleratorKeys('CommandOrControl+Shift+P', 'darwin')).toEqual(['⌘', '⇧', 'P']);
     expect(saveName('C:\\exports\\report.txt', 'win32')).toBe('report.txt');
     expect(saveName('../../NUL.txt', 'win32')).toBe('_NUL.txt');
     expect(saveName('a:b?.txt. ', 'win32')).toBe('a_b_.txt');

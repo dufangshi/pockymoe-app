@@ -73,7 +73,8 @@ export function createPetController(deps: PetControllerDeps, benchmark?: { quad:
   let appearance: Appearance = deps.appearance() ?? {
     effective: nativeTheme.shouldUseDarkColors ? 'dark' : 'light',
     pack: 'classic',
-    accent: '#ad782e',
+    // Classic's accent until the page reports the real appearance.
+    accent: nativeTheme.shouldUseDarkColors ? '#00cc76' : '#008b53',
   };
   let uiLocale = resolveLocale(appearance.locale || app.getLocale());
   setLocale(uiLocale);

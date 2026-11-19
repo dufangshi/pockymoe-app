@@ -17,23 +17,33 @@ export function taskbarBadge(snapshot: ActivitySnapshot | null): { count: number
   const running = new Set(snapshot?.items.filter(item => item.state === 'running').map(conversationKey)).size;
   return { count: waiting || running, style: waiting ? 'attention' : running ? 'running' : 'none' };
 }
+/** Native menus cannot ellipsize, so keep both ends of a long title (ui-principles §14). */
+export function middleTruncate(value: string, max: number): string {
+  const chars = Array.from(value);
+  if (chars.length <= max) return value;
+  const head = Math.ceil((max - 1) / 2);
+  return `${chars.slice(0, head).join('')}…${chars.slice(chars.length - (max - 1 - head)).join('')}`;
+}
 export function trayTemplate(snapshot: ActivitySnapshot | null, settings: DesktopSettings, open: (i: ActivityItem) => void, actions: { pet: () => void; snooze: () => void; main: () => void; settings: () => void; quit: () => void; map: () => void; reveal: (item: ActivityItem) => void }): MenuItemConstructorOptions[] {
   const all = snapshot?.items || [];
   const needs = groupActivities(all.filter(i => i.state === 'needsInput' || ['failed', 'interrupted'].includes(i.state) && i.unread), all);
   const running = groupActivities(all.filter(i => i.state === 'running'), all);
   const items: MenuItemConstructorOptions[] = [];
+  // Empty groups say nothing; with no activity at all, one line says so.
+  if (!needs.length && !running.length) items.push({ label: t('没有需要你处理的线程'), enabled: false });
   for (const [title, group] of [[t('需要你'), needs], [t('进行中'), running]] as const) {
+    if (!group.length) continue;
     items.push({ label: `${title} · ${group.length}`, enabled: false });
     for (const conversation of group.slice(0, 5)) {
       const menuFor = (item: ActivityItem): MenuItemConstructorOptions[] => [{ label: t('打开线程'), click: () => open(item) }, { label: t('在地图中显示'), click: () => actions.reveal(item) }];
       const first = conversation.items[0];
       const rootOnly = conversation.items.length === 1 && first.key === conversation.key;
-      items.push({ label: `${conversation.title.slice(0, 48)} — ${first.deviceName}`, submenu: rootOnly ? menuFor(first) : conversation.items.map(item => ({ label: activitySecondary(item), submenu: menuFor(item) })) });
+      items.push({ label: `${middleTruncate(conversation.title, 48)} · ${first.deviceName}`, submenu: rootOnly ? menuFor(first) : conversation.items.map(item => ({ label: activitySecondary(item), submenu: menuFor(item) })) });
     }
   }
   items.push({ type: 'separator' }, { label: t('显示桌宠'), type: 'checkbox', checked: settings.petVisible, click: actions.pet },
     { label: Date.parse(settings.snoozeUntil || '') > Date.now() ? t('恢复提醒') : t('暂停提醒 1 小时'), click: actions.snooze },
-    { type: 'separator' }, { label: t('打开地图'), click: actions.map }, { label: t('打开 Pockymoe'), click: actions.main }, { label: t('设置…'), click: actions.settings },
+    { type: 'separator' }, { label: t('打开 Pockymoe'), click: actions.main }, { label: t('打开地图'), click: actions.map }, { label: t('设置…'), click: actions.settings },
     { type: 'separator' }, { label: t('退出 Pockymoe'), accelerator: 'CommandOrControl+Q', click: actions.quit });
   return items;
 }
