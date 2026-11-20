@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Local three-file release builder. Publishing requires a separate explicit call."""
+"""Three-file client release steps, plus the local Apple-silicon fallback command.
+
+GitHub Actions (.github/workflows/client-release.yml through client_release_ci.py)
+is the documented release path. It and this local command share every build,
+signing and verification step defined here. Publishing requires a separate
+explicit call.
+"""
 import argparse
 import json
 import os
@@ -9,6 +15,7 @@ import re
 import shutil
 import signal
 import subprocess
+import sys
 import tempfile
 import time
 import zipfile
@@ -17,27 +24,53 @@ from required_aggregate import require_aggregate
 ROOT = Path(__file__).resolve().parent.parent
 DESKTOP = ROOT / 'desktop'
 REPO = 'dufangshi/pockymoe-app'
+WINDOWS = os.name == 'nt'
+# The interpreter running this file, so helpers also work where only `python` exists.
+PYTHON = sys.executable or 'python3'
+STEP_TIMEOUT = 600
 
 
-def run(*args, cwd=ROOT, capture=False, env=None):
-    started = time.monotonic()
+def _stop_tree(child):
+    if WINDOWS:
+        subprocess.run(['taskkill', '/PID', str(child.pid), '/T', '/F'],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    else:
+        os.killpg(child.pid, signal.SIGKILL)
+
+
+def run(*args, cwd=ROOT, capture=False, env=None, timeout=STEP_TIMEOUT, retries=0):
+    """Run one step in its own process group with a timeout.
+
+    `retries` is for network-bound, idempotent steps only (installs, downloads,
+    queries). Publication is never retried.
+    """
     command = [str(arg) for arg in args]
-    child = subprocess.Popen(command, cwd=cwd, env=env, start_new_session=True,
-                             stdout=subprocess.PIPE if capture else None,
-                             stderr=subprocess.PIPE if capture else None)
-    try:
+    if WINDOWS:
+        # CreateProcess does not search PATHEXT; resolve pnpm.cmd and similar.
+        command[0] = shutil.which(command[0]) or command[0]
+    name = Path(command[0]).name
+    for attempt in range(retries + 1):
+        started = time.monotonic()
+        child = subprocess.Popen(command, cwd=cwd, env=env, start_new_session=not WINDOWS,
+                                 stdout=subprocess.PIPE if capture else None,
+                                 stderr=subprocess.PIPE if capture else None)
         try:
-            output, error = child.communicate(timeout=600)
-        except subprocess.TimeoutExpired:
-            os.killpg(child.pid, signal.SIGKILL)
-            child.communicate()
-            raise RuntimeError(f"Release step {Path(command[0]).name} exceeded ten minutes; its owned process group was stopped") from None
-        if child.returncode:
-            raise subprocess.CalledProcessError(child.returncode, command, output, error)
-        return output
-    finally:
-        # Never log command arguments, environments or signing subjects.
-        print(f"Release step {Path(command[0]).name}: {time.monotonic() - started:.2f}s", flush=True)
+            try:
+                output, error = child.communicate(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                _stop_tree(child)
+                child.communicate()
+                failure = RuntimeError(f"Release step {name} exceeded {timeout}s; its owned process group was stopped")
+            else:
+                if not child.returncode:
+                    return output
+                failure = subprocess.CalledProcessError(child.returncode, command, output, error)
+        finally:
+            # Never log command arguments, environments or signing subjects.
+            print(f"Release step {name}: {time.monotonic() - started:.2f}s", flush=True)
+        if attempt < retries:
+            print(f"Release step {name} failed; retrying once", flush=True)
+    raise failure
 
 
 def git(*args):
@@ -78,7 +111,7 @@ def exact_output(folder, version):
 
 
 def scan(*paths):
-    run('python3', ROOT / 'scripts/check-production-address.py', *paths)
+    run(PYTHON, ROOT / 'scripts/check-production-address.py', *paths)
 
 
 def extract_asar(resources, destination):
@@ -105,7 +138,7 @@ def apk_certificate(apk):
 
 def previous_apk(work, code, validation=False):
     # Failure to query GitHub is not evidence that there is no previous release.
-    release = json.loads(run('gh', 'release', 'view', '--repo', REPO, '--json', 'tagName,assets', capture=True))
+    release = json.loads(run('gh', 'release', 'view', '--repo', REPO, '--json', 'tagName,assets', capture=True, retries=1, timeout=60))
     assets = [asset['name'] for asset in release['assets'] if asset['name'].endswith('.apk')]
     if not assets:
         print('Latest release has no APK; versionCode/certificate comparison unavailable')
@@ -114,7 +147,7 @@ def previous_apk(work, code, validation=False):
         raise RuntimeError('Ambiguous previous APK')
     folder = work / 'previous'
     folder.mkdir()
-    run('gh', 'release', 'download', release['tagName'], '--repo', REPO, '--pattern', assets[0], '--dir', folder, capture=True)
+    run('gh', 'release', 'download', release['tagName'], '--repo', REPO, '--pattern', assets[0], '--dir', folder, '--clobber', capture=True, retries=1, timeout=300)
     previous = folder / assets[0]
     badging = run(sdk_tool('aapt'), 'dump', 'badging', previous, capture=True).decode()
     previous_code = int(re.search(r"versionCode='(\d+)'", badging).group(1))
@@ -168,75 +201,152 @@ def verify_mac_dmg(dmg, work, signing):
         run('hdiutil', 'detach', mount, capture=True)
 
 
-def build(version, code, output, work, validation=False):
-    previous = previous_apk(work, code, validation)
-    run('python3', ROOT / 'scripts/check-production-address.py')
-    run('pnpm', 'install', '--frozen-lockfile', cwd=DESKTOP)
-    artifacts = work / 'builder'
-    env = dict(os.environ, CSC_IDENTITY_AUTO_DISCOVERY='false')
+def release_env():
+    """Environment for public packaging: no inherited signing or fixture overrides."""
+    env = dict(os.environ)
     # Ignore inherited signing overrides: public Mac output must use the dedicated non-personal identity.
     for key in list(env):
         if key.startswith(('CSC_', 'WIN_CSC_', 'APPLE_', 'POCKYMOE_UPDATER_TEST_')):
             env.pop(key)
     env['CSC_IDENTITY_AUTO_DISCOVERY'] = 'false'
-    # Both --validate and publication must exercise exactly the release fuse policy.
+    # Both validation and publication must exercise exactly the release fuse policy.
     env['POCKYMOE_RELEASE_FUSES'] = '1'
+    return env
+
+
+def build_desktop(env):
+    run('pnpm', 'install', '--frozen-lockfile', cwd=DESKTOP, retries=1)
     run('pnpm', 'build', cwd=DESKTOP, env=env)
+
+
+def package_mac(artifacts, env, signing, signing_args=()):
+    """Package the arm64 app, sign it with the Pockymoe identity, verify the pin, then build the DMG."""
     # Self-signed identities are omitted by builder's trusted-identity discovery.
     # Sign explicitly in a dedicated keychain without changing system trust.
-    run('python3', ROOT / 'scripts/setup-client-signing.py', capture=True)
-    signing = json.loads((DESKTOP / 'build/release-signing.json').read_text())
     run('pnpm', 'exec', 'electron-builder', '--mac', '--arm64', '--dir', '--publish', 'never',
         '-c.mac.identity=null', '-c.mac.hardenedRuntime=false', '-c.mac.notarize=false',
         f'-c.directories.output={artifacts}', cwd=DESKTOP, env=env)
     mac_app = artifacts / 'mac-arm64/Pockymoe.app'
-    run('python3', ROOT / 'scripts/setup-client-signing.py', '--sign-app', mac_app, capture=True)
+    # The helper prints only public hashes and secret-free errors.
+    run(PYTHON, ROOT / 'scripts/setup-client-signing.py', *signing_args, '--sign-app', mac_app)
     run('codesign', '--verify', '--deep', '--strict', '-R', '=certificate leaf = H"' + signing['certificateSha1'] + '"', mac_app, capture=True)
+    # hdiutil occasionally reports a busy resource on shared hosts; the step is idempotent.
     run('pnpm', 'exec', 'electron-builder', '--mac', 'dmg', '--arm64', '--prepackaged', mac_app,
         '--publish', 'never', '-c.mac.identity=null', '-c.mac.hardenedRuntime=false',
-        f'-c.directories.output={artifacts}', cwd=DESKTOP, env=env)
+        f'-c.directories.output={artifacts}', cwd=DESKTOP, env=env, retries=1)
+    return mac_app
+
+
+def package_windows(artifacts, env):
     run('pnpm', 'exec', 'electron-builder', '--win', 'nsis', '--x64', '--publish', 'never',
         f'-c.directories.output={artifacts}', cwd=DESKTOP, env=env)
-    # Check the builder output itself, not just files selected for copying.
+
+
+def check_builder_output(artifacts, names):
+    """Check the builder output itself, not just files selected for copying."""
     generated = sorted(p.name for p in artifacts.iterdir() if p.suffix in ('.dmg', '.zip', '.exe', '.yml', '.blockmap') and p.name != 'builder-debug.yml' and not p.name.endswith('.__uninstaller.exe'))
-    if generated != sorted(asset_names(version)[1:]):
+    if generated != sorted(names):
         raise RuntimeError('Unexpected builder artifacts (including update metadata/blockmaps): ' + ', '.join(generated))
     if list(artifacts.rglob('app-update.yml')) or list(artifacts.rglob('*.blockmap')) or list(artifacts.rglob('latest*.yml')):
         raise RuntimeError('Unexpected update metadata/blockmap')
-    win = artifacts / 'win-unpacked'
-    run('node', DESKTOP / 'scripts/verify-windows-package.cjs', win, 'x64', cwd=DESKTOP)
-    mac_smoke(artifacts / 'mac-arm64/Pockymoe.app', work)
-    android_output = work / 'android'
-    run('bash', ROOT / 'scripts/assemble-signed-apk.sh', android_output, capture=True)
-    apk = android_output / 'remote-codex-android.apk'
-    certificate = apk_certificate(apk)
-    if previous and certificate != apk_certificate(previous):
-        raise RuntimeError('APK signing certificate differs from previous release')
-    print('APK certificate verified' + (' against previous release' if previous else ''))
-    scan_apk = work / 'scan-apk'
-    with zipfile.ZipFile(apk) as archive:
-        archive.extractall(scan_apk)
-    verify_mac_dmg(artifacts / asset_names(version)[1], work, signing)
-    # Extract the actual NSIS installer, including its compressed app payload.
+
+
+def verify_windows_installer(installer, work):
+    """Extract the final NSIS installer, including its app payload; return paths to scan."""
     seven = run('node', DESKTOP / 'scripts/7zip-path.cjs', cwd=DESKTOP, capture=True).decode().splitlines()[-1].strip()
-    installer = work / 'scan-installer'
-    run(seven, 'x', artifacts / asset_names(version)[2], f'-o{installer}', '-y', capture=True)
-    payloads = list(installer.rglob('app-64.7z'))
-    if len(payloads) != 1:
+    extracted = work / 'scan-installer'
+    run(seven, 'x', installer, f'-o{extracted}', '-y', capture=True)
+    payloads = list(extracted.rglob('app-64.7z'))
+    direct = extracted / 'Pockymoe.exe'
+    # The macOS/Linux 7za returns an app-64.7z wrapper; the Windows 7za extracts
+    # the embedded app directly. Accept exactly one of the two layouts.
+    if payloads and not direct.exists():
+        if len(payloads) != 1:
+            raise RuntimeError('Expected exactly one x64 installer payload')
+        installed = work / 'scan-installed'
+        run(seven, 'x', payloads[0], f'-o{installed}', '-y', capture=True)
+    elif direct.is_file() and not payloads:
+        installed = extracted
+    else:
         raise RuntimeError('Expected exactly one x64 installer payload')
-    installed = work / 'scan-installed'
-    run(seven, 'x', payloads[0], f'-o{installed}', '-y', capture=True)
     run('node', DESKTOP / 'scripts/verify-windows-package.cjs', installed, 'x64', cwd=DESKTOP)
     print('Final NSIS extracted Windows executable:')
     run('node', DESKTOP / 'scripts/release-fuses.cjs', installed / 'Pockymoe.exe', cwd=DESKTOP)
     extract_asar(installed / 'resources', work / 'scan-win-asar')
-    scan(apk, scan_apk, artifacts / asset_names(version)[1], artifacts / asset_names(version)[2], installer, installed, work / 'scan-win-asar')
+    return installed, [installer, *dict.fromkeys([extracted, installed]), work / 'scan-win-asar']
+
+
+def verify_apk(apk, previous, work, certificate_continuity=True):
+    """Verify the APK signature (and its continuity with the previous release); return paths to scan."""
+    certificate = apk_certificate(apk)
+    if previous and certificate != apk_certificate(previous):
+        if certificate_continuity:
+            raise RuntimeError('APK signing certificate differs from previous release')
+        print('APK signature verified with a throwaway dry-run key; continuity with the previous release is checked only with the release key')
+    elif certificate_continuity:
+        print('APK certificate verified' + (' against previous release' if previous else ''))
+    scan_apk = work / 'scan-apk'
+    with zipfile.ZipFile(apk) as archive:
+        archive.extractall(scan_apk)
+    return [apk, scan_apk]
+
+
+def build(version, code, output, work, validation=False):
+    previous = previous_apk(work, code, validation)
+    run(PYTHON, ROOT / 'scripts/check-production-address.py')
+    env = release_env()
+    build_desktop(env)
+    artifacts = work / 'builder'
+    run(PYTHON, ROOT / 'scripts/setup-client-signing.py', capture=True)
+    signing = json.loads((DESKTOP / 'build/release-signing.json').read_text())
+    mac_app = package_mac(artifacts, env, signing)
+    package_windows(artifacts, env)
+    check_builder_output(artifacts, asset_names(version)[1:])
+    run('node', DESKTOP / 'scripts/verify-windows-package.cjs', artifacts / 'win-unpacked', 'x64', cwd=DESKTOP)
+    mac_smoke(mac_app, work)
+    android_output = work / 'android'
+    run('bash', ROOT / 'scripts/assemble-signed-apk.sh', android_output, capture=True)
+    apk_scan = verify_apk(android_output / 'remote-codex-android.apk', previous, work)
+    verify_mac_dmg(artifacts / asset_names(version)[1], work, signing)
+    _, windows_scan = verify_windows_installer(artifacts / asset_names(version)[2], work)
+    scan(*apk_scan, artifacts / asset_names(version)[1], *windows_scan)
     if list(output.iterdir()):
         raise RuntimeError('Output folder changed while building; refusing to overwrite')
-    shutil.copy2(apk, output / asset_names(version)[0])
+    shutil.copy2(apk_scan[0], output / asset_names(version)[0])
     for name in asset_names(version)[1:]:
         shutil.copy2(artifacts / name, output / name)
     exact_output(output, version)
+
+
+def default_notes(version):
+    template = ROOT / 'desktop/release-notes-template.md'
+    if template.is_file():
+        return template.read_text().replace('{version}', version)
+    return f'Pockymoe {version}\n\nmacOS may show one Keychain prompt after each update; choose Always Allow to retain sign-in and saved voice keys.\n'
+
+
+def write_release_notes(version, folder, notes, source, *, production, validation_public_key=None):
+    """Sign update metadata for the final files, append it to the notes and verify it.
+
+    Production uses the release Ed25519 key and the committed public key;
+    everything else uses a fresh throwaway key whose public half is saved to
+    `validation_public_key`. Returns the public key used for verification.
+    """
+    with tempfile.TemporaryDirectory(prefix='pockymoe-update-notes-') as temporary:
+        metadata = Path(temporary) / 'metadata.md'
+        if production:
+            run('node', ROOT / 'scripts/update-signatures.cjs', 'sign', version, folder, metadata, '--publish')
+            public_key = DESKTOP / 'build/update-public-key.pem'
+        else:
+            temporary_public = Path(temporary) / 'validation-public-key.pem'
+            run('node', ROOT / 'scripts/update-signatures.cjs', 'sign-validation', version, folder, metadata, temporary_public)
+            validation_public_key.write_bytes(temporary_public.read_bytes())
+            public_key = validation_public_key
+        original = re.sub(r'<!-- pockymoe-updates-v1\n[\s\S]*?\n-->\n?', '', source)
+        notes.write_text(original.rstrip() + '\n\n' + metadata.read_text())
+    scan(notes)
+    run('node', ROOT / 'scripts/update-signatures.cjs', 'verify', version, folder, notes, public_key)
+    return public_key
 
 
 def main():
@@ -273,22 +383,9 @@ def main():
         print(f'{file.name}\t{file.stat().st_size} bytes')
     print(f'Output: {output}\nCommit: {sha}')
     notes = output.parent / f'{args.version}-release-notes.md' if args.publish else output.parent / f'{output.name}-validation-notes.md'
-    public_key = DESKTOP / 'build/update-public-key.pem' if args.publish else output.parent / f'{output.name}-validation-public-key.pem'
-    with tempfile.TemporaryDirectory(prefix='pockymoe-update-notes-') as temporary:
-        metadata = Path(temporary) / 'metadata.md'
-        if args.publish:
-            run('node', ROOT / 'scripts/update-signatures.cjs', 'sign', args.version, output, metadata, '--publish')
-        else:
-            temporary_public = Path(temporary) / 'validation-public-key.pem'
-            run('node', ROOT / 'scripts/update-signatures.cjs', 'sign-validation', args.version, output, metadata, temporary_public)
-            public_key.write_bytes(temporary_public.read_bytes())
-        template = ROOT / 'desktop/release-notes-template.md'
-        default_notes = template.read_text().replace('{version}', args.version) if template.is_file() else f'Pockymoe {args.version}\n\nmacOS may show one Keychain prompt after each update; choose Always Allow to retain sign-in and saved voice keys.\n'
-        original = args.notes_file.read_text() if args.notes_file else default_notes
-        original = re.sub(r'<!-- pockymoe-updates-v1\n[\s\S]*?\n-->\n?', '', original)
-        notes.write_text(original.rstrip() + '\n\n' + metadata.read_text())
-    scan(notes)
-    run('node', ROOT / 'scripts/update-signatures.cjs', 'verify', args.version, output, notes, public_key)
+    source = args.notes_file.read_text() if args.notes_file else default_notes(args.version)
+    public_key = write_release_notes(args.version, output, notes, source, production=args.publish,
+                                     validation_public_key=output.parent / f'{output.name}-validation-public-key.pem')
     print(f'Metadata: {notes}\nVerification public key: {public_key}')
     if args.publish:
         require_aggregate(REPO, sha, args.allow_unchecked_ci)

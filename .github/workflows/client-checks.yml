@@ -46,6 +46,7 @@ jobs:
       - name: Validate publication safety without building or signing
         run: |
           python3 scripts/test_release_client.py
+          python3 -m unittest discover -s scripts -p test_client_release_ci.py
           python3 -m unittest discover -s scripts -p test_required_aggregate.py
       - name: Classify changed paths
         id: classify
