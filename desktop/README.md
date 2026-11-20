@@ -225,6 +225,119 @@ No ZIP, combined installer, update manifests or blockmaps are published. Builder
 targets and scripts pin these architectures; the packaging regression rejects
 extra targets/architectures or an updater dependency. Local outputs are ignored.
 
+### Release workflow
+
+Releases are made by the **Client release** workflow
+(`.github/workflows/client-release.yml`). Bump the desktop version, Android
+`versionName` and a higher Android `versionCode` in a reviewed PR, merge it,
+wait for `Client checks complete` on that main commit, then:
+
+```sh
+gh workflow run client-release.yml -R dufangshi/pockymoe-app --ref main \
+  -f version=0.3.10 -f channel=publish -f notes_file=path/in/repo/notes.md
+# or -f notes="$(cat notes.md)"; copy desktop/release-notes-template.md
+```
+
+| Channel | Ref | Keys | Result |
+|---|---|---|---|
+| `dry-run` | any | throwaway, created in the run; no secrets are read | three verified files and validation notes as a run artifact |
+| `signed-dry-run` | main | release keys from the `client-release` environment | also release-signed notes; nothing is published |
+| `publish` | main tip | release keys | release `vX.Y.Z` at the commit, marked latest |
+
+Jobs: **prepare** (versions agree, channel/ref gate, dispatched commit is the
+main tip for the release-key channels; for publish also notes, an unused tag and
+`Client checks complete` on the commit), then in parallel
+**Android** (ubuntu), **macOS arm64** (`macos-15`) and **Windows x64**
+(`windows-latest`), then **assemble** and, for the release-key channels,
+**publish**. Every build, signing and verification step is shared with the local
+command below (`scripts/release_client.py`; the job wrappers are in
+`scripts/client_release_ci.py`):
+
+- Android: Gradle `assembleRelease`, package/versionCode/versionName read back
+  from the APK, versionCode above the latest release (equal is allowed only off
+  `publish`), signing certificate equal to the latest release APK's (release
+  keys only), expanded-APK scan.
+- macOS: Pockymoe identity in a run-scoped keychain (release `.p12`, or a
+  throwaway certificate for `dry-run`), explicit signing and pinned-leaf check,
+  DMG, packaged voice addon load, 5-second launch and 15-second quit, read-only
+  mount of the final DMG with pinned signature, release fuses and full scan.
+- Windows: NSIS package, PE checks in the unpacked app and in the payload
+  extracted from the final installer, release fuses, launch of that payload
+  (native window, RunAsNode helper, inspector port stays closed), scan.
+- assemble: exactly three files, each byte-identical to what its build job
+  verified (SHA-256 manifests) and signed with the kind the channel requires;
+  APK certificate rechecked; update metadata signed with a throwaway key and
+  verified.
+- publish: rechecks the files, main containment, the tag and the aggregate;
+  signs the metadata with the release Ed25519 key after the source gate,
+  verifies it against the committed `desktop/build/update-public-key.pem`, then
+  runs `gh release create vX.Y.Z --target <SHA> --latest` with the three files.
+  This step is never retried.
+
+`allow_unchecked_ci` is the emergency equivalent of `--allow-unchecked-ci`; it
+applies only to `publish` and logs the reason's SHA-256, not its text. pnpm,
+Gradle, Electron and electron-builder downloads are cached. Each step has a
+timeout; installs, Gradle and GitHub queries are retried once. Dry runs can be
+dispatched from a branch with `--ref BRANCH -f channel=dry-run`.
+
+#### Release workflow secrets
+
+Create the environment once: **Settings → Environments → New environment**
+`client-release`, **Deployment branches and tags: Selected branches → `main`**.
+Adding yourself as a required reviewer is optional; it then asks for approval
+when the build jobs start and again before publish. Secrets live in that
+environment, so only main runs of the release-key channels receive them. Missing
+secrets stop the run before anything is signed or published.
+
+| Secret | Value |
+|---|---|
+| `CLIENT_ANDROID_KEYSTORE_BASE64` | base64 of the keystore named by `storeFile` |
+| `CLIENT_ANDROID_STORE_PASSWORD` | `storePassword` |
+| `CLIENT_ANDROID_KEY_ALIAS` | `keyAlias` (optional; default `remote-codex-release`) |
+| `CLIENT_ANDROID_KEY_PASSWORD` | `keyPassword` (optional; default the store password) |
+| `CLIENT_MAC_SIGNING_P12_BASE64` | base64 of `pockymoe-client-signing.p12` |
+| `CLIENT_MAC_SIGNING_P12_PASSWORD` | contents of `pockymoe-client-signing.password` |
+| `CLIENT_UPDATE_SIGNING_KEY_BASE64` | base64 of `client-update-ed25519.pem` |
+
+The files are in the signing Mac's private release folder
+(`~/dev/remoteCodex/.local/mobile-release/`, keystore values in
+`android-release-keystore.properties`). From that folder, these commands pipe
+each value straight into GitHub without printing it:
+
+```sh
+R=dufangshi/pockymoe-app E=client-release
+prop() { awk -v k="$1" '{line=$0; sub(/=.*/, "", $0); gsub(/[ \t]/, "", $0)} $0==k {sub(/^[^=]*=[ \t]*/, "", line); sub(/[ \t\r]*$/, "", line); print line}' android-release-keystore.properties; }
+store="$(prop storeFile)"; case "$store" in /*) ;; *) store="$HOME/dev/remoteCodex/$store" ;; esac
+base64 -i "$store" | gh secret set CLIENT_ANDROID_KEYSTORE_BASE64 -R "$R" -e "$E"
+prop storePassword | tr -d '\n' | gh secret set CLIENT_ANDROID_STORE_PASSWORD -R "$R" -e "$E"
+# Only if the properties file has them:
+prop keyAlias | tr -d '\n' | gh secret set CLIENT_ANDROID_KEY_ALIAS -R "$R" -e "$E"
+prop keyPassword | tr -d '\n' | gh secret set CLIENT_ANDROID_KEY_PASSWORD -R "$R" -e "$E"
+base64 -i pockymoe-client-signing.p12 | gh secret set CLIENT_MAC_SIGNING_P12_BASE64 -R "$R" -e "$E"
+tr -d '\n' < pockymoe-client-signing.password | gh secret set CLIENT_MAC_SIGNING_P12_PASSWORD -R "$R" -e "$E"
+base64 -i client-update-ed25519.pem | gh secret set CLIENT_UPDATE_SIGNING_KEY_BASE64 -R "$R" -e "$E"
+```
+
+Optional repository secret `CLIENT_PRIVATE_IDENTIFIERS`: newline-separated
+names/emails that must never appear in an artifact. Runners have no local Git or
+Keychain identity, so set it to what the Mac scan finds there, for example
+`printf '%s\n' "$(git config user.email)" "$(git config user.name)" | gh secret set CLIENT_PRIVATE_IDENTIFIERS -R "$R"`.
+
+Then run `channel=signed-dry-run` once from main. It proves that the imported
+Mac identity matches `desktop/build/release-signing.json`, the APK certificate
+matches the latest release and the metadata key matches the committed public
+key, without publishing.
+
+The Mac DMG keeps today's stable self-signed Pockymoe certificate: no Apple
+Developer ID and no notarization, so Gatekeeper warns on first install. Moving
+to Developer ID needs an Apple Developer Program membership, a Developer ID
+Application certificate plus a notarization API key as further secrets, and a
+bridge release (installed clients pin the current leaf certificate; see Key
+backup and rotation). The Windows installer is not Authenticode-signed.
+
+### Local fallback on the signing Mac
+
+If GitHub Actions is unavailable, the same steps run locally.
 From the repository root on the Apple silicon signing Mac, bump the desktop
 version, Android `versionName` and Android `versionCode` in a reviewed commit.
 The versionCode must exceed the latest release APK's value. Merge first, then
@@ -288,7 +401,8 @@ isolated empty profile and loads its packaged voice addon. All five Windows spee
 files and PE headers are checked in the unpacked app and extracted NSIS payload.
 The APK is built through `scripts/assemble-signed-apk.sh`; its certificate must
 match the latest APK, and versionCode must increase. GitHub lookup failures stop
-the build; absence of a previous APK is reported. Keys stay on this Mac, never CI.
+the build; absence of a previous APK is reported. The local command reads the
+keys from this Mac; the workflow reads copies from the `client-release` environment.
 
 Every artifact is scanned with `scripts/check-production-address.py`, including
 the entire read-only mounted DMG volume root (including its hidden files and
@@ -605,11 +719,15 @@ on the signing Mac. The production Ed25519 key is `client-update-ed25519.pem`
 beside the Android keystore in the private mobile-release directory; only
 `desktop/build/update-public-key.pem` is committed. Private key files remain
 mode `0600`, as do the local release credentials. Back up these and the dedicated
-Mac signing keychain/certificate/private key securely offline. Never upload them
-to CI or a repository, or print their contents.
+Mac signing keychain/certificate/private key securely offline. Never commit them
+or print their contents. Their only other copies are the `client-release`
+environment secrets of the release workflow (GitHub does not show them again).
 
-This separation prevents someone who only compromises the GitHub account or
-release assets from forging an update that installed clients accept. File mode
+With those secrets, whoever controls the GitHub account, can push to `main` and
+passes the environment's protection can publish an update that installed clients
+accept: the project treats GitHub as trusted. Keeping the keys only on the Mac,
+and releasing with the local command, is the stricter alternative. Release
+assets alone still cannot be swapped for a forged update. File mode
 `0600` restricts access by other local users; it does **not** protect keys from
 code running as this Mac user, which can also access local signing and GitHub
 credentials. The keys stay usable for unattended releases; they are not a
