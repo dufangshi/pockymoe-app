@@ -191,6 +191,72 @@ class ArtifactGateTests(unittest.TestCase):
         scan.assert_not_called()
         self.assertEqual(command.call_args_list[-1].args, ('hdiutil', 'detach', work / 'dmg-mount'))
 
+    def windows_layout(self, name, files):
+        work = self.root / name
+        work.mkdir()
+        calls = []
+
+        def run(*args, **_kwargs):
+            calls.append(args)
+            if args[1:2] == (self.desktop / 'scripts/7zip-path.cjs',):
+                return b'/fixture/7za\n'
+            if args[:2] == ('/fixture/7za', 'x') and args[2] == self.root / 'installer.exe':
+                for file in files:
+                    target = work / 'scan-installer' / file
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.write_bytes(b'fixture')
+            return b''
+        with patch.object(release, 'run', side_effect=run), patch.object(release, 'extract_asar') as extract, contextlib.redirect_stdout(io.StringIO()):
+            installed, scans = release.verify_windows_installer(self.root / 'installer.exe', work)
+        extract.assert_called_once_with(installed / 'resources', work / 'scan-win-asar')
+        return work, installed, scans, calls
+
+    def test_nsis_payload_wrapper_layout_extracts_the_inner_app(self):
+        work, installed, scans, calls = self.windows_layout('mac-layout', ['$PLUGINSDIR/app-64.7z'])
+        self.assertEqual(installed, work / 'scan-installed')
+        self.assertIn(('/fixture/7za', 'x', work / 'scan-installer/$PLUGINSDIR/app-64.7z', f'-o{installed}', '-y'), calls)
+        self.assertIn(('node', self.desktop / 'scripts/release-fuses.cjs', installed / 'Pockymoe.exe'), calls)
+        self.assertEqual(scans, [self.root / 'installer.exe', work / 'scan-installer', installed, work / 'scan-win-asar'])
+
+    def test_nsis_direct_layout_from_windows_7za_is_verified_in_place(self):
+        work, installed, scans, calls = self.windows_layout('windows-layout', ['Pockymoe.exe'])
+        self.assertEqual(installed, work / 'scan-installer')
+        self.assertIn(('node', self.desktop / 'scripts/verify-windows-package.cjs', installed, 'x64'), calls)
+        self.assertEqual(scans, [self.root / 'installer.exe', installed, work / 'scan-win-asar'])
+
+    def test_nsis_ambiguous_or_missing_payload_is_rejected(self):
+        for name, files in [('both', ['Pockymoe.exe', '$PLUGINSDIR/app-64.7z']), ('none', ['readme.txt']),
+                            ('two', ['a/app-64.7z', 'b/app-64.7z'])]:
+            with self.subTest(layout=name), self.assertRaisesRegex(RuntimeError, 'exactly one x64 installer payload'):
+                self.windows_layout(name, files)
+
+    def test_apk_certificate_continuity_is_required_only_with_the_release_key(self):
+        apk, previous = self.root / 'new.apk', self.root / 'previous.apk'
+        import zipfile
+        with zipfile.ZipFile(apk, 'w') as archive:
+            archive.writestr('AndroidManifest.xml', b'fixture')
+        digests = {apk: ['a' * 64], previous: ['b' * 64]}
+        for continuity in (True, False):
+            work = self.root / f'apk-{continuity}'
+            work.mkdir()
+            with self.subTest(continuity=continuity), patch.object(release, 'apk_certificate', side_effect=lambda path: digests[path]), contextlib.redirect_stdout(io.StringIO()):
+                if continuity:
+                    with self.assertRaisesRegex(RuntimeError, 'differs from previous release'):
+                        release.verify_apk(apk, previous, work, certificate_continuity=True)
+                else:
+                    self.assertEqual(release.verify_apk(apk, previous, work, certificate_continuity=False), [apk, work / 'scan-apk'])
+                    self.assertTrue((work / 'scan-apk/AndroidManifest.xml').is_file())
+
+    def test_run_retries_only_when_asked_and_reports_timeouts(self):
+        with contextlib.redirect_stdout(io.StringIO()) as printed:
+            with self.assertRaises(subprocess.CalledProcessError):
+                release.run(release.PYTHON, '-c', 'raise SystemExit(3)', retries=1)
+        self.assertEqual(printed.getvalue().count('retrying once'), 1)
+        with contextlib.redirect_stdout(io.StringIO()) as printed:
+            with self.assertRaisesRegex(RuntimeError, 'exceeded 1s'):
+                release.run(release.PYTHON, '-c', 'import time; time.sleep(30)', timeout=1)
+        self.assertNotIn('retrying', printed.getvalue())
+
     def test_new_sdk_scheme_signer_output_is_normalized_and_deduplicated(self):
         output = b'V2 Signer: certificate SHA-256 digest: ' + b'C' * 64 + b'\nV3 Signer: certificate SHA-256 digest: ' + b'C' * 64 + b'\n'
         with patch.object(release, 'sdk_tool', return_value='/fixture/apksigner'), patch.object(release, 'run', return_value=output):

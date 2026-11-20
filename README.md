@@ -8,6 +8,10 @@ The mobile clients render the live relay product in a WebView, so devices, works
 
 Signed Android APKs are published on [GitHub Releases](https://github.com/dufangshi/remote-codex-app/releases). Package id is `com.remotecodex.app` (this rewrite is not an in-place update of the old `com.remotecodex.android` APK).
 
+## Releases
+
+A client release is one GitHub Release `vX.Y.Z` with exactly three files: the Android APK, the Apple silicon Mac DMG and the Windows x64 installer. It is built, verified and published by the **Client release** GitHub Actions workflow (`.github/workflows/client-release.yml`) from `main`, after `Client checks complete` passed on that commit. Use `channel=dry-run` from any branch to build and verify everything with throwaway keys. Signing keys are secrets of the protected `client-release` environment. Channels, jobs, the secrets list and how to add them are in [desktop/README.md, Release workflow](desktop/README.md#release-workflow). `scripts/release-client.sh` on the signing Mac remains as a local fallback.
+
 ## Screens
 
 1. Relay URL

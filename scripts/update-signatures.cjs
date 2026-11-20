@@ -1,13 +1,15 @@
 #!/usr/bin/env node
-// Private release key stays on the signing Mac. Validation keys exist in memory
-// for one invocation and never read the production private key.
+// The production private key is read only by `sign ... --publish`: from the
+// signing Mac's private folder, or in the release workflow from the file named by
+// POCKYMOE_UPDATE_PRIVATE_KEY_FILE (decoded from a protected environment secret).
+// Validation keys exist in memory for one invocation and never read it.
 const { generateKeyPairSync, createPrivateKey, createPublicKey, sign, verify, createHash } = require('node:crypto');
 const { readFileSync, writeFileSync, existsSync, mkdirSync, statSync } = require('node:fs');
 const { execFileSync } = require('node:child_process');
 const { join } = require('node:path');
 const { homedir } = require('node:os');
 const root = join(__dirname, '..');
-const privatePath = join(homedir(), 'dev/remoteCodex/.local/mobile-release/client-update-ed25519.pem');
+const privatePath = process.env.POCKYMOE_UPDATE_PRIVATE_KEY_FILE || join(homedir(), 'dev/remoteCodex/.local/mobile-release/client-update-ed25519.pem');
 const publicPath = join(root, 'desktop/build/update-public-key.pem');
 const platforms = [['darwin-arm64', 'mac-arm64.dmg'], ['win32-x64', 'win-x64.exe']];
 function canonical(value) { return JSON.stringify({ version: value.version, platform: value.platform, fileName: value.fileName, sha256: value.sha256, size: value.size }); }
@@ -19,6 +21,14 @@ function productionKey() {
 }
 function publishGate() {
   const git = (...args) => execFileSync('git', args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  if (process.env.GITHUB_ACTIONS === 'true') {
+    // The workflow checks out the dispatched main commit detached; it must be
+    // clean, be that commit, and still be contained in freshly fetched main.
+    if (git('status', '--porcelain') || process.env.GITHUB_REF !== 'refs/heads/main' || git('rev-parse', 'HEAD') !== process.env.GITHUB_SHA) throw new Error('Production metadata signing requires the clean dispatched main commit');
+    git('fetch', '--quiet', 'origin', 'main');
+    git('merge-base', '--is-ancestor', 'HEAD', 'FETCH_HEAD');
+    return;
+  }
   if (git('status', '--porcelain') || git('branch', '--show-current') !== 'main') throw new Error('Production metadata signing requires clean main');
   git('fetch', 'origin', 'main');
   if (git('rev-parse', 'HEAD') !== git('rev-parse', 'origin/main')) throw new Error('Production metadata signing requires main matching origin/main');

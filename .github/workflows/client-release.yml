@@ -1,0 +1,276 @@
+name: Client release
+run-name: Client ${{ inputs.channel }} v${{ inputs.version }}
+
+# Builds the three public files in parallel, verifies them with the same steps
+# as scripts/release_client.py, then (publish only) creates release vX.Y.Z.
+#   dry-run         any ref, throwaway keys, never reads secrets, never publishes
+#   signed-dry-run  main only, release keys from the client-release environment, no release
+#   publish         main only, release keys, needs "Client checks complete" on the commit
+# Secrets and setup: desktop/README.md, "Release workflow".
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version x.y.z (no v); must match desktop/package.json and Android versionName
+        required: true
+        type: string
+      channel:
+        description: dry-run (any branch, no secrets), signed-dry-run or publish (main only)
+        required: true
+        default: dry-run
+        type: choice
+        options: [dry-run, signed-dry-run, publish]
+      notes:
+        description: Release notes (Markdown); or use notes_file. Required for publish
+        required: false
+        default: ''
+        type: string
+      notes_file:
+        description: Path of a release notes file in the repository, instead of notes
+        required: false
+        default: ''
+        type: string
+      allow_unchecked_ci:
+        description: Emergency only. Reason to publish without a passed "Client checks complete"
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  # Release-key runs share one queue; dry runs queue per ref.
+  group: client-release-${{ inputs.channel == 'dry-run' && github.ref || 'main' }}
+  cancel-in-progress: false
+
+env:
+  RELEASE_VERSION: ${{ inputs.version }}
+  RELEASE_CHANNEL: ${{ inputs.channel }}
+  RELEASE_NOTES: ${{ inputs.notes }}
+  RELEASE_NOTES_FILE: ${{ inputs.notes_file }}
+  PYTHONUNBUFFERED: '1'
+  PYTHONUTF8: '1'
+  # Optional extra private names/emails for the artifact scan (repository secret).
+  CLIENT_PRIVATE_IDENTIFIERS: ${{ secrets.CLIENT_PRIVATE_IDENTIFIERS }}
+
+jobs:
+  prepare:
+    name: Check source and gates
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      sha: ${{ steps.gate.outputs.sha }}
+      signing: ${{ steps.gate.outputs.signing }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Validate release gates without building or signing
+        run: |
+          python3 scripts/test_release_client.py
+          python3 -m unittest discover -s scripts -p 'test_client_release_ci.py'
+          python3 -m unittest discover -s scripts -p test_required_aggregate.py
+      - name: Check version, channel, ref and required CI
+        id: gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ALLOW_UNCHECKED_CI: ${{ inputs.allow_unchecked_ci }}
+        run: python3 scripts/client_release_ci.py prepare
+
+  android:
+    name: Android APK
+    needs: prepare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    # Release keys come only from the protected environment, and only for the
+    # two release-key channels; anything else gets no environment and no secrets.
+    environment: ${{ contains(fromJSON('["signed-dry-run","publish"]'), inputs.channel) && 'client-release' || '' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: ${{ github.ref != 'refs/heads/main' }}
+      - name: Build, sign and verify the APK
+        timeout-minutes: 25
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CLIENT_ANDROID_KEYSTORE_BASE64: ${{ contains(fromJSON('["signed-dry-run","publish"]'), inputs.channel) && secrets.CLIENT_ANDROID_KEYSTORE_BASE64 || '' }}
+          CLIENT_ANDROID_STORE_PASSWORD: ${{ contains(fromJSON('["signed-dry-run","publish"]'), inputs.channel) && secrets.CLIENT_ANDROID_STORE_PASSWORD || '' }}
+          CLIENT_ANDROID_KEY_ALIAS: ${{ contains(fromJSON('["signed-dry-run","publish"]'), inputs.channel) && secrets.CLIENT_ANDROID_KEY_ALIAS || '' }}
+          CLIENT_ANDROID_KEY_PASSWORD: ${{ contains(fromJSON('["signed-dry-run","publish"]'), inputs.channel) && secrets.CLIENT_ANDROID_KEY_PASSWORD || '' }}
+        run: python3 scripts/client_release_ci.py android --work "$RUNNER_TEMP/work" --out "$RUNNER_TEMP/out"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: client-android
+          path: ${{ runner.temp }}/out/
+          if-no-files-found: error
+          retention-days: 7
+
+  mac:
+    name: macOS arm64 DMG
+    needs: prepare
+    runs-on: macos-15
+    timeout-minutes: 40
+    environment: ${{ contains(fromJSON('["signed-dry-run","publish"]'), inputs.channel) && 'client-release' || '' }}
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: desktop/pnpm-lock.yaml
+      - name: Use cached Electron and builder tool downloads
+        run: |
+          echo "ELECTRON_CACHE=$RUNNER_TEMP/electron-download-cache" >> "$GITHUB_ENV"
+          echo "ELECTRON_BUILDER_CACHE=$RUNNER_TEMP/electron-builder-download-cache" >> "$GITHUB_ENV"
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ${{ runner.temp }}/electron-download-cache
+            ${{ runner.temp }}/electron-builder-download-cache
+          key: client-release-electron-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('desktop/pnpm-lock.yaml') }}
+          restore-keys: client-release-electron-${{ runner.os }}-${{ runner.arch }}-
+      - name: Build, sign, launch and verify the DMG
+        timeout-minutes: 35
+        env:
+          CLIENT_MAC_SIGNING_P12_BASE64: ${{ contains(fromJSON('["signed-dry-run","publish"]'), inputs.channel) && secrets.CLIENT_MAC_SIGNING_P12_BASE64 || '' }}
+          CLIENT_MAC_SIGNING_P12_PASSWORD: ${{ contains(fromJSON('["signed-dry-run","publish"]'), inputs.channel) && secrets.CLIENT_MAC_SIGNING_P12_PASSWORD || '' }}
+        run: python3 scripts/client_release_ci.py mac --work "$RUNNER_TEMP/work" --out "$RUNNER_TEMP/out"
+      - name: Remove the run-scoped signing keychain
+        if: always()
+        run: python3 scripts/setup-client-signing.py --delete-ci-keychain "$RUNNER_TEMP/work/signing"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: client-mac
+          path: ${{ runner.temp }}/out/
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+
+  windows:
+    name: Windows x64 installer
+    needs: prepare
+    runs-on: windows-latest
+    timeout-minutes: 40
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: desktop/pnpm-lock.yaml
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Use cached Electron and builder tool downloads
+        run: |
+          echo "ELECTRON_CACHE=$RUNNER_TEMP/electron-download-cache" >> "$GITHUB_ENV"
+          echo "ELECTRON_BUILDER_CACHE=$RUNNER_TEMP/electron-builder-download-cache" >> "$GITHUB_ENV"
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ${{ runner.temp }}/electron-download-cache
+            ${{ runner.temp }}/electron-builder-download-cache
+          key: client-release-electron-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('desktop/pnpm-lock.yaml') }}
+          restore-keys: client-release-electron-${{ runner.os }}-${{ runner.arch }}-
+      - name: Build, launch and verify the NSIS installer
+        timeout-minutes: 35
+        run: python scripts/client_release_ci.py windows --work "$RUNNER_TEMP/work" --out "$RUNNER_TEMP/out"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: client-windows
+          path: ${{ runner.temp }}/out/
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+
+  assemble:
+    name: Assemble and verify three files
+    needs: [prepare, android, mac, windows]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: client-*
+          path: ${{ runner.temp }}/inputs
+      - name: Check files against their build jobs, scan, sign and verify validation metadata
+        run: python3 scripts/client_release_ci.py assemble --inputs "$RUNNER_TEMP/inputs" --work "$RUNNER_TEMP/work" --out "$RUNNER_TEMP/bundle"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-v${{ inputs.version }}-${{ inputs.channel }}
+          path: ${{ runner.temp }}/bundle/
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+
+  publish:
+    name: Sign update metadata and publish
+    needs: [prepare, assemble]
+    if: contains(fromJSON('["signed-dry-run","publish"]'), inputs.channel)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    environment: client-release
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-v${{ inputs.version }}-${{ inputs.channel }}
+          path: ${{ runner.temp }}/bundle
+      - name: Sign metadata with the release key, verify, and create the release
+        timeout-minutes: 35
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ALLOW_UNCHECKED_CI: ${{ inputs.allow_unchecked_ci }}
+          CLIENT_UPDATE_SIGNING_KEY_BASE64: ${{ secrets.CLIENT_UPDATE_SIGNING_KEY_BASE64 }}
+        run: python3 scripts/client_release_ci.py publish --bundle "$RUNNER_TEMP/bundle" --work "$RUNNER_TEMP/work"
+      - uses: actions/upload-artifact@v4
+        if: inputs.channel == 'signed-dry-run'
+        with:
+          name: signed-notes-v${{ inputs.version }}
+          path: ${{ runner.temp }}/bundle/${{ inputs.version }}-release-notes.md
+          retention-days: 14
