@@ -97,10 +97,11 @@ new app id starts a new Play listing. iOS push needs the relay's APNs topic for
 iOS without a Mac: `.github/workflows/native-ios.yml` (GitHub Actions `macos-26`, newest Xcode;
 Expo SDK 58 needs Xcode 26.4 or later) runs on pushes to `feat/native-mobile` under `native/`
 and on demand. It generates the project (`expo prebuild --platform ios`), builds Debug and
-Release for the iOS Simulator, signs them ad hoc with simulator keychain entitlements
-(`scripts/ci/simulator.entitlements`; without them the Keychain refuses every call), and checks
-that the Release app launches and stays up. The .app files are the run's artifacts; screens are
-tested on the x86sim lab with them. `.maestro/screens.yaml` walks the main screens
+Release for the iOS Simulator, signed ad hoc by Xcode with the simulator keychain entitlements
+(`scripts/ci/simulator.entitlements`, embedded as simulated entitlements; without them the
+Keychain refuses every call), and checks that the Release app launches and stays up. The .app
+files are the run's artifacts, plus a copy with the entitlements in the signature for simulators
+that read them only there; screens are tested on the x86sim lab with them. `.maestro/screens.yaml` walks the main screens
 (`maestro test -e OUT=… -e URL=http://localhost:<port> .maestro/screens.yaml`) against a
 Supervisor seeded by `scripts/ci/seed-local.mjs`.
 

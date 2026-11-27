@@ -11,7 +11,7 @@ import { createStore } from '../state/store';
 import { Press } from './Press';
 import { AppText } from './AppText';
 import { Button } from './Button';
-import { Sheet, setOverlayRenderer, useModalKey, useModalTop, useNoSheetOpen } from './Sheet';
+import { Sheet, setOverlayRenderer, useInsideSheet, useModalKey, useModalTop, useNoSheetOpen } from './Sheet';
 import { useTheme } from './theme';
 import { haptic } from './haptics';
 import { translate } from '../i18n';
@@ -89,12 +89,16 @@ function MenuHost() {
   // A popover (not the sheet fallback) is a Modal layer of its own for VoiceOver (D6).
   const fitsPopover = popover && menu!.items.length * 46 + 16 + (menu!.title ? (menu!.subtitle ? 54 : 38) : 0) <= height - insets.top - insets.bottom - 16;
   const popoverTop = useModalTop(!!current && fitsPopover);
+  // Inside a Sheet on iOS the popover draws over it in place: VoiceOver never reaches a Modal
+  // presented from the Sheet's Modal (D6).
+  const inSheet = useInsideSheet();
+  const iosModal = Platform.OS === 'ios' && !inSheet;
   // Android has no Modal onDismiss and no presentation limit: run it on the next frame there.
   useEffect(() => {
-    if (Platform.OS === 'ios' || current || !after || !popover) return;
+    if (iosModal || current || !after || !popover) return;
     const id = requestAnimationFrame(() => { const fn = after; setAfter(null); fn(); });
     return () => cancelAnimationFrame(id);
-  }, [current, after, popover]);
+  }, [current, after, popover, iosModal]);
   const popoverDismissed = () => { if (after) { const fn = after; setAfter(null); fn(); } };
   if (!menu) return null;
   const close = (fn?: () => void) => { if (fn) setAfter(() => fn); closeMenu(); };
@@ -108,12 +112,11 @@ function MenuHost() {
     return <Sheet visible={!!current} onClose={() => close()} onClosed={sheetClosed} overlayLayer={false} title={menu.title} subtitle={menu.subtitle}><View style={{ marginHorizontal: -6 }}>{rows}</View></Sheet>;
   }
   // iOS: keep the popover's Modal mounted, hidden, until UIKit reports it dismissed (onDismiss).
-  if (!current && !(Platform.OS === 'ios' && after)) return null;
+  if (!current && !(iosModal && after)) return null;
   const below = menu.anchor.y + menu.anchor.height + 6;
   const top = below + estimated < height - insets.bottom - 8 ? below : Math.max(insets.top + 8, menu.anchor.y - estimated - 6);
   const left = Math.min(Math.max(8, menu.anchor.x + menu.anchor.width - menuWidth), width - menuWidth - 8);
-  return (
-    <Modal key={modalKey} transparent visible={!!current} onDismiss={popoverDismissed} animationType="none" onRequestClose={() => close()} statusBarTranslucent>
+  const panel = (<>
       <Pressable style={{ flex: 1 }} onPress={() => close()} accessibilityLabel={translate('workbench.close')} />
       <Animated.View entering={FadeIn.duration(120)} exiting={FadeOut.duration(100)} accessibilityRole="menu" accessibilityViewIsModal={popoverTop}
         style={{ position: 'absolute', top, left, width: menuWidth, padding: 6, backgroundColor: t.c.panel, borderRadius: t.radius.lg, borderWidth: 1, borderColor: t.c.borderStrong,
@@ -127,6 +130,11 @@ function MenuHost() {
         ) : null}
         {rows}
       </Animated.View>
+  </>);
+  if (inSheet) return current ? <View style={{ position: 'absolute', inset: 0 }}>{panel}</View> : null;
+  return (
+    <Modal key={modalKey} transparent visible={!!current} onDismiss={popoverDismissed} animationType="none" onRequestClose={() => close()} statusBarTranslucent>
+      {panel}
     </Modal>
   );
 }

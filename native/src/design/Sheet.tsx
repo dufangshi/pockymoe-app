@@ -1,9 +1,9 @@
 // Secondary windows (docs/ui-principles.md §4): on a phone they rise from the bottom with
 // a scrim, a grabber, a title and a 40 pt ×; on wide windows they are centered dialogs.
 // The content scrolls vertically only; actions sit at the bottom, Cancel first.
-import { useEffect, useState, type ReactNode } from 'react';
+import { createContext, Fragment, useContext, useEffect, useLayoutEffect, useState, type ReactNode } from 'react';
 import { createStore } from '../state/store';
-import { BackHandler, Modal, Pressable, ScrollView, useWindowDimensions, View, type StyleProp, type ViewStyle } from 'react-native';
+import { BackHandler, Modal, Platform, Pressable, ScrollView, useWindowDimensions, View, type StyleProp, type ViewStyle } from 'react-native';
 import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
 import Animated, { Easing, runOnJS, useAnimatedStyle, useSharedValue, withSpring, withTiming } from 'react-native-reanimated';
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
@@ -50,6 +50,33 @@ export function useModalTop(active: boolean) {
     return () => modals.set(s => ({ stack: s.stack.filter(x => x !== id) }));
   }, [active, id]);
   return modals.useValue(s => s.stack[s.stack.length - 1] === id);
+}
+
+// VoiceOver also never reaches a Modal presented from another Modal's controller (the Commit
+// sheet and the Git menu over the Git sheet stayed out of the tree with the mark fixed). On iOS a
+// Sheet or popover opened inside a Sheet therefore draws into that Sheet's own Modal through
+// this portal instead of presenting a second controller. The only React context in the app is
+// the theme, which is the same at the outlet.
+type PortalStore = ReturnType<typeof createPortal>;
+const createPortal = () => createStore<{ nodes: [number, ReactNode][] }>({ nodes: [] });
+const PortalContext = createContext<PortalStore | null>(null);
+/** True inside a Sheet on iOS: draw over it in place instead of opening another Modal. */
+export function useInsideSheet() { const portal = useContext(PortalContext); return Platform.OS === 'ios' && portal !== null; }
+function PortalOutlet({ portal }: { portal: PortalStore }) {
+  const nodes = portal.useValue(s => s.nodes);
+  if (!nodes.length) return null;
+  return <View pointerEvents="box-none" style={{ position: 'absolute', inset: 0 }}>{nodes.map(([id, node]) => <Fragment key={id}>{node}</Fragment>)}</View>;
+}
+function usePortal(portal: PortalStore | null, id: number, node: ReactNode) {
+  useLayoutEffect(() => {
+    if (!portal) return;
+    portal.set(s => {
+      const at = s.nodes.findIndex(([key]) => key === id);
+      if (node === null) return at < 0 ? s : { nodes: s.nodes.filter(([key]) => key !== id) };
+      return { nodes: at < 0 ? [...s.nodes, [id, node]] : s.nodes.map(entry => entry[0] === id ? [id, node] as [number, ReactNode] : entry) };
+    });
+  });
+  useLayoutEffect(() => () => { portal?.set(s => ({ nodes: s.nodes.filter(([key]) => key !== id) })); }, [portal, id]);
 }
 
 export interface SheetProps {
@@ -102,6 +129,10 @@ export function Sheet({ visible, onClose, title, subtitle, children, footer, tal
   const [mounted, setMounted] = useState(visible);
   const isTopLayer = useLayer(overlayLayer && mounted);
   const modalTop = useModalTop(mounted);
+  const outer = useContext(PortalContext);
+  const nested = Platform.OS === 'ios' && outer !== null;
+  const [portal] = useState(createPortal);
+  const [portalId] = useState(() => ++modalSeq);
   // The Modal unmounts with `mounted`; tell the owner on the next frame, when iOS has dismissed it.
   const [wasMounted, setWasMounted] = useState(mounted);
   useEffect(() => {
@@ -146,28 +177,26 @@ export function Sheet({ visible, onClose, title, subtitle, children, footer, tal
 
   const sheetStyle = useAnimatedStyle(() => ({ transform: [{ translateY: offset.value }], opacity: wide ? fade.value : 1 }));
   const scrimStyle = useAnimatedStyle(() => ({ opacity: fade.value }));
-  if (!mounted) return null;
-
-  const maxHeight = wide ? Math.min(height * 0.86, 760) : fraction ? Math.min(height * fraction, height - insets.top - 12) : height - insets.top - 12;
-  const header = !showHeader ? (wide ? null : <View style={{ alignSelf: 'center', width: 38, height: 5, borderRadius: 3, backgroundColor: t.c.borderStrong, marginTop: 6, marginBottom: 2 }} />) : (
-    <View style={{ paddingHorizontal: 16, paddingTop: wide ? 14 : 6, paddingBottom: 6 }}>
-      {!wide ? <View style={{ alignSelf: 'center', width: 38, height: 5, borderRadius: 3, backgroundColor: t.c.borderStrong, marginBottom: 8 }} /> : null}
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 40 }}>
-        <View style={{ flex: 1, minWidth: 0 }}>
-          {title ? <AppText variant="headline" accessibilityRole="header" numberOfLines={1}>{title}</AppText> : null}
-          {subtitle ? <AppText variant="footnote" tone="muted" numberOfLines={1}>{subtitle}</AppText> : null}
+  const renderContent = () => {
+    const maxHeight = wide ? Math.min(height * 0.86, 760) : fraction ? Math.min(height * fraction, height - insets.top - 12) : height - insets.top - 12;
+    const header = !showHeader ? (wide ? null : <View style={{ alignSelf: 'center', width: 38, height: 5, borderRadius: 3, backgroundColor: t.c.borderStrong, marginTop: 6, marginBottom: 2 }} />) : (
+      <View style={{ paddingHorizontal: 16, paddingTop: wide ? 14 : 6, paddingBottom: 6 }}>
+        {!wide ? <View style={{ alignSelf: 'center', width: 38, height: 5, borderRadius: 3, backgroundColor: t.c.borderStrong, marginBottom: 8 }} /> : null}
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 40 }}>
+          <View style={{ flex: 1, minWidth: 0 }}>
+            {title ? <AppText variant="headline" accessibilityRole="header" numberOfLines={1}>{title}</AppText> : null}
+            {subtitle ? <AppText variant="footnote" tone="muted" numberOfLines={1}>{subtitle}</AppText> : null}
+          </View>
+          <IconButton icon={X} label={translate('workbench.close')} onPress={onClose} testID="sheet-close" />
         </View>
-        <IconButton icon={X} label={translate('workbench.close')} onPress={onClose} testID="sheet-close" />
       </View>
-    </View>
-  );
-  const body = scroll
-    ? <ScrollView style={tall ? { flex: 1 } : { flexGrow: 0 }} contentContainerStyle={[{ paddingHorizontal: 16, paddingBottom: 12 }, contentStyle]} keyboardShouldPersistTaps="handled" showsHorizontalScrollIndicator={false}>{children}</ScrollView>
-    : <View style={[{ flexShrink: 1, flexGrow: tall ? 1 : 0 }, contentStyle]}>{children}</View>;
+    );
+    const body = scroll
+      ? <ScrollView style={tall ? { flex: 1 } : { flexGrow: 0 }} contentContainerStyle={[{ paddingHorizontal: 16, paddingBottom: 12 }, contentStyle]} keyboardShouldPersistTaps="handled" showsHorizontalScrollIndicator={false}>{children}</ScrollView>
+      : <View style={[{ flexShrink: 1, flexGrow: tall ? 1 : 0 }, contentStyle]}>{children}</View>;
 
-  return (
-    <Modal key={modalKey} transparent visible animationType="none" statusBarTranslucent navigationBarTranslucent onRequestClose={() => { if (dismissable) onClose(); }}>
-      <GestureHandlerRootView style={{ flex: 1 }}>
+    return (
+      <View pointerEvents="box-none" style={{ position: 'absolute', inset: 0 }}>
         <KeyboardAvoidingView behavior="padding" style={{ flex: 1, justifyContent: wide ? 'center' : 'flex-end', alignItems: wide ? 'center' : 'stretch', paddingTop: wide ? 0 : insets.top + 8 }}>
           <Animated.View style={[{ position: 'absolute', inset: 0, backgroundColor: t.c.scrim }, scrimStyle]}>
             <Pressable style={{ flex: 1 }} onPress={() => dismissable && onClose()} accessibilityRole="button" accessibilityLabel={translate('workbench.close')} />
@@ -189,8 +218,22 @@ export function Sheet({ visible, onClose, title, subtitle, children, footer, tal
             </Animated.View>
           </GestureDetector>
         </KeyboardAvoidingView>
-      </GestureHandlerRootView>
-      {isTopLayer && renderOverlays ? <View pointerEvents="box-none" style={{ position: 'absolute', inset: 0 }}>{renderOverlays()}</View> : null}
+        {nested && isTopLayer && renderOverlays ? <View pointerEvents="box-none" style={{ position: 'absolute', inset: 0 }}>{renderOverlays()}</View> : null}
+      </View>
+    );
+  };
+  const content = mounted ? renderContent() : null;
+  usePortal(nested ? outer : null, portalId, nested ? content : null);
+  if (!mounted || nested) return null;
+  return (
+    <Modal key={modalKey} transparent visible animationType="none" statusBarTranslucent navigationBarTranslucent onRequestClose={() => { if (dismissable) onClose(); }}>
+      <PortalContext.Provider value={portal}>
+        <GestureHandlerRootView style={{ flex: 1 }}>
+          {content}
+          <PortalOutlet portal={portal} />
+        </GestureHandlerRootView>
+        {isTopLayer && renderOverlays ? <View pointerEvents="box-none" style={{ position: 'absolute', inset: 0 }}>{renderOverlays()}</View> : null}
+      </PortalContext.Provider>
     </Modal>
   );
 }
