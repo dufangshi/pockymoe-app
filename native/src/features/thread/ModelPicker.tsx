@@ -33,6 +33,7 @@ import { effortLabel } from './effort';
 import { EffortSlider } from './EffortSlider';
 import { moveCursor, scrollToShow, type CursorMove } from './pickerCursor';
 import { KeyCommandsRoot, useKeyCommand } from '../../platform/keyCommands';
+import { railAgents } from './pickerRail';
 
 // The segmented control lives in the design system; re-exported for existing imports.
 export { Segmented };
@@ -106,15 +107,18 @@ export function ModelPicker(props: ModelPickerProps) {
   );
 }
 
+
 function PickerBody({ onClose, api, threadId, agent, value, onChange, agents: agentOptions, canSwitch, running = false, liveModelSwitch, cwd, onSwitched }: ModelPickerProps) {
   const t = useTheme();
   const currentAgentId = agent.agentId ?? '';
   // Switching: the owner's ACP thread, with another ready agent to move to.
+  const railList = useMemo(() => railAgents(agentOptions, currentAgentId), [agentOptions, currentAgentId]);
   const pickerAgents = useMemo<ModelPickerAgent[]>(() => {
     if (!canSwitch || !threadId || agent.provider !== 'acp' || !currentAgentId) return [];
-    const ready = (agentOptions ?? []).filter(a => !a.hidden && ((a.acpAgent?.availability ?? 'ready') === 'ready' || a.model === currentAgentId));
-    return orderPickerAgents(ready.map(a => ({ id: a.model || a.id, name: agentEntryLabel(a) || a.model })), currentAgentId);
-  }, [agentOptions, canSwitch, threadId, agent.provider, currentAgentId]);
+    return orderPickerAgents(railList.map(a => ({ id: a.id, name: agentEntryLabel(a.entry) || a.entry.model })), currentAgentId);
+  }, [railList, canSwitch, threadId, agent.provider, currentAgentId]);
+  // The rail keys entries like threads; the API takes the list's own id (pickerRail.ts, D20).
+  const acpAgentId = useCallback((key: string) => railList.find(a => a.id === key)?.apiId ?? key, [railList]);
   const switching = pickerAgents.length > 1 && pickerAgents.some(a => a.id === currentAgentId);
   const showRail = switching;
 
@@ -156,11 +160,11 @@ function PickerBody({ onClose, api, threadId, agent, value, onChange, agents: ag
     setLoads(c => ({ ...c, [agentId]: { status: 'loading' } }));
     const cacheKey = `${agentId}\u0000${cwd ?? ''}`;
     const cached = modelCache.get(cacheKey);
-    const request = cached && Date.now() - cached.at < 60_000 && !force ? cached.request : api.runtimeModels('acp', agentId, cwd);
+    const request = cached && Date.now() - cached.at < 60_000 && !force ? cached.request : api.runtimeModels('acp', acpAgentId(agentId), cwd);
     if (request !== cached?.request) { modelCache.set(cacheKey, { at: Date.now(), request }); request.catch(() => modelCache.delete(cacheKey)); }
     request.then(data => { if (live.current) setLoads(n => ({ ...n, [agentId]: { status: 'ready', data } })); },
       e => { asked.current.delete(key); if (live.current) setLoads(n => ({ ...n, [agentId]: { status: 'error', error: message(e) } })); });
-  }, [switching, currentAgentId, api, cwd]);
+  }, [switching, currentAgentId, api, cwd, acpAgentId]);
 
   const searching = query.trim().length > 0;
   const currentModels = current.status === 'ready' ? visiblePickerModels(current.data, value.model) : [];
@@ -180,10 +184,10 @@ function PickerBody({ onClose, api, threadId, agent, value, onChange, agents: ag
     if (asked.current.has(key) && !force) return;
     asked.current.add(key);
     setPreviews(c => (c[agentId]?.status === 'ready' && !force ? c : { ...c, [agentId]: { status: 'loading' } }));
-    api.harnessPreview(threadId, { provider: 'acp', agentId, model }).then(
+    api.harnessPreview(threadId, { provider: 'acp', agentId: acpAgentId(agentId), model }).then(
       data => { if (live.current) setPreviews(n => ({ ...n, [agentId]: { status: 'ready', data } })); },
       e => { asked.current.delete(key); if (live.current) setPreviews(n => ({ ...n, [agentId]: { status: 'error', error: message(e) } })); });
-  }, [switching, threadId, api]);
+  }, [switching, threadId, api, acpAgentId]);
   useEffect(() => { if (view !== currentAgentId && viewModels?.status === 'ready') countHistory(view, previewTarget); },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [view, currentAgentId, viewModels?.status, previewTarget, countHistory]);
@@ -192,7 +196,7 @@ function PickerBody({ onClose, api, threadId, agent, value, onChange, agents: ag
 
   // The agent's display name, as the Web heads the list ("OpenAI Codex", "ACP · Claude").
   const agentName = (id: string) => pickerAgents.find(a => a.id === id)?.name
-    ?? (() => { const entry = (agentOptions ?? []).find(a => (a.model || a.id) === id); return entry ? agentEntryLabel(entry) : agentKeyName(id); })();
+    ?? (() => { const entry = railList.find(a => a.id === id)?.entry; return entry ? agentEntryLabel(entry) : agentKeyName(id); })();
   const changeView = (id: string) => {
     if (id !== view) { setPending(null); setTargetEffort(null); }
     setView(id); setShowPreview(false); setSwitchError(null);
@@ -205,7 +209,7 @@ function PickerBody({ onClose, api, threadId, agent, value, onChange, agents: ag
     try {
       // As the Web: stop the turn, then release, which waits for it to settle before the switch.
       if (stop) { await api.interrupt(threadId); await api.release(threadId, { interrupt: true }); }
-      const switched = await api.harnessSwitch(threadId, { provider: 'acp', agentId, model: option.model, reasoningEffort: effortFor(option) });
+      const switched = await api.harnessSwitch(threadId, { provider: 'acp', agentId: acpAgentId(agentId), model: option.model, reasoningEffort: effortFor(option) });
       haptic.success();
       if (switched?.id) onSwitched?.(switched);
       if (live.current) onClose();
