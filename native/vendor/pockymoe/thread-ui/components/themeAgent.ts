@@ -10,6 +10,7 @@ const AGENT_FAMILIES: readonly (readonly [key: string, matches: (value: string) 
   ['deepseek', (value) => value.includes('deepseek') || value === 'dsh'],
   ['copilot', (value) => value.includes('copilot')],
   ['gemini', (value) => value.includes('gemini')],
+  ['antigravity', (value) => value.includes('antigravity') || value === 'agy'],
   ['grok', (value) => value.includes('grok')],
   ['cursor', (value) => value.includes('cursor')],
   ['qwen', (value) => value.includes('qwen')],
@@ -17,6 +18,7 @@ const AGENT_FAMILIES: readonly (readonly [key: string, matches: (value: string) 
 ];
 
 const AGENT_NAMES: Record<string, string> = {
+  antigravity: 'Antigravity',
   claude: 'Claude',
   codex: 'Codex',
   copilot: 'Copilot',

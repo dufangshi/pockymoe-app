@@ -5,9 +5,9 @@
       "repository": "dufangshi/pockymoe",
       "prefix": "runtime",
       "base": "",
-      "commit": "b4c2bbc29cbc79a6d45672b210ece236495a3df4",
+      "commit": "373c8ba007d352e4f0e3fa123764359f1928c7b9",
       "files": {
-        "packages/shared/src/index.ts": "0003b4568641b364147fbecb1f74539cc08f3f6bd149125b55e2d16e03e3d9d8",
+        "packages/shared/src/index.ts": "590bf64783a66837456ca90134bacc4959e86c0306ec3f08ba2a04bb24de96fa",
         "packages/shared/src/agent-providers.ts": "86f3b54960b2e77948db249fde635ff160cfd65e20c8172f94fbc9b95b0ed14e",
         "packages/shared/src/automation.ts": "1af7dfe46645a7fe448a07ede26fb900266fdb53c150211970af3aa59437b7f9",
         "packages/shared/src/deviceMetrics.ts": "8419fd3093acf8ee5f4c400de242581eaad80d82b5ae6c3af731d699d7cb08e0",
@@ -21,7 +21,7 @@
         "apps/supervisor-web/src/lib/accountVaultState.ts": "fec750002626ec60b202348612315c5bf96e8bedf3e5e1f8adc4ebcf942403b8",
         "apps/supervisor-web/src/lib/pendingEnrollmentStore.ts": "44fd495386d8c6174865a9183084ce351553081eeef888f4b6c27389bc19acbc",
         "apps/supervisor-web/src/lib/relayOrigin.ts": "d6410522f00bb5cdb89e04045b312733912dc998d3b1530b67226e9d78b6924f",
-        "apps/supervisor-web/src/lib/relayTransportCrypto.ts": "a1f1703d8de92ad9fbb03c9da308078de7be41a1c64313483ebf785be76088b4",
+        "apps/supervisor-web/src/lib/relayTransportCrypto.ts": "7be987cce34d704303f6001aece1b4c3a71822c8ce8a1c0057ba7aaa5a8c9be7",
         "apps/supervisor-web/src/lib/sessionActor.ts": "6dc0ae5bfe53626b7077bb384b39b16a5e328b4a9defc2617963defc29580f36",
         "apps/supervisor-web/src/lib/sharePending.ts": "c7483864a37240dfcd564692beda6f15f4bd169593c53092e9b5bba47a772ff9",
         "apps/supervisor-web/src/lib/sharedDeviceTrust.ts": "25272f991b48a54a0f8337b8b67a6a89927bdbb71710641eb1bae410d4293fee",
@@ -73,7 +73,7 @@
       "repository": "dufangshi/pockymoe-thread-ui-rust",
       "prefix": "thread-ui",
       "base": "packages/thread-ui/src",
-      "commit": "747524d3f5c04143ea396bc8e8602821be86fcdb",
+      "commit": "b251204a9cc725e9cdc92a582da940b41ba8eb4e",
       "files": {
         "i18n/locales.ts": "6c5ae59a5c6f38d38bcdd76be71b8e655680d8148f9daff54bfd5ed86f3b0114",
         "i18n/admin.en.ts": "7fc52645897763db22abe2b111ddfbffb96754cc2920ca2257fe0d769df24487",
@@ -82,8 +82,8 @@
         "i18n/auth.zh-CN.ts": "6cf8e160614d47a635f2022f2d6a958542946a8071ea6a29174efe146c61fb91",
         "i18n/automation.en.ts": "363b35e420d93da1e8258998601b409a9e48232972b18269ba17977b07883b63",
         "i18n/automation.zh-CN.ts": "0703b4897854479179815b91432fc94ae0cc346e4e1ced39b7c8904e247e90be",
-        "i18n/chat.en.ts": "baf3aaac9d70991d2022c84543e6ab5586b82f069b591772ba637b2dff359480",
-        "i18n/chat.zh-CN.ts": "55fdc7ce4edf5ffa4753674542d17d1ea1c4f22c0b6592f936abd00986600526",
+        "i18n/chat.en.ts": "e2879fa7951ce5a7374b5f29361bdf2edad050af448559044b778e29c24fede2",
+        "i18n/chat.zh-CN.ts": "0d90a326453e8f964769ab1b5064b0324dbd99452dd3783b37d4a0632818851d",
         "i18n/common.en.ts": "fee13fcba7ee2d170329c280630b18541809e1ef515c2e97201270cd7593a7a6",
         "i18n/common.zh-CN.ts": "4e6e38717177d3aac33e85ddded4681b274fff003520d553ae2cc2dc0441a98f",
         "i18n/content-quality.en.ts": "f8fb1b7ecd389297570c645693432d32b6aeff362a390c8d489b3647d45d7594",
@@ -113,7 +113,7 @@
         "components/composer/promptQuotes.ts": "20e12724ce29a550098fe6c5db2d9faa1a5deec6511b084cda44c333b6950103",
         "components/composer/contextInspectionModel.ts": "a2a01cef577dfc8996d6653fa71d892fec56f06d4e8845b975be9e0c4a998f40",
         "components/composer/modelPicker/modelPickerLogic.ts": "6906ea7dd43ae524acc28024fff2b006ce5c18b99f7eb2f672a4e6f888fde102",
-        "components/themeAgent.ts": "defc1a66930b9fc839d306a025d580d3c240f79f98af862fff5725f2e8c64020",
+        "components/themeAgent.ts": "90d1b59934faf046b4cd2d74b4145e3ef7acc986182b60aa0b98765ea67627dc",
         "components/attachments/attachmentFiles.ts": "10b53466f26d1d68f0faefccd640be5e5633c2d3927c5cc3cc9594f04d000f2b"
       }
     }
