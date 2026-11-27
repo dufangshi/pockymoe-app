@@ -17,6 +17,7 @@ env:
   EXPO_NO_TELEMETRY: '1'
   EXPO_NO_GIT_STATUS: '1'
   CI: '1'
+  XCODE_VERSION: '26.2'
 concurrency:
   group: native-ios-${{ github.ref }}
   cancel-in-progress: true
@@ -39,10 +40,13 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: native/package-lock.json
-      - name: Pick the newest stable Xcode
+      - name: Select Xcode
+        # Expo SDK 58's Swift (expo-modules-jsi) builds with Xcode 26.2; 26.3's compiler turns a
+        # region-isolation diagnostic in it into an error.
         run: |
           ls -d /Applications/Xcode*.app
-          XCODE=$(ls -d /Applications/Xcode_*.app | grep -v -i beta | sort -V | tail -1)
+          XCODE=/Applications/Xcode_${XCODE_VERSION}.app
+          test -d "$XCODE" || XCODE=$(ls -d /Applications/Xcode_*.app | grep -v -i beta | sort -V | tail -1)
           sudo xcode-select -s "$XCODE"
           xcodebuild -version
           xcrun simctl list runtimes
@@ -59,13 +63,14 @@ jobs:
         run: pod install
       - name: Build for the iOS Simulator
         run: |
-          set -o pipefail
           mkdir -p ../ci-out
           xcodebuild -workspace ios/PockymoeDev.xcworkspace -scheme PockymoeDev \
             -configuration ${{ matrix.configuration }} -sdk iphonesimulator \
             -destination 'generic/platform=iOS Simulator' -derivedDataPath ios/build \
-            CODE_SIGNING_ALLOWED=NO COMPILER_INDEX_STORE_ENABLE=NO build 2>&1 | tee ../ci-out/xcodebuild.log | grep -E "error:|warning: .*deprecated|BUILD (SUCCEEDED|FAILED)|\*\* " || true
-          test -d ios/build/Build/Products/${{ matrix.configuration }}-iphonesimulator/PockymoeDev.app
+            CODE_SIGNING_ALLOWED=NO COMPILER_INDEX_STORE_ENABLE=NO build > ../ci-out/xcodebuild.log 2>&1 || status=$?
+          grep -E " error:|\*\* BUILD" ../ci-out/xcodebuild.log | head -40 || true
+          [ -z "${status:-}" ] || { tail -40 ../ci-out/xcodebuild.log; exit "$status"; }
+          test -f ios/build/Build/Products/${{ matrix.configuration }}-iphonesimulator/PockymoeDev.app/Info.plist
           ditto -c -k --keepParent ios/build/Build/Products/${{ matrix.configuration }}-iphonesimulator/PockymoeDev.app ../ci-out/PockymoeDev-${{ matrix.configuration }}.app.zip
       - name: Start a local fake-runtime Supervisor (v0.14.1) and seed it
         if: matrix.configuration == 'Release'
