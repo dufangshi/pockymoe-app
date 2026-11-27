@@ -104,7 +104,7 @@ jobs:
           test -f "$APP/Info.plist"
           echo "signature entitlements:"; codesign -d --entitlements - "$APP" 2>&1 | head -20
           echo "simulated entitlements:"; strings "$APP/PockymoeDev" | grep -A1 -E "keychain-access-groups|application-identifier" | head -8 || true
-          ditto -c -k --keepParent "$APP" ../ci-out/PockymoeDev-${{ matrix.configuration }}.app.zip
+          ditto -c -k --keepParent "$APP" ../ci-out/PockymoeDev-${{ matrix.configuration }}${{ matrix.signing == 'personal' && '-personal' || '' }}.app.zip
       - name: Launch smoke test on an iPhone simulator
         if: matrix.configuration == 'Release'
         run: |
