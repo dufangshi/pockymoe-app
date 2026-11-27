@@ -34,9 +34,16 @@ appId: com.pockymoe.app.dev
 - takeScreenshot: ${OUT}03-thread
 - tapOn:
     id: "composer-input"
+# The composer opens and the keyboard rises: wait until both have settled before tapping on.
+- extendedWaitUntil:
+    visible:
+      id: "model-key"
+    timeout: 15000
+- waitForAnimationToEnd
 - takeScreenshot: ${OUT}04-composer
 - tapOn:
     id: "model-key"
+    retryTapIfNoChange: true
 - extendedWaitUntil:
     visible: "Search models"
     timeout: 20000
