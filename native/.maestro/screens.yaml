@@ -24,7 +24,10 @@ appId: com.pockymoe.app.dev
     visible: "notes.*"
     timeout: 60000
 - takeScreenshot: ${OUT}02-threads
-- tapOn: "Split prompt.*"
+- waitForAnimationToEnd
+- tapOn:
+    text: "Split prompt.*"
+    retryTapIfNoChange: true
 - extendedWaitUntil:
     visible: "Worked for.*"
     timeout: 30000
@@ -54,7 +57,10 @@ appId: com.pockymoe.app.dev
 - tapOn:
     id: "back"
     optional: true
-- tapOn: "Reply with.*"
+- waitForAnimationToEnd
+- tapOn:
+    text: "Reply with.*"
+    retryTapIfNoChange: true
 - extendedWaitUntil:
     visible: "Release notes"
     timeout: 20000
