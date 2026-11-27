@@ -152,7 +152,7 @@ export function SettingsView({ onBack, onAddSupervisor, onSwitchRelay, onSignIn 
                 </SettingBlock>
               ) : null}
               <SettingBlock first={account.phase !== 'ready'} title={translate('native.systemNotifications')}
-                description={notify.permission === 'denied' ? translate('native.notificationsDenied') : notify.native === 'unavailable' ? translate('native.apnsUnavailable') : notify.native === 'registered' ? translate('native.apnsRegistered') : translate('native.systemNotificationsBody')}
+                description={notify.permission === 'denied' ? translate('native.notificationsDenied') : notify.native === 'unavailable' ? translate('native.apnsUnavailable') : notify.native === 'registered' ? translate('native.apnsRegistered') : notify.native === 'failed' ? translate('native.apnsFailed') : translate('native.systemNotificationsBody')}
                 inline={<Checkbox value={notify.permission === 'granted'} onValueChange={v => { if (v) void enableNotifications(); }} label={translate('native.systemNotifications')} />} />
             </>
           ) : (

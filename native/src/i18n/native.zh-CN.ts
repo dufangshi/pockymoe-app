@@ -200,6 +200,7 @@ export const nativeZhCN: Record<keyof typeof nativeEn, Message> = {
   'native.notificationsBody': "轮次完成、失败或需要你时",
   'native.notificationsDenied': "系统设置中已关闭通知",
   'native.apnsUnavailable': "这个 Relay 没有配置 Apple 推送密钥",
+  'native.apnsFailed': "这台设备未开启 Relay 推送；应用打开时仍会通知",
   'native.apnsRegistered': "Relay 推送已开启",
   'native.moreQueued': "还有 {{count}} 条排队",
   'native.quote': "引用",
