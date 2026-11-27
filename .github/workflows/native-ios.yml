@@ -17,14 +17,16 @@ env:
   EXPO_NO_TELEMETRY: '1'
   EXPO_NO_GIT_STATUS: '1'
   CI: '1'
-  XCODE_VERSION: '26.2'
+  # Expo SDK 58's Swift (expo-modules-jsi: nonisolated(unsafe) locals, Swift runtime export
+  # notes for Xcode 26.4/27) needs Xcode 26.4 or later; empty picks the newest stable one.
+  XCODE_VERSION: ''
 concurrency:
   group: native-ios-${{ github.ref }}
   cancel-in-progress: true
 jobs:
   build:
     name: ${{ matrix.configuration }} build${{ matrix.configuration == 'Release' && ', screenshots' || '' }}
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 90
     strategy:
       fail-fast: false
@@ -41,12 +43,11 @@ jobs:
           cache: npm
           cache-dependency-path: native/package-lock.json
       - name: Select Xcode
-        # Expo SDK 58's Swift (expo-modules-jsi) builds with Xcode 26.2; 26.3's compiler turns a
-        # region-isolation diagnostic in it into an error.
         run: |
           ls -d /Applications/Xcode*.app
-          XCODE=/Applications/Xcode_${XCODE_VERSION}.app
+          XCODE=/Applications/Xcode_${XCODE_VERSION:-none}.app
           test -d "$XCODE" || XCODE=$(ls -d /Applications/Xcode_*.app | grep -v -i beta | sort -V | tail -1)
+          echo "Using $XCODE"
           sudo xcode-select -s "$XCODE"
           xcodebuild -version
           xcrun simctl list runtimes
@@ -109,7 +110,7 @@ jobs:
             for mode in light dark; do
               xcrun simctl ui "$UDID" appearance $mode
               xcrun simctl terminate "$UDID" com.pockymoe.app.dev || true
-              maestro --device "$UDID" test -e OUT="$OUT/$kind-$mode-" .maestro/screens.yaml --debug-output "$OUT/maestro-$kind-$mode" || status=1
+              maestro --device "$UDID" test -e OUT="$OUT/$kind-$mode-" -e URL=http://localhost:45900 .maestro/screens.yaml --debug-output "$OUT/maestro-$kind-$mode" || status=1
               xcrun simctl io "$UDID" screenshot "$OUT/$kind-$mode-zz-last.png" || true
             done
             xcrun simctl spawn "$UDID" log show --last 15m --predicate 'process == "PockymoeDev"' > "$OUT/$kind-device.log" 2>&1 || true

@@ -1,6 +1,7 @@
 # Main screens of the native client for the iOS CI screenshots. The app talks to a local
 # fake-runtime Supervisor (see .github/workflows/native-ios.yml). Run with -e OUT=<dir prefix>.
 # The connect steps run only on a fresh install; a second run (dark mode) starts signed in.
+# -e URL=<Supervisor address> (the workflow passes http://localhost:45900).
 appId: com.pockymoe.app.dev
 ---
 - launchApp
@@ -16,7 +17,7 @@ appId: com.pockymoe.app.dev
       - tapOn: "This network.*"
       - tapOn:
           id: "direct-url"
-      - inputText: "http://localhost:45900"
+      - inputText: ${URL}
       - tapOn:
           id: "direct-connect"
 - extendedWaitUntil:
