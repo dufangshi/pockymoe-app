@@ -268,8 +268,16 @@ export function ThreadList({ deviceKey, selectedThreadId, onOpen, onNewThread, o
   const account = accountStore.useValue(s => s);
   const avatarRef = useRef<ComponentRef<typeof View>>(null);
   // The Web's account menu: who is signed in, then Settings, Device management and Log out.
+  // The header measures itself: in a narrow column (an iPad list column) the device name gets
+  // the width, and Pull requests moves into the account menu (or the ⋯ that replaces the gear).
+  const [headerWidth, setHeaderWidth] = useState(0);
+  const prs = !!onPullRequests && !device?.shared;
+  const iconCount = 2 + (prs ? 1 : 0) + (!compact ? 1 : 0);
+  const foldPrs = prs && headerWidth > 0 && headerWidth - iconCount * 44 < 170;
+  const prItem = foldPrs ? [{ label: translate('review.pullRequests'), icon: GitPullRequest, onPress: () => onPullRequests?.() }] : [];
   const openAccountMenu = () => avatarRef.current?.measureInWindow((x, y, width, height) => showMenu({
     anchor: { x, y, width, height }, title: account.user?.username ?? undefined, subtitle: account.user?.email ?? undefined, items: [
+      ...prItem,
       { label: translate('workbench.settings'), icon: Settings, onPress: onSettings },
       { label: translate('files.deviceManagement'), icon: MonitorSmartphone, onPress: () => onDevices() },
       { label: translate('auth.logOut'), icon: LogOut, destructive: true, onPress: async () => {
@@ -278,6 +286,7 @@ export function ThreadList({ deviceKey, selectedThreadId, onOpen, onNewThread, o
     ] }));
   return (
     <View style={{ flex: 1, backgroundColor: compact ? t.c.bg : t.c.chrome === t.c.bg ? t.c.panel : t.c.bg }}>
+      <View onLayout={e => setHeaderWidth(e.nativeEvent.layout.width)}>
       <AppBar
         center={
           <View ref={devicesRef} collapsable={false} style={{ alignSelf: 'flex-start', maxWidth: '100%' }}>
@@ -291,14 +300,21 @@ export function ThreadList({ deviceKey, selectedThreadId, onOpen, onNewThread, o
         }
         trailing={<>
           <IconButton icon={Search} label={translate('chat.search')} onPress={() => { setSearchOpen(true); setTimeout(() => searchRef.current?.focus(), 50); }} />
-          {onPullRequests && !device?.shared ? <IconButton icon={GitPullRequest} label={translate('review.pullRequests')} onPress={onPullRequests} testID="pull-requests" /> : null}
+          {prs && !foldPrs ? <IconButton icon={GitPullRequest} label={translate('review.pullRequests')} onPress={onPullRequests} testID="pull-requests" /> : null}
           {!compact ? <IconButton icon={MessageSquarePlus} label={translate('workbench.createThread')} onPress={() => onNewThread()} testID="new-thread" /> : null}
           {/* A relay account is reached from its avatar, as on the Web; a local setup keeps the gear (§1). */}
           {account.phase === 'ready' && account.user ? (
             <AccountAvatar ref={avatarRef} name={account.user.username ?? account.user.email ?? ''} testID="account"
               label={translate('native.accountMenu', { name: account.user.username ?? account.user.email ?? '' })} onPress={openAccountMenu} />
+          ) : foldPrs ? (
+            <View ref={avatarRef} collapsable={false}>
+              <IconButton icon={MoreHorizontal} label={translate('native.moreActions')} testID="settings"
+                onPress={() => avatarRef.current?.measureInWindow((x, y, width, height) => showMenu({ anchor: { x, y, width, height }, items: [
+                  ...prItem, { label: translate('workbench.settings'), icon: Settings, onPress: onSettings }] }))} />
+            </View>
           ) : <IconButton icon={Settings} label={translate('workbench.settings')} onPress={onSettings} testID="settings" />}
         </>} />
+      </View>
       {searchOpen || query ? (
         <View style={{ flexDirection: 'row', alignItems: 'center', marginHorizontal: 12, marginBottom: 6, paddingLeft: 10, height: 42, borderRadius: t.radius.md, backgroundColor: t.c.surface, borderWidth: 1, borderColor: t.c.border }}>
           <Search size={16} color={t.c.fgMuted} />
