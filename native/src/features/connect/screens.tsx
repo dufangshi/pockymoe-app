@@ -19,8 +19,8 @@ import { useTheme } from '../../design/theme';
 import { clearLocaleOverride, hasLocaleOverride, setLocale, translate, useI18n } from '../../i18n';
 import { showMenu } from '../../design/Overlay';
 import { accountStore, restoreAccount, chooseRelay, completeChallenge, finishRegistration, probeRelay, register, signIn, signInWithRecovery } from '../../connection/account';
-import { addDirect, signInDirect } from '../../connection/devices';
-import { selectDevice } from '../../layout/selection';
+import { addDirect, devicesStore, refreshRelayDevices, signInDirect } from '../../connection/devices';
+import { selectDevice, selectionStore } from '../../layout/selection';
 
 /** The language menu of the Web's sign-in header: system, English, 简体中文. */
 function LanguageButton() {
@@ -97,6 +97,16 @@ function Brand({ title, subtitle }: { title: string; subtitle?: string | null })
 const message = (e: unknown) => String((e as Error)?.message ?? e);
 /** What the relay's sign-in answer means for the reader (the Web's RelayPortalPage rules):
  *  a wrong password belongs to the password field; account states are a visible notice. */
+/** After a relay sign-in, open one of its devices unless a relay device is already open (a phone
+ *  that only had direct Supervisors stayed on them; D8 did this for Add a Supervisor). */
+async function selectRelayAfterSignIn() {
+  if (accountStore.get().phase !== 'ready' || selectionStore.get().deviceKey?.startsWith('relay:')) return;
+  await refreshRelayDevices();
+  const relay = devicesStore.get().relay;
+  const first = relay.find(d => !d.shared && d.online) ?? relay.find(d => !d.shared) ?? relay[0];
+  if (first) selectDevice(first.key);
+}
+
 function signInOutcome(e: unknown): { field?: string; notice?: { tone: 'info' | 'warning' | 'danger'; text: string } } {
   const code = (e as { code?: string })?.code;
   if (code === 'unauthorized' || code === 'invalid_credentials') return { field: translate('auth.invalid_credentials') };
@@ -170,7 +180,7 @@ export function SignIn({ onBack, onRegister }: { onBack: () => void; onRegister:
   const [notice2, setNotice2] = useState<{ tone: 'info' | 'warning' | 'danger'; text: string } | null>(null);
   const run = async (task: () => Promise<unknown>) => {
     setBusy(true); setError(null); setFieldError(null); setNotice2(null);
-    try { await task(); }
+    try { await task(); await selectRelayAfterSignIn(); }
     catch (e) { const outcome = signInOutcome(e); setFieldError(outcome.field ?? null); setNotice2(outcome.notice ?? null); setError(outcome.field ?? outcome.notice?.text ?? message(e)); }
     finally { setBusy(false); }
   };

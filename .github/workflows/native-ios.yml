@@ -96,7 +96,8 @@ jobs:
         run: |
           APP=ios/build/Build/Products/Release-iphonesimulator/PockymoeDev.app
           OUT="$PWD/../ci-out/smoke"; mkdir -p "$OUT"
-          UDID=$(xcrun simctl list devices available -j | python3 -c "import json,sys; ds=[d for k,v in json.load(sys.stdin)['devices'].items() if 'iOS' in k for d in v if d['name'].startswith('iPhone')]; print(ds[-1]['udid'])")
+          # An iPhone with a Dynamic Island (a Pro model) for the Live Activity capture, else any iPhone.
+          UDID=$(xcrun simctl list devices available -j | python3 -c "import json,sys; ds=[d for k,v in json.load(sys.stdin)['devices'].items() if 'iOS' in k for d in v if d['name'].startswith('iPhone')]; pro=[d for d in ds if ' Pro' in d['name']]; print((pro or ds)[-1]['udid'])")
           xcrun simctl boot "$UDID"; xcrun simctl bootstatus "$UDID" -b || true
           # launch <app> <name>: install, launch (retrying while SpringBoard starts), wait 25 s.
           launch() {

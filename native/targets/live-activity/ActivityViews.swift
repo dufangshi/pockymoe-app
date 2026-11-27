@@ -112,6 +112,8 @@ struct ActivityExpanded: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        // The expanded island's lower corners are rounded: keep the first letters clear of them.
+        .padding(.horizontal, 8)
     }
 }
 
