@@ -114,12 +114,21 @@ async function registerApns(deviceToken?: string) {
   const origin = accountStore.get().origin;
   if (!origin) return;
   try {
-    const token = deviceToken ?? String((await Notifications.getDevicePushTokenAsync()).data);
+    // Without a connection to Apple's push service (some simulators) the token never comes: give up
+    // after 30 s; the next launch or token change tries again.
+    const token = deviceToken ?? String((await withTimeout(Notifications.getDevicePushTokenAsync(), 30_000)).data);
     const response = await fetch(relayUrl('relay/account/notifications/native'), { method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify(apnsSubscription(token, origin, String(Constants.expoConfig?.extra?.variant ?? 'development'))) });
     notifyStore.set({ native: response.ok ? 'registered' : response.status === 503 ? 'unavailable' : 'failed' });
     apnsRegistered = response.ok ? `${origin}\u0000${token}` : null;
-  } catch { notifyStore.set({ native: 'failed' }); }
+  } catch { notifyStore.set({ native: 'failed' }); apnsRegistered = null; }
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const id = setTimeout(() => reject(new Error('timeout')), ms);
+    promise.then(value => { clearTimeout(id); resolve(value); }, error => { clearTimeout(id); reject(error); });
+  });
 }
 
 // Registered once per relay and token; again when iOS hands out a new token.
