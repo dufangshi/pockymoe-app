@@ -110,12 +110,14 @@ jobs:
             for mode in light dark; do
               xcrun simctl ui "$UDID" appearance $mode
               xcrun simctl terminate "$UDID" com.pockymoe.app.dev || true
-              maestro --device "$UDID" test -e OUT="$OUT/$kind-$mode-" -e URL=http://localhost:45900 .maestro/screens.yaml --debug-output "$OUT/maestro-$kind-$mode" || status=1
+              maestro --device "$UDID" test --test-output-dir "$OUT/maestro" -e OUT="$kind-$mode-" -e URL=http://localhost:45900 .maestro/screens.yaml || status=1
               xcrun simctl io "$UDID" screenshot "$OUT/$kind-$mode-zz-last.png" || true
             done
             xcrun simctl spawn "$UDID" log show --last 15m --predicate 'process == "PockymoeDev"' > "$OUT/$kind-device.log" 2>&1 || true
             xcrun simctl shutdown "$UDID"
           done
+          # Every screenshot in one folder, named <device>-<mode>-<step>.png.
+          find "$OUT/maestro" -path '*takeScreenshot*' -name '*.png' -exec cp {} "$OUT/" \;
           ls -la "$OUT"
           exit $status
       - uses: actions/upload-artifact@v4

@@ -38,7 +38,12 @@ appId: com.pockymoe.app.dev
     timeout: 20000
 - takeScreenshot: ${OUT}05-picker
 - tapOn: "Close"
-- hideKeyboard
+- hideKeyboard:
+    optional: true
+# Phones go back to the list; tablets show it beside the thread.
+- tapOn:
+    id: "back"
+    optional: true
 - tapOn: "Reply with.*"
 - extendedWaitUntil:
     visible: "Release notes"
