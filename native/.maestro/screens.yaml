@@ -29,7 +29,8 @@ appId: com.pockymoe.app.dev
     visible: "Worked for.*"
     timeout: 30000
 - takeScreenshot: ${OUT}03-thread
-- tapOn: "Message"
+- tapOn:
+    id: "composer-input"
 - takeScreenshot: ${OUT}04-composer
 - tapOn:
     id: "model-key"

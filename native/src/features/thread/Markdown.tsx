@@ -43,13 +43,13 @@ const linkStyle = (t: Theme): TextStyle => {
 function Inline({ tokens, t, base }: { tokens: Token[] | undefined; t: Theme; base?: TextStyle }): React.ReactNode {
   if (!tokens) return null;
   // Terminal's body font is monospace too: any space is a full cell, so no padding there.
-  const pad = t.terminal ? null : <AppText style={{ fontFamily: t.font.regular }}>{'\u2009'}</AppText>;
+  const pad = t.terminal ? null : <AppText style={{ fontFamily: t.font.regular }}>{'\u202f'}</AppText>;
   return tokens.map((token, i) => {
     switch (token.type) {
       case 'strong': return <AppText key={i} style={[base, { fontFamily: t.font.bold }]}><Inline tokens={(token as Tokens.Strong).tokens} t={t} base={{ ...base, fontFamily: t.font.bold }} /></AppText>;
       case 'em': return <AppText key={i} style={[base, { fontStyle: 'italic' }]}><Inline tokens={(token as Tokens.Em).tokens} t={t} base={{ ...base, fontStyle: 'italic' }} /></AppText>;
       case 'del': return <AppText key={i} style={[base, { textDecorationLine: 'line-through' }]}><Inline tokens={(token as Tokens.Del).tokens} t={t} base={base} /></AppText>;
-      // Nested text takes no padding: thin spaces in the body font pad the chip (a monospace
+      // Nested text takes no padding: narrow no-break spaces in the body font pad the chip (no-break, or iOS wraps the pad alone and paints its background to the line end) (a monospace
       // space is a full cell, which pushed the next punctuation away, "x.ts ;").
       case 'codespan': return (
         <AppText key={i} style={{ fontFamily: t.font.mono, fontSize: t.terminal ? 12 : 13.5, backgroundColor: inlineCode(t).bg, color: inlineCode(t).fg }}>

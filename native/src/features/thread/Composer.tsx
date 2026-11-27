@@ -228,7 +228,7 @@ export function Composer({ draftKey, api, threadId, agent, agents, canSwitch, cw
           <TextInput ref={input} value={text} onChangeText={v => update({ text: v })} multiline autoFocus={autoFocus}
             onFocus={() => setExpanded(true)} onBlur={() => { if (!readDraft(draftKey).text.trim() && !draft.attachments.length && !draft.quotes.length) setExpanded(false); }}
             placeholder={placeholder ?? (running ? translate('chat.queueNextPrompt') : translate('chat.typeMessage'))} placeholderTextColor={t.c.fgMuted}
-            accessibilityLabel={translate('native.prompt')} selectionColor={t.c.primary} textAlignVertical="top" scrollEnabled={expanded}
+            accessibilityLabel={translate('native.prompt')} selectionColor={t.c.primary} textAlignVertical="top" scrollEnabled={expanded} testID="composer-input"
             style={{ flex: 1, minHeight: 24, maxHeight: expanded ? 240 : 24, padding: 0, color: t.c.fg, fontFamily: t.terminal ? t.font.mono : t.font.regular, fontSize: t.terminal ? 13 : 16, lineHeight: 24 }} />
           {!expanded && lines > 1 ? <View style={{ paddingHorizontal: 6, paddingVertical: 1, borderRadius: 999, backgroundColor: t.c.hover }}><AppText variant="caption" style={{ fontSize: 11 }}>{`+${lines - 1}`}</AppText></View> : null}
           {!expanded ? <>{stopKey}{sendKey}</> : null}
