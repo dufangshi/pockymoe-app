@@ -146,7 +146,8 @@ export function ThreadList({ deviceKey, selectedThreadId, onOpen, onNewThread, o
   }, [data.threads]);
   const references = referencesStore.useValue(s => s);
   const drafts = draftStore.useValue(s => s);
-  const rowState = useMemo(() => ({ waiting: data.waiting, threads: data.threads, selectedThreadId, references, drafts, query }), [data.waiting, data.threads, selectedThreadId, references, drafts, query]);
+  // Rows read the theme from this closure: a theme change must re-render them too.
+  const rowState = useMemo(() => ({ waiting: data.waiting, threads: data.threads, selectedThreadId, references, drafts, query, t }), [data.waiting, data.threads, selectedThreadId, references, drafts, query, t]);
   const childCount = useMemo(() => {
     const map = new Map<string, number>();
     for (const th of data.threads) if (th.rootThreadId && th.parentThreadId && !th.closedAt) map.set(th.rootThreadId, (map.get(th.rootThreadId) ?? 0) + 1);

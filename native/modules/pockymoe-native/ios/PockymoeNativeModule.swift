@@ -24,5 +24,22 @@ public class PockymoeNativeModule: Module {
     Function("cameraAvailable") { () -> Bool in
       UIImagePickerController.isSourceTypeAvailable(.camera)
     }
+
+    // iPadOS 26+ windowed apps: the window controls (close/minimise/resize) sit in the top-leading
+    // corner over the app, outside the plain safe area. The safe area adapted vertically to that
+    // corner starts below them; the app pads its top by it so headers stay clear (D21).
+    AsyncFunction("windowControlsTop") { () -> Double in
+      guard let view = Self.rootView() else { return 0 }
+      if #available(iOS 26.0, *) {
+        return Double(view.layoutGuide(for: .safeArea(cornerAdaptation: .vertical)).layoutFrame.minY)
+      }
+      return Double(view.safeAreaInsets.top)
+    }.runOnQueue(.main)
+  }
+
+  private static func rootView() -> UIView? {
+    let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+    let windows = scenes.flatMap { $0.windows }
+    return (windows.first { $0.isKeyWindow } ?? windows.first)?.rootViewController?.view
   }
 }

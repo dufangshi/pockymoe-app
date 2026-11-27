@@ -3,6 +3,7 @@ import { View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { KeyCommandsRoot, useKeyCommand } from './platform/keyCommands';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { WindowControlsInsets } from './platform/windowControls';
 import { KeyboardProvider } from 'react-native-keyboard-controller';
 import { NavigationContainer, DefaultTheme, DarkTheme, type NavigationState } from '@react-navigation/native';
 import { StatusBar } from 'expo-status-bar';
@@ -70,11 +71,13 @@ export default function App() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <KeyCommandsRoot>
       <SafeAreaProvider>
+        <WindowControlsInsets>
         <KeyboardProvider>
           <ThemeProvider>
             <Themed />
           </ThemeProvider>
         </KeyboardProvider>
+        </WindowControlsInsets>
       </SafeAreaProvider>
       </KeyCommandsRoot>
     </GestureHandlerRootView>

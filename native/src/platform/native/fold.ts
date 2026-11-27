@@ -11,6 +11,8 @@ interface PockymoeNative {
   rememberThreadNames?(names: Record<string, string>): void;
   /** False on simulators and devices without a camera (iOS aborts on an unavailable camera). */
   cameraAvailable?(): boolean;
+  /** iOS: the top of the safe area below iPadOS window controls (windowed apps), in points. */
+  windowControlsTop?(): Promise<number>;
 }
 export const pockymoeNative = requireOptionalNativeModule<PockymoeNative>('PockymoeNative');
 const native = pockymoeNative;
