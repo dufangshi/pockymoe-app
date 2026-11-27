@@ -153,7 +153,11 @@ export async function setLiveActivityToken(token: string) {
 // Registered once per relay and token; again when iOS hands out a new token.
 let apnsRegistered: string | null = null;
 let apnsTokenListener: { remove(): void } | null = null;
+/** A Personal Team build (free Apple ID) cannot sign the push entitlement (app.config.ts). */
+export const pushInBuild = Platform.OS !== 'ios' || Constants.expoConfig?.extra?.iosSigning !== 'personal';
+
 function syncApns() {
+  if (!pushInBuild) return;
   const account = accountStore.get();
   const ready = account.phase === 'ready' && !!account.origin && notifyStore.get().permission === 'granted';
   if (!ready) { apnsRegistered = null; apnsRegistration = null; if (account.phase !== 'ready') liveActivityToken = null; return; }

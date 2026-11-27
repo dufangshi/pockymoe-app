@@ -200,6 +200,7 @@ export const nativeEn = {
   'native.notificationsDenied': "Notifications are off in system settings",
   'native.apnsUnavailable': "This relay has no Apple push key",
   'native.apnsFailed': "Push from the relay is off here; notices come while the app is open",
+  'native.pushNotInBuild': "This build cannot receive relay push; notices come while the app is open",
   'native.apnsRegistered': "Push from the relay is on",
   'native.moreQueued': {"one":"{{count}} more queued","other":"{{count}} more queued"},
   'native.quote': "Quote",

@@ -6,7 +6,12 @@ name: Native iOS (simulator build and launch)
 # x86sim lab with these .app artifacts; no device signing, no release.
 on:
   push:
-    branches: [feat/native-mobile]
+    branches: [main, feat/native-mobile]
+    paths:
+      - 'native/**'
+      - '.github/workflows/native-ios.yml'
+  pull_request:
+    branches: [main]
     paths:
       - 'native/**'
       - '.github/workflows/native-ios.yml'
@@ -26,13 +31,20 @@ concurrency:
   cancel-in-progress: true
 jobs:
   build:
-    name: ${{ matrix.configuration }} build${{ matrix.configuration == 'Release' && ', launch' || '' }}
+    name: ${{ matrix.signing == 'personal' && 'Personal Team Release (simulator, launch, unsigned device build)' || format('{0} build{1}', matrix.configuration, matrix.configuration == 'Release' && ', launch' || '') }}
     runs-on: macos-26
     timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
-        configuration: [Debug, Release]
+        include:
+          - configuration: Debug
+          - configuration: Release
+          # The free-Apple-ID build (docs/ios-install-personal.md): no push entitlement.
+          - configuration: Release
+            signing: personal
+    env:
+      POCKYMOE_IOS_SIGNING: ${{ matrix.signing || 'standard' }}
     defaults:
       run:
         working-directory: native
@@ -79,6 +91,8 @@ jobs:
           # the host refuse to spawn the app (POSIX 162, run 45977634252). The x86sim lab reads the
           # simulated entitlements too.
           cp scripts/ci/simulator.entitlements ios/PockymoeDev/PockymoeDev.entitlements
+          # A Personal Team cannot sign push: its build has no aps-environment.
+          if [ "$POCKYMOE_IOS_SIGNING" = personal ]; then /usr/libexec/PlistBuddy -c 'Delete :aps-environment' ios/PockymoeDev/PockymoeDev.entitlements; fi
           xcodebuild -workspace ios/PockymoeDev.xcworkspace -scheme PockymoeDev \
             -configuration ${{ matrix.configuration }} -sdk iphonesimulator \
             -destination 'generic/platform=iOS Simulator' -derivedDataPath ios/build \
@@ -125,9 +139,21 @@ jobs:
           sleep 6
           xcrun simctl io "$UDID" screenshot "$OUT/live-activity-island.png" || true
           xcrun simctl spawn "$UDID" log show --last 2m --predicate 'process == "PockymoeDev" OR process == "PockymoeLiveActivity" OR process CONTAINS "liveactivit" OR process == "chronod"' > "$OUT/live-activity.log" 2>&1 || true
+      - name: Unsigned device build (iphoneos Release; proves the app and widget compile for devices)
+        if: matrix.signing == 'personal'
+        run: |
+          xcodebuild -workspace ios/PockymoeDev.xcworkspace -scheme PockymoeDev -configuration Release -sdk iphoneos \
+            -destination 'generic/platform=iOS' -derivedDataPath ios/build-device \
+            CODE_SIGNING_ALLOWED=NO COMPILER_INDEX_STORE_ENABLE=NO build > ../ci-out/xcodebuild-device.log 2>&1 || status=$?
+          grep -E " error:|\*\* BUILD" ../ci-out/xcodebuild-device.log | head -40 || true
+          [ -z "${status:-}" ] || { tail -40 ../ci-out/xcodebuild-device.log; exit "$status"; }
+          APP=ios/build-device/Build/Products/Release-iphoneos/PockymoeDev.app
+          test -f "$APP/Info.plist"
+          test -f "$APP/PlugIns/PockymoeLiveActivity.appex/Info.plist"
+          lipo -info "$APP/PockymoeDev"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: native-ios-${{ matrix.configuration }}
+          name: native-ios-${{ matrix.configuration }}${{ matrix.signing == 'personal' && '-personal' || '' }}
           path: ci-out/
           if-no-files-found: warn

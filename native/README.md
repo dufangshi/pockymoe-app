@@ -96,8 +96,9 @@ new app id starts a new Play listing. iOS push needs the relay's APNs topic for
 
 iOS without a Mac: `.github/workflows/native-ios.yml` (GitHub Actions `macos-26`, newest Xcode;
 Expo SDK 58 needs Xcode 26.4 or later) runs on pushes to `feat/native-mobile` under `native/`
-and on demand. It generates the project (`expo prebuild --platform ios`), builds Debug and
-Release for the iOS Simulator, signed ad hoc by Xcode with the simulator keychain entitlements
+on pull requests to `main` and on demand. It generates the project (`expo prebuild --platform ios`),
+builds Debug and Release for the iOS Simulator, plus the free-Apple-ID variant (simulator, launch,
+and an unsigned device build that proves device compilation), signed ad hoc by Xcode with the simulator keychain entitlements
 (`scripts/ci/simulator.entitlements`, embedded as simulated entitlements; without them the
 Keychain refuses every call), and checks that the Release app launches and stays up. The .app
 files are the run's artifacts; screens are tested on the x86sim lab with them. `.maestro/screens.yaml` walks the main screens
@@ -105,7 +106,16 @@ files are the run's artifacts; screens are tested on the x86sim lab with them. `
 Supervisor seeded by `scripts/ci/seed-local.mjs`.
 
 iOS needs a Mac: `npm run ios:prebuild`, then `pod install` and build `ios/PockymoeDev.xcworkspace`
-(`ios/Pockymoe.xcworkspace` for `APP_VARIANT=production`).
+(`ios/Pockymoe.xcworkspace` for `APP_VARIANT=production`). Without an Apple Developer Program
+membership, install on your own iPhone with a free Apple ID: [docs/ios-install-personal.md](docs/ios-install-personal.md)
+(`scripts/ios-device-install.sh`, `POCKYMOE_IOS_SIGNING=personal`: no push, Live Activity without
+push updates). `POCKYMOE_IOS_BUNDLE_ID` and `POCKYMOE_IOS_TEAM_ID` override the bundle id and team.
+
+Versions follow the WebView client: `app.config.ts` reads `versionName`/`versionCode` from
+`../android/app/build.gradle.kts`, which the client release checks against the release version.
+Android release builds are signed with the client release keystore when its environment is set
+(`plugins/withReleaseSigning.js`: `REMOTE_CODEX_ANDROID_*` as the client release passes them, or the
+`CLIENT_ANDROID_*` secrets); otherwise with React Native's debug key.
 
 ## Lab backend
 

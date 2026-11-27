@@ -27,6 +27,10 @@ final class LiveActivityManager {
          "activities": Activity<PockymoeActivityAttributes>.activities.map { ["id": $0.id, "state": String(describing: $0.activityState)] }]
     }
 
+    /// The app's own URL scheme (Info.plist CFBundleURLTypes), for the widget's links.
+    static let appScheme: String? = ((Bundle.main.object(forInfoDictionaryKey: "CFBundleURLTypes") as? [[String: Any]])?
+        .compactMap { ($0["CFBundleURLSchemes"] as? [String])?.first }.first { $0.hasPrefix("pockymoe") })
+
     func resendToken() { if let lastToken { onToken?(lastToken) } }
 
     func sync(_ snapshot: ActivitySnapshot) async {
@@ -66,6 +70,7 @@ final class LiveActivityManager {
     private func apply(_ snapshot: ActivitySnapshot, generation: UUID) async {
         guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
         ActivityMetadataCache.save(snapshot)
+        ActivityMetadataCache.setScheme(Self.appScheme)
         if activity == nil { activity = Activity.activities.first { $0.attributes.accountId == snapshot.accountId && $0.activityState == .active } }
         if policy.accountId == nil, let activity { policy.restore(accountId: activity.attributes.accountId, state: activity.content.state) }
         let state = policy.sync(snapshot, now: .now)
@@ -81,7 +86,10 @@ final class LiveActivityManager {
         if activity == nil, ActivityPolicy.shouldStart(state, foreground: UIApplication.shared.applicationState == .active) {
             // Push-updated: the relay sends liveactivity pushes to this activity's token.
             do {
-                activity = try Activity.request(attributes: PockymoeActivityAttributes(accountId: snapshot.accountId), content: ActivityContent(state: state, staleDate: nil), pushType: .token)
+                // Push-updated when this build may use APNs; a Personal Team build updates it only
+                // while the app runs (PockymoeNativePush, app.config.ts).
+                let push = Bundle.main.object(forInfoDictionaryKey: "PockymoeNativePush") as? Bool ?? true
+                activity = try Activity.request(attributes: PockymoeActivityAttributes(accountId: snapshot.accountId), content: ActivityContent(state: state, staleDate: nil), pushType: push ? .token : nil)
                 lastError = nil
             } catch { lastError = String(describing: error) }
         }

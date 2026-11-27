@@ -12,10 +12,35 @@ const ids = {
   production: { name: 'Pockymoe', id: 'com.pockymoe.app', scheme: 'pockymoe-app' },
 }[variant];
 
+// Releases carry the same version as the WebView client: read from its Gradle file, which the
+// client release checks against the release version, so v0.4.0 ships native 0.4.0 (versionCode
+// too). Outside the repo (a copied native/ folder) the fallback applies.
+function clientVersion(): { name: string; code: number } {
+  try {
+    const gradle = require('node:fs').readFileSync(require('node:path').join(__dirname, '../android/app/build.gradle.kts'), 'utf8') as string;
+    const name = /versionName = "([^"]+)"/.exec(gradle)?.[1];
+    const code = Number(/versionCode = (\d+)/.exec(gradle)?.[1]);
+    if (name && code) return { name, code };
+  } catch { /* not in the repository */ }
+  return { name: '0.1.0', code: 1 };
+}
+const version = clientVersion();
+
+// iOS signing. `standard` needs a paid Apple Developer Program team (push, production APNs).
+// `personal`: a free Apple ID's Personal Team, which cannot sign Push Notifications (Apple's
+// "Supported capabilities (iOS)" table; App Groups and Keychain sharing are allowed), so the
+// build leaves out aps-environment, the app skips push registration and the Live Activity runs
+// without push updates. A free team may need its own bundle id (POCKYMOE_IOS_BUNDLE_ID) and its
+// team id (POCKYMOE_IOS_TEAM_ID). See docs/ios-install-personal.md.
+const iosSigning = process.env.POCKYMOE_IOS_SIGNING === 'personal' ? 'personal' : 'standard';
+const iosBundleId = process.env.POCKYMOE_IOS_BUNDLE_ID?.trim() || ids.id;
+const iosTeamId = process.env.POCKYMOE_IOS_TEAM_ID?.trim() || undefined;
+const iosPush = iosSigning !== 'personal';
+
 const config: ExpoConfig = {
   name: ids.name,
   slug: 'pockymoe-native',
-  version: '0.1.0',
+  version: version.name,
   scheme: ids.scheme,
   orientation: 'default',
   icon: './assets/icon.png',
@@ -23,7 +48,9 @@ const config: ExpoConfig = {
   // Classic's page colour (the default preset), so launch does not flash a second colour.
   backgroundColor: '#e0e4e0',
   ios: {
-    bundleIdentifier: ids.id,
+    bundleIdentifier: iosBundleId,
+    ...(iosTeamId ? { appleTeamId: iosTeamId } : {}),
+    buildNumber: String(version.code),
     supportsTablet: true,
     requireFullScreen: false,
     infoPlist: {
@@ -36,6 +63,8 @@ const config: ExpoConfig = {
       UIViewControllerBasedStatusBarAppearance: false,
       // The account Live Activity (targets/live-activity), kept current by the relay over APNs.
       NSSupportsLiveActivities: true,
+      // Whether this build may ask APNs for tokens (LiveActivityManager, notifications.ts).
+      PockymoeNativePush: iosPush,
       // Direct Supervisors: LAN names and IP addresses are local networking; Tailscale
       // MagicDNS names (*.ts.net) are the other plain-HTTP case a self-hosted Supervisor has.
       NSAppTransportSecurity: {
@@ -46,11 +75,12 @@ const config: ExpoConfig = {
     },
     // Shared with the Live Activity widget for thread titles (ActivityMetadataCache). Device builds
     // need this app group registered for the app id in the owner's Apple account.
-    entitlements: { 'com.apple.security.application-groups': [`group.${ids.id}`] },
+    entitlements: { 'com.apple.security.application-groups': [`group.${iosBundleId}`] },
   },
   locales: { 'zh-Hans': './locales/zh-Hans.json' },
   android: {
     package: ids.id,
+    versionCode: version.code,
     // The basket logo the Web and desktop use (owner decision 2026-11-26); the purple is the
     // logo's own edge colour, so the adaptive mask never shows a seam.
     adaptiveIcon: {
@@ -65,7 +95,8 @@ const config: ExpoConfig = {
   },
   plugins: [
     ['expo-build-properties', {
-      android: { usesCleartextTraffic: true, minSdkVersion: 26 },
+      // No 32-bit x86: no phone uses it; arm64 and armeabi-v7a phones, x86_64 emulators and Chromebooks.
+      android: { usesCleartextTraffic: true, minSdkVersion: 26, buildArchs: ['arm64-v8a', 'armeabi-v7a', 'x86_64'] },
       ios: { deploymentTarget: '17.0' },
     }],
     ['expo-splash-screen', { image: './assets/splash-icon.png', imageWidth: 160, backgroundColor: '#e0e4e0',
@@ -78,16 +109,18 @@ const config: ExpoConfig = {
     'expo-image',
     'expo-sharing',
     ['expo-image-picker', { cameraPermission: 'Take a photo to attach to a prompt.', microphonePermission: false }],
-    // Status-bar icon: the >_ badge of the basket logo as a white disc (the full logo is a blob
-    // at 24 dp); tinted with Classic's primary fill.
-    // aps-environment: Apple's sandbox for development builds, production for preview and release.
     // The Live Activity widget extension (targets/live-activity).
     '@bacons/apple-targets',
-    ['expo-notifications', { icon: './assets/notification-icon.png', color: '#008650', mode: variant === 'development' ? 'development' : 'production' }],
+    // Status-bar icon: the >_ badge of the basket logo as a white disc (the full logo is a blob
+    // at 24 dp); tinted with Classic's primary fill. aps-environment: Apple's sandbox for
+    // development builds, production for preview and release, none for a Personal Team.
+    ['expo-notifications', { icon: './assets/notification-icon.png', color: '#008650', mode: variant === 'development' ? 'development' : 'production', enableRemoteNotifications: iosPush }],
+    // Release APKs signed with the client release keystore (plugins/withReleaseSigning.js).
+    './plugins/withReleaseSigning',
     'react-native-quick-crypto',
   ],
   experiments: { reactCompiler: true },
-  extra: { variant },
+  extra: { variant, iosSigning },
 };
 
 export default config;

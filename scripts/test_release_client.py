@@ -77,19 +77,25 @@ class ArtifactGateTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'must agree'):
             release.versions('1.2.3')
 
-    def test_exact_three_named_regular_files_only(self):
+    def test_exact_four_named_regular_files_only(self):
         output = self.root / 'output'
         output.mkdir()
-        names = release.asset_names('1.2.3')
-        self.assertEqual(names, ['Pockymoe-1.2.3-android.apk', 'Pockymoe-1.2.3-mac-arm64.dmg', 'Pockymoe-1.2.3-win-x64.exe'])
+        self.assertEqual(release.asset_names('1.2.3'), ['Pockymoe-1.2.3-android.apk', 'Pockymoe-1.2.3-mac-arm64.dmg', 'Pockymoe-1.2.3-win-x64.exe'])
+        names = release.release_assets('1.2.3')
+        self.assertEqual(names, [*release.asset_names('1.2.3'), 'Pockymoe-Native-1.2.3-android.apk'])
         for name in names:
             (output / name).write_bytes(b'fixture')
         release.exact_output(output, '1.2.3')
         for extra in ['latest.yml', 'Pockymoe-1.2.3-win-x64.exe.blockmap', '.hidden']:
             (output / extra).touch()
-            with self.assertRaisesRegex(RuntimeError, 'exactly the three'):
+            with self.assertRaisesRegex(RuntimeError, 'exactly the four'):
                 release.exact_output(output, '1.2.3')
             (output / extra).unlink()
+        native = output / names[3]
+        native.unlink()
+        with self.assertRaisesRegex(RuntimeError, 'exactly the four'):
+            release.exact_output(output, '1.2.3')
+        native.write_bytes(b'fixture')
         target = output / names[0]
         target.unlink()
         with self.assertRaises(RuntimeError):
@@ -128,6 +134,30 @@ class ArtifactGateTests(unittest.TestCase):
                         release.previous_apk(work, code, validation=True)
                 else:
                     self.assertEqual(release.previous_apk(work, code, validation=True).name, 'Pockymoe-1.2.2-android.apk')
+
+    def test_previous_apks_are_picked_by_name_when_a_release_has_both(self):
+        def run(*args, **_kwargs):
+            if args[:3] == ('gh', 'release', 'view'):
+                return json.dumps({'tagName': 'v1.2.2', 'assets': [{'name': 'Pockymoe-1.2.2-android.apk'}, {'name': 'Pockymoe-Native-1.2.2-android.apk'},
+                                                                   {'name': 'Pockymoe-1.2.2-mac-arm64.dmg'}]}).encode()
+            if args[1:3] == ('dump', 'badging'):
+                return b"package: name='fixture' versionCode='7' versionName='1.2.2'"
+            return b''
+        with patch.object(release, 'run', side_effect=run), patch.object(release, 'sdk_tool', return_value='/fixture/aapt'), contextlib.redirect_stdout(io.StringIO()):
+            work = self.root / 'both'
+            work.mkdir()
+            self.assertEqual(release.previous_apk(work, 8).name, 'Pockymoe-1.2.2-android.apk')
+            self.assertEqual(release.previous_apk(work, 8, native=True).name, 'Pockymoe-Native-1.2.2-android.apk')
+
+    def test_release_without_a_native_apk_has_no_previous_native(self):
+        def run(*args, **_kwargs):
+            if args[:3] == ('gh', 'release', 'view'):
+                return json.dumps({'tagName': 'v1.2.2', 'assets': [{'name': 'Pockymoe-1.2.2-android.apk'}]}).encode()
+            return b''
+        work = self.root / 'none'
+        work.mkdir()
+        with patch.object(release, 'run', side_effect=run), contextlib.redirect_stdout(io.StringIO()):
+            self.assertIsNone(release.previous_apk(work, 8, native=True))
 
     def test_public_build_strips_fixture_feed_and_signing_environment(self):
         class StopAfterBuildEnvironment(Exception):
@@ -282,7 +312,7 @@ class CommandTests(unittest.TestCase):
 
             def build(version, _code, folder, _work, validation=False):
                 self.assertEqual(validation, '--validate' in arguments)
-                for name in release.asset_names(version):
+                for name in release.release_assets(version):
                     (folder / name).write_bytes(b'fixture')
 
             def run(*args, **kwargs):
@@ -305,7 +335,7 @@ class CommandTests(unittest.TestCase):
             prepared = (root / ('1.2.3-release-notes.md' if '--publish' in arguments else 'output-validation-notes.md')).read_text()
             return prepared, calls, gate.call_args_list, scan.call_args_list
 
-    def test_validation_prepares_throwaway_signed_comment_outside_three_file_folder(self):
+    def test_validation_prepares_throwaway_signed_comment_outside_the_release_folder(self):
         prepared, calls, gates, scans = self.invoke(['--validate'])
         self.assertEqual(prepared.count('<!-- pockymoe-updates-v1'), 1)
         self.assertIn('Reviewed notes', prepared)
@@ -322,7 +352,7 @@ class CommandTests(unittest.TestCase):
         self.assertEqual([call[2] for call in calls], ['sign-validation', 'verify'])
         self.assertTrue(all(call.args == (False,) for call in gates))
 
-    def test_publish_explicitly_targets_full_sha_latest_notes_and_exact_three_assets(self):
+    def test_publish_explicitly_targets_full_sha_latest_notes_and_exact_four_assets(self):
         _, calls, gates, _ = self.invoke(['--publish'])
         publish = [call for call in calls if call[:3] == ('gh', 'release', 'create')]
         self.assertEqual(len(publish), 1)
@@ -330,7 +360,7 @@ class CommandTests(unittest.TestCase):
         self.assertEqual(command[command.index('--target') + 1], SHA)
         self.assertIn('--latest', command)
         self.assertEqual(Path(command[command.index('--notes-file') + 1]).name, '1.2.3-release-notes.md')
-        self.assertEqual([Path(arg).name for arg in command[-3:]], release.asset_names('1.2.3'))
+        self.assertEqual([Path(arg).name for arg in command[-4:]], release.release_assets('1.2.3'))
         self.assertTrue(all(call.args == (False,) for call in gates))
         sign = [call for call in calls if call[:3] == ('node', release.ROOT / 'scripts/update-signatures.cjs', 'sign')]
         self.assertEqual(len(sign), 1)

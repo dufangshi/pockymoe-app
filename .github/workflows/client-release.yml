@@ -1,7 +1,8 @@
 name: Client release
 run-name: Client ${{ inputs.channel }} v${{ inputs.version }}
 
-# Builds the three public files in parallel, verifies them with the same steps
+# Builds the four public files in parallel (WebView APK, macOS DMG, Windows installer and the
+# native Android APK from native/), verifies them with the same steps
 # as scripts/release_client.py, then (publish only) creates release vX.Y.Z.
 #   dry-run         any ref, throwaway keys, never reads secrets, never publishes
 #   signed-dry-run  main only, release keys from the client-release environment, no release
@@ -116,6 +117,45 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  android-native:
+    name: Native Android APK
+    needs: prepare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    # Signed with the WebView APK's key (same environment and secrets; a different package).
+    environment: ${{ contains(fromJSON('["signed-dry-run","publish"]'), inputs.channel) && 'client-release' || '' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: native/package-lock.json
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: ${{ github.ref != 'refs/heads/main' }}
+      - name: Build, sign and verify the native APK
+        timeout-minutes: 65
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CLIENT_ANDROID_KEYSTORE_BASE64: ${{ contains(fromJSON('["signed-dry-run","publish"]'), inputs.channel) && secrets.CLIENT_ANDROID_KEYSTORE_BASE64 || '' }}
+          CLIENT_ANDROID_STORE_PASSWORD: ${{ contains(fromJSON('["signed-dry-run","publish"]'), inputs.channel) && secrets.CLIENT_ANDROID_STORE_PASSWORD || '' }}
+          CLIENT_ANDROID_KEY_ALIAS: ${{ contains(fromJSON('["signed-dry-run","publish"]'), inputs.channel) && secrets.CLIENT_ANDROID_KEY_ALIAS || '' }}
+          CLIENT_ANDROID_KEY_PASSWORD: ${{ contains(fromJSON('["signed-dry-run","publish"]'), inputs.channel) && secrets.CLIENT_ANDROID_KEY_PASSWORD || '' }}
+        run: python3 scripts/client_release_ci.py android-native --work "$RUNNER_TEMP/work" --out "$RUNNER_TEMP/out"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: client-android-native
+          path: ${{ runner.temp }}/out/
+          if-no-files-found: error
+          retention-days: 7
+
   mac:
     name: macOS arm64 DMG
     needs: prepare
@@ -210,8 +250,8 @@ jobs:
           compression-level: 0
 
   assemble:
-    name: Assemble and verify three files
-    needs: [prepare, android, mac, windows]
+    name: Assemble and verify four files
+    needs: [prepare, android, android-native, mac, windows]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:

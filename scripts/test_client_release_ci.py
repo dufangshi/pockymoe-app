@@ -42,7 +42,7 @@ class ChannelTests(unittest.TestCase):
             ci.channel_gate('release')
 
     def test_dry_run_drops_every_secret_without_using_it(self):
-        for platform in ('android', 'mac', 'publish', 'windows'):
+        for platform in ('android', 'android-native', 'mac', 'publish', 'windows'):
             with self.subTest(platform=platform), patch.dict(os.environ, ALL_KEYS):
                 self.assertEqual(ci.take_secrets(platform, 'dry-run'), {})
                 self.assertFalse(any(name in os.environ for name in ALL_KEYS))
@@ -65,8 +65,8 @@ class ChannelTests(unittest.TestCase):
             self.assertFalse(any(name in os.environ for name in ALL_KEYS))
 
     def test_signing_kinds_follow_channel(self):
-        self.assertEqual(ci.expected_signing('dry-run'), {'android': 'throwaway', 'mac': 'throwaway', 'windows': 'none'})
-        self.assertEqual(ci.expected_signing('publish'), {'android': 'release', 'mac': 'release', 'windows': 'none'})
+        self.assertEqual(ci.expected_signing('dry-run'), {'android': 'throwaway', 'mac': 'throwaway', 'windows': 'none', 'android-native': 'throwaway'})
+        self.assertEqual(ci.expected_signing('publish'), {'android': 'release', 'mac': 'release', 'windows': 'none', 'android-native': 'release'})
 
 
 class NotesTests(unittest.TestCase):
@@ -132,7 +132,7 @@ class BundleTests(unittest.TestCase):
 
     def job_outputs(self, signing='throwaway', commit=SHA, tamper=None):
         inputs = self.root / 'inputs'
-        for platform, name in zip(ci.PLATFORMS, release.asset_names('1.2.3')):
+        for platform, name in zip(ci.PLATFORMS, release.release_assets('1.2.3')):
             out = inputs / f'client-{platform}'
             out.mkdir(parents=True)
             (out / name).write_bytes(f'{platform}-bytes'.encode())
@@ -149,9 +149,9 @@ class BundleTests(unittest.TestCase):
         with patch.dict(os.environ, {'GITHUB_SHA': SHA}):
             return ci.collect(channel, '1.2.3', inputs, folder), folder
 
-    def test_collects_exactly_three_verified_files(self):
+    def test_collects_exactly_four_verified_files(self):
         manifests, folder = self.collect('dry-run', self.job_outputs())
-        self.assertEqual(sorted(p.name for p in folder.iterdir()), sorted(release.asset_names('1.2.3')))
+        self.assertEqual(sorted(p.name for p in folder.iterdir()), sorted(release.release_assets('1.2.3')))
         self.assertEqual(set(manifests), set(ci.PLATFORMS))
 
     def test_rejects_changed_bytes_other_commits_and_throwaway_signing_for_release(self):
@@ -201,7 +201,7 @@ class BundleTests(unittest.TestCase):
         self.assertEqual(calls, [])
         aggregate.assert_not_called()
 
-    def test_publish_creates_latest_release_at_the_commit_with_three_assets(self):
+    def test_publish_creates_latest_release_at_the_commit_with_four_assets(self):
         calls, aggregate = self.publish('publish')
         aggregate.assert_called_once_with(release.REPO, SHA, None)
         self.assertEqual(len(calls), 1)
@@ -209,7 +209,7 @@ class BundleTests(unittest.TestCase):
         self.assertEqual(command[:4], ('gh', 'release', 'create', 'v1.2.3'))
         self.assertEqual(command[command.index('--target') + 1], SHA)
         self.assertIn('--latest', command)
-        self.assertEqual([Path(arg).name for arg in command[-3:]], release.asset_names('1.2.3'))
+        self.assertEqual([Path(arg).name for arg in command[-4:]], release.release_assets('1.2.3'))
 
     def test_dry_run_or_branch_can_never_publish(self):
         with self.assertRaisesRegex(RuntimeError, 'Only signed-dry-run and publish'):

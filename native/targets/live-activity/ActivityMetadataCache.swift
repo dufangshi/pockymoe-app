@@ -59,8 +59,13 @@ enum ActivityMetadataCache {
         let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_."))
         return "thread/\(device.addingPercentEncoding(withAllowedCharacters: allowed) ?? "")/\(thread.addingPercentEncoding(withAllowedCharacters: allowed) ?? "")"
     }
-    /// The app's URL scheme for this build (app.config.ts: pockymoe-app, -preview, -dev).
+    static func setScheme(_ scheme: String?, in defaults: UserDefaults? = sharedDefaults) {
+        if let scheme { defaults?.set(scheme, forKey: "activityScheme") }
+    }
+    /// The app's URL scheme: as the app recorded it, else from its bundle id (app.config.ts:
+    /// pockymoe-app, -preview, -dev; a Personal Team build may use its own bundle id).
     static var scheme: String {
+        if let recorded = sharedDefaults?.string(forKey: "activityScheme") { return recorded }
         let id = appIdentifier
         return id.hasSuffix(".dev") ? "pockymoe-app-dev" : id.hasSuffix(".preview") ? "pockymoe-app-preview" : "pockymoe-app"
     }

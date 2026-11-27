@@ -20,7 +20,7 @@ import { DeviceRow, deviceMenu } from '../devices/DeviceSwitcher';
 import { DeviceDetail } from '../devices/DeviceDetail';
 import { Segmented } from '../thread/ModelPicker';
 import { runSelfTest } from './selfTest';
-import { enableNotifications, notifyStore } from '../notifications/notifications';
+import { enableNotifications, notifyStore, pushInBuild } from '../notifications/notifications';
 import { NotificationScopeRows } from '../notifications/NotificationScope';
 import SOURCE from '../../../vendor/pockymoe/SOURCE.json';
 
@@ -152,7 +152,7 @@ export function SettingsView({ onBack, onAddSupervisor, onSwitchRelay, onSignIn 
                 </SettingBlock>
               ) : null}
               <SettingBlock first={account.phase !== 'ready'} title={translate('native.systemNotifications')}
-                description={notify.permission === 'denied' ? translate('native.notificationsDenied') : notify.native === 'unavailable' ? translate('native.apnsUnavailable') : notify.native === 'registered' ? translate('native.apnsRegistered') : notify.native === 'failed' ? translate('native.apnsFailed') : translate('native.systemNotificationsBody')}
+                description={notify.permission === 'denied' ? translate('native.notificationsDenied') : notify.native === 'unavailable' ? translate('native.apnsUnavailable') : notify.native === 'registered' ? translate('native.apnsRegistered') : !pushInBuild ? translate('native.pushNotInBuild') : notify.native === 'failed' ? translate('native.apnsFailed') : translate('native.systemNotificationsBody')}
                 inline={<Checkbox value={notify.permission === 'granted'} onValueChange={v => { if (v) void enableNotifications(); }} label={translate('native.systemNotifications')} />} />
             </>
           ) : (
