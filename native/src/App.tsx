@@ -63,7 +63,15 @@ export default function App() {
     const stopEvents = onAnyDeviceEvent(notifyFromEvent);
     const stopActivity = startLiveActivity();
     // Devices and starred threads follow the account.
-    const unsubscribe = accountStore.subscribe(() => { if (accountStore.get().phase === 'ready') { void refreshRelayDevices(); void refreshReferences(); void loadNotificationScope(); } syncBackgroundWatch(); });
+    // Signed out: the relay's devices leave the list too (refreshRelayDevices empties it).
+    let relayPhase = accountStore.get().phase;
+    const unsubscribe = accountStore.subscribe(() => {
+      const phase = accountStore.get().phase;
+      if (phase === 'ready') { void refreshRelayDevices(); void refreshReferences(); void loadNotificationScope(); }
+      else if (relayPhase === 'ready' || phase === 'signedOut' || phase === 'none') void refreshRelayDevices();
+      relayPhase = phase;
+      syncBackgroundWatch();
+    });
     const timer = setInterval(() => { if (accountStore.get().phase === 'ready') void refreshRelayDevices(); void probeAllDirect(); }, 30_000);
     return () => { unsubscribe(); clearInterval(timer); stop(); stopLinks(); stopRouting(); stopEvents(); stopActivity(); };
   }, []);

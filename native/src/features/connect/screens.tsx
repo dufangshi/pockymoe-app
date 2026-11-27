@@ -100,7 +100,16 @@ const message = (e: unknown) => String((e as Error)?.message ?? e);
 /** After a relay sign-in, open one of its devices unless a relay device is already open (a phone
  *  that only had direct Supervisors stayed on them; D8 did this for Add a Supervisor). */
 async function selectRelayAfterSignIn() {
-  if (accountStore.get().phase !== 'ready' || selectionStore.get().deviceKey?.startsWith('relay:')) return;
+  // The account turns ready after sign-in resolves (its keys unlock next): wait up to 30 s.
+  const ready = await new Promise<boolean>(resolve => {
+    if (accountStore.get().phase === 'ready') { resolve(true); return; }
+    const timer = setTimeout(() => { unsubscribe(); resolve(false); }, 30_000);
+    const unsubscribe = accountStore.subscribe(() => {
+      if (accountStore.get().phase !== 'ready') return;
+      clearTimeout(timer); unsubscribe(); resolve(true);
+    });
+  });
+  if (!ready || selectionStore.get().deviceKey?.startsWith('relay:')) return;
   await refreshRelayDevices();
   const relay = devicesStore.get().relay;
   const first = relay.find(d => !d.shared && d.online) ?? relay.find(d => !d.shared) ?? relay[0];
@@ -180,7 +189,7 @@ export function SignIn({ onBack, onRegister }: { onBack: () => void; onRegister:
   const [notice2, setNotice2] = useState<{ tone: 'info' | 'warning' | 'danger'; text: string } | null>(null);
   const run = async (task: () => Promise<unknown>) => {
     setBusy(true); setError(null); setFieldError(null); setNotice2(null);
-    try { await task(); await selectRelayAfterSignIn(); }
+    try { await task(); void selectRelayAfterSignIn(); }
     catch (e) { const outcome = signInOutcome(e); setFieldError(outcome.field ?? null); setNotice2(outcome.notice ?? null); setError(outcome.field ?? outcome.notice?.text ?? message(e)); }
     finally { setBusy(false); }
   };

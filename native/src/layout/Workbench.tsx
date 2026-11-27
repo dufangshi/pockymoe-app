@@ -96,7 +96,7 @@ export function Workbench() {
   );
   const picker = (
     <Sheet visible={picking} onClose={() => setPicking(false)} title={translate('auth.devices')}>
-      <DeviceList selectedKey={deviceKey} onSelect={key => { haptic.selection(); selectDevice(key); setPicking(false); }} onAdd={() => { setPicking(false); nav.push('DirectConnect'); }} onAddRelay={accountStore.get().origin ? undefined : () => { setPicking(false); nav.push('RelayAddress'); }}
+      <DeviceList selectedKey={deviceKey} onSelect={key => { haptic.selection(); selectDevice(key); setPicking(false); }} onAdd={() => { setPicking(false); nav.push('DirectConnect'); }} onAddRelay={accountStore.get().phase === 'ready' ? undefined : () => { setPicking(false); nav.push(accountStore.get().origin ? 'SignIn' : 'RelayAddress'); }}
         onNewThread={key => { setPicking(false); if (key !== deviceKey) selectDevice(key); if (layout.split) selectionStore.set({ newThread: {}, threadId: null }); else nav.push('NewThread', { deviceKey: key }); }} />
     </Sheet>
   );
