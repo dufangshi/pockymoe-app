@@ -1,0 +1,93 @@
+# Main screens of the native client for the iOS CI screenshots. The app talks to a local
+# fake-runtime Supervisor (see .github/workflows/native-ios.yml). Run with -e OUT=<dir prefix>.
+# The connect steps run only on a fresh install; a second run (dark mode) starts signed in.
+# -e URL=<Supervisor address> (the workflow passes http://localhost:45900).
+appId: com.pockymoe.app.dev
+---
+- launchApp
+- extendedWaitUntil:
+    visible: "This network.*"
+    timeout: 90000
+    optional: true
+- runFlow:
+    when:
+      visible: "This network.*"
+    commands:
+      - takeScreenshot: ${OUT}01-connect
+      - tapOn: "This network.*"
+      - tapOn:
+          id: "direct-url"
+      - inputText: ${URL}
+      - tapOn:
+          id: "direct-connect"
+- extendedWaitUntil:
+    visible: "notes.*"
+    timeout: 60000
+- takeScreenshot: ${OUT}02-threads
+- waitForAnimationToEnd
+- tapOn:
+    text: "Split prompt.*"
+    retryTapIfNoChange: true
+- extendedWaitUntil:
+    visible: "Worked for.*"
+    timeout: 30000
+- takeScreenshot: ${OUT}03-thread
+- tapOn:
+    id: "composer-input"
+# The composer opens and the keyboard rises: wait until both have settled before tapping on.
+- extendedWaitUntil:
+    visible:
+      id: "model-key"
+    timeout: 15000
+- waitForAnimationToEnd
+- takeScreenshot: ${OUT}04-composer
+- tapOn:
+    id: "model-key"
+    retryTapIfNoChange: true
+- extendedWaitUntil:
+    visible: "Search models"
+    timeout: 20000
+- takeScreenshot: ${OUT}05-picker
+# Phones close the sheet; the tablet popover has no Close and closes on a tap outside it.
+- tapOn:
+    text: "Close"
+    optional: true
+- runFlow:
+    when:
+      visible: "Search models"
+    commands:
+      - tapOn:
+          point: "50%,8%"
+- hideKeyboard:
+    optional: true
+# Phones go back to the list; tablets show it beside the thread.
+- tapOn:
+    id: "back"
+    optional: true
+- waitForAnimationToEnd
+- tapOn:
+    text: "Reply with.*"
+    retryTapIfNoChange: true
+- extendedWaitUntil:
+    visible: "Release notes"
+    timeout: 20000
+    optional: true
+- takeScreenshot: ${OUT}06-answer
+- tapOn:
+    id: "back"
+    optional: true
+- tapOn:
+    id: "new-thread"
+    optional: true
+- extendedWaitUntil:
+    visible: "New Thread"
+    timeout: 20000
+    optional: true
+- takeScreenshot: ${OUT}07-newthread
+- tapOn:
+    text: "Cancel"
+    optional: true
+- tapOn:
+    text: "Settings"
+    optional: true
+- takeScreenshot: ${OUT}08-settings

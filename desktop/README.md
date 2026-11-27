@@ -215,11 +215,16 @@ window is 560 px wide and fits its contents. Pet-specific checks belong to the p
 
 ## Packaging, signing and packaged-app QA
 
-Public releases contain exactly three files:
+Public releases contain exactly four files:
 
-- `Pockymoe-<version>-android.apk` (signed with the existing local Android key)
+- `Pockymoe-<version>-android.apk` (the WebView app `com.remotecodex.app`, signed with the existing local Android key)
 - `Pockymoe-<version>-mac-arm64.dmg` (Apple silicon only, dedicated non-personal Pockymoe signature)
 - `Pockymoe-<version>-win-x64.exe` (x64 NSIS only)
+- `Pockymoe-Native-<version>-android.apk` (the native app `com.pockymoe.app` from `native/`, beta;
+  same key and same version as the WebView APK, installs beside it)
+
+The native iOS app has no release file (no Apple developer account yet; see
+`native/docs/ios-install-personal.md`).
 
 No ZIP, combined installer, update manifests or blockmaps are published. Builder
 targets and scripts pin these architectures; the packaging regression rejects
@@ -240,15 +245,15 @@ gh workflow run client-release.yml -R dufangshi/pockymoe-app --ref main \
 
 | Channel | Ref | Keys | Result |
 |---|---|---|---|
-| `dry-run` | any | throwaway, created in the run; no secrets are read | three verified files and validation notes as a run artifact |
+| `dry-run` | any | throwaway, created in the run; no secrets are read | four verified files and validation notes as a run artifact |
 | `signed-dry-run` | main | release keys from the `client-release` environment | also release-signed notes; nothing is published |
 | `publish` | main tip | release keys | release `vX.Y.Z` at the commit, marked latest |
 
 Jobs: **prepare** (versions agree, channel/ref gate, dispatched commit is the
 main tip for the release-key channels; for publish also notes, an unused tag and
 `Client checks complete` on the commit), then in parallel
-**Android** (ubuntu), **macOS arm64** (`macos-15`) and **Windows x64**
-(`windows-latest`), then **assemble** and, for the release-key channels,
+**Android** (ubuntu), **Native Android** (ubuntu), **macOS arm64** (`macos-15`) and
+**Windows x64** (`windows-latest`), then **assemble** and, for the release-key channels,
 **publish**. Every build, signing and verification step is shared with the local
 command below (`scripts/release_client.py`; the job wrappers are in
 `scripts/client_release_ci.py`):
@@ -257,6 +262,12 @@ command below (`scripts/release_client.py`; the job wrappers are in
   from the APK, versionCode above the latest release (equal is allowed only off
   `publish`), signing certificate equal to the latest release APK's (release
   keys only), expanded-APK scan.
+- Native Android: `scripts/assemble-signed-native-apk.sh` (Expo prebuild and Gradle
+  `assembleRelease` in `native/`, signed through `native/plugins/withReleaseSigning.js` with the
+  same key the WebView build uses, from `scripts/android-release-signing.sh`); package
+  `com.pockymoe.app`, versionCode and versionName (taken from `android/app/build.gradle.kts`)
+  read back from the APK, versionCode and certificate checked against the latest release's
+  native APK when there is one, expanded-APK scan.
 - macOS: Pockymoe identity in a run-scoped keychain (release `.p12`, or a
   throwaway certificate for `dry-run`), explicit signing and pinned-leaf check,
   DMG, packaged voice addon load, 5-second launch and 15-second quit, read-only
@@ -264,14 +275,14 @@ command below (`scripts/release_client.py`; the job wrappers are in
 - Windows: NSIS package, PE checks in the unpacked app and in the payload
   extracted from the final installer, release fuses, launch of that payload
   (native window, RunAsNode helper, inspector port stays closed), scan.
-- assemble: exactly three files, each byte-identical to what its build job
+- assemble: exactly four files, each byte-identical to what its build job
   verified (SHA-256 manifests) and signed with the kind the channel requires;
-  APK certificate rechecked; update metadata signed with a throwaway key and
+  both APK certificates rechecked, and equal to each other with the release key; update metadata signed with a throwaway key and
   verified.
 - publish: rechecks the files, main containment, the tag and the aggregate;
   signs the metadata with the release Ed25519 key after the source gate,
   verifies it against the committed `desktop/build/update-public-key.pem`, then
-  runs `gh release create vX.Y.Z --target <SHA> --latest` with the three files.
+  runs `gh release create vX.Y.Z --target <SHA> --latest` with the four files.
   This step is never retried.
 
 `allow_unchecked_ci` is the emergency equivalent of `--allow-unchecked-ci`; it
@@ -359,7 +370,7 @@ before publication. The separate quarantine job may fail without blocking this
 aggregate. Missing, pending, failed or unqueryable aggregate results fail closed
 with a clear message. Emergency `--allow-unchecked-ci REASON` bypasses only this
 CI check; the log records the flag, final SHA and reason SHA256 without printing
-arbitrary incident text. All signing, scanning, certificate, three-file and Mac
+arbitrary incident text. All signing, scanning, certificate, four-file and Mac
 launch gates remain mandatory. Each subprocess has a ten-minute timeout and logs
 only the executable name and elapsed seconds, never arguments or credentials.
 

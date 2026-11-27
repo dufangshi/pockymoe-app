@@ -1,0 +1,159 @@
+name: Native iOS (simulator build and launch)
+# The Expo/React Native client in native/: generate the iOS project (CNG), build it for the
+# iOS Simulator (Debug and Release, signed ad hoc with simulator keychain entitlements; the app
+# and its Live Activity widget extension), run the Live Activity policy and relay fixture tests,
+# and check that the Release app launches and stays up. Screen-by-screen iOS testing happens on the
+# x86sim lab with these .app artifacts; no device signing, no release.
+on:
+  push:
+    branches: [main, feat/native-mobile]
+    paths:
+      - 'native/**'
+      - '.github/workflows/native-ios.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'native/**'
+      - '.github/workflows/native-ios.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+env:
+  HOMEBREW_NO_AUTO_UPDATE: '1'
+  EXPO_NO_TELEMETRY: '1'
+  EXPO_NO_GIT_STATUS: '1'
+  CI: '1'
+  # Expo SDK 58's Swift (expo-modules-jsi: nonisolated(unsafe) locals, Swift runtime export
+  # notes for Xcode 26.4/27) needs Xcode 26.4 or later; empty picks the newest stable one.
+  XCODE_VERSION: ''
+concurrency:
+  group: native-ios-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  build:
+    name: ${{ matrix.signing == 'personal' && 'Personal Team Release (simulator, launch, unsigned device build)' || format('{0} build{1}', matrix.configuration, matrix.configuration == 'Release' && ', launch' || '') }}
+    runs-on: macos-26
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - configuration: Debug
+          - configuration: Release
+          # The free-Apple-ID build (docs/ios-install-personal.md): no push entitlement.
+          - configuration: Release
+            signing: personal
+    env:
+      POCKYMOE_IOS_SIGNING: ${{ matrix.signing || 'standard' }}
+    defaults:
+      run:
+        working-directory: native
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: native/package-lock.json
+      - name: Select Xcode
+        run: |
+          ls -d /Applications/Xcode*.app
+          XCODE=/Applications/Xcode_${XCODE_VERSION:-none}.app
+          test -d "$XCODE" || XCODE=$(ls -d /Applications/Xcode_*.app | grep -v -i beta | sort -V | tail -1)
+          echo "Using $XCODE"
+          sudo xcode-select -s "$XCODE"
+          xcodebuild -version
+          xcrun simctl list runtimes
+      - name: Install dependencies
+        run: npm ci
+      - name: Typecheck and unit tests
+        run: |
+          npx tsc --noEmit
+          npx vitest run
+      - name: Live Activity policy and relay fixture tests (the iOS shell's, Swift)
+        if: matrix.configuration == 'Debug'
+        run: |
+          mkdir -p ../ci-out
+          xcrun swiftc -parse-as-library targets/live-activity/ActivityPolicy.swift scripts/ci/live-activity-tests/LiveActivityTests.swift -o ../ci-out/live-activity-tests
+          ../ci-out/live-activity-tests scripts/ci/live-activity-tests/fixtures
+      - name: Generate the iOS project (development variant, com.pockymoe.app.dev)
+        run: npx expo prebuild --platform ios --no-install
+      - name: Install pods
+        working-directory: native/ios
+        run: pod install
+      - name: Build for the iOS Simulator
+        run: |
+          mkdir -p ../ci-out
+          # D1: without entitlements the simulator Keychain refuses the app (-34018). Sign the app
+          # target ad hoc with the simulator entitlements, as Xcode's "Sign to Run Locally" does:
+          # Xcode puts application-identifier and keychain-access-groups into the binary's
+          # simulated-entitlements section. Putting them into the ad-hoc signature itself makes
+          # the host refuse to spawn the app (POSIX 162, run 45977634252). The x86sim lab reads the
+          # simulated entitlements too.
+          cp scripts/ci/simulator.entitlements ios/PockymoeDev/PockymoeDev.entitlements
+          # A Personal Team cannot sign push: its build has no aps-environment.
+          if [ "$POCKYMOE_IOS_SIGNING" = personal ]; then /usr/libexec/PlistBuddy -c 'Delete :aps-environment' ios/PockymoeDev/PockymoeDev.entitlements; fi
+          xcodebuild -workspace ios/PockymoeDev.xcworkspace -scheme PockymoeDev \
+            -configuration ${{ matrix.configuration }} -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' -derivedDataPath ios/build \
+            CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= PROVISIONING_PROFILE_SPECIFIER= \
+            COMPILER_INDEX_STORE_ENABLE=NO build > ../ci-out/xcodebuild.log 2>&1 || status=$?
+          grep -E " error:|\*\* BUILD" ../ci-out/xcodebuild.log | head -40 || true
+          [ -z "${status:-}" ] || { tail -40 ../ci-out/xcodebuild.log; exit "$status"; }
+          APP=ios/build/Build/Products/${{ matrix.configuration }}-iphonesimulator/PockymoeDev.app
+          test -f "$APP/Info.plist"
+          echo "signature entitlements:"; codesign -d --entitlements - "$APP" 2>&1 | head -20
+          echo "simulated entitlements:"; strings "$APP/PockymoeDev" | grep -A1 -E "keychain-access-groups|application-identifier" | head -8 || true
+          ditto -c -k --keepParent "$APP" ../ci-out/PockymoeDev-${{ matrix.configuration }}${{ matrix.signing == 'personal' && '-personal' || '' }}.app.zip
+      - name: Launch smoke test on an iPhone simulator
+        if: matrix.configuration == 'Release'
+        run: |
+          APP=ios/build/Build/Products/Release-iphonesimulator/PockymoeDev.app
+          OUT="$PWD/../ci-out/smoke"; mkdir -p "$OUT"
+          # An iPhone with a Dynamic Island (a Pro model) for the Live Activity capture, else any iPhone.
+          UDID=$(xcrun simctl list devices available -j | python3 -c "import json,sys; ds=[d for k,v in json.load(sys.stdin)['devices'].items() if 'iOS' in k for d in v if d['name'].startswith('iPhone')]; pro=[d for d in ds if ' Pro' in d['name']]; print((pro or ds)[-1]['udid'])")
+          xcrun simctl boot "$UDID"; xcrun simctl bootstatus "$UDID" -b || true
+          # launch <app> <name>: install, launch (retrying while SpringBoard starts), wait 25 s.
+          launch() {
+            xcrun simctl install "$UDID" "$1"
+            for i in 1 2 3 4 5 6; do
+              xcrun simctl launch "$UDID" com.pockymoe.app.dev && break
+              [ "$i" = 6 ] && { echo "$2: launch failed"; return 1; }
+              sleep 15
+            done
+            sleep 25
+            xcrun simctl io "$UDID" screenshot "$OUT/$2.png"
+            xcrun simctl spawn "$UDID" log show --last 2m --predicate 'process == "PockymoeDev"' > "$OUT/$2-device.log" 2>&1 || true
+            xcrun simctl spawn "$UDID" launchctl list | grep -q "com.pockymoe.app.dev" || { echo "$2: not running after 25 s"; return 1; }
+            if grep -q -- "-34018" "$OUT/$2-device.log"; then echo "$2: Keychain entitlement errors"; grep -m3 -- "-34018" "$OUT/$2-device.log"; return 1; fi
+            echo "$2: launched and running"
+          }
+          launch "$APP" launch || { xcrun simctl spawn "$UDID" log show --last 5m --predicate 'eventMessage CONTAINS "com.pockymoe.app.dev"' > "$OUT/springboard.log" 2>&1 || true; exit 1; }
+          # The Live Activity: relaunch with sample threads (-PockymoeActivityFixture), let it start in the
+          # foreground, then open Settings so the Dynamic Island shows it. Evidence only; not a gate.
+          xcrun simctl terminate "$UDID" com.pockymoe.app.dev || true
+          xcrun simctl launch "$UDID" com.pockymoe.app.dev -PockymoeActivityFixture || true
+          sleep 15
+          xcrun simctl io "$UDID" screenshot "$OUT/live-activity-app.png" || true
+          xcrun simctl launch "$UDID" com.apple.Preferences || true
+          sleep 6
+          xcrun simctl io "$UDID" screenshot "$OUT/live-activity-island.png" || true
+          xcrun simctl spawn "$UDID" log show --last 2m --predicate 'process == "PockymoeDev" OR process == "PockymoeLiveActivity" OR process CONTAINS "liveactivit" OR process == "chronod"' > "$OUT/live-activity.log" 2>&1 || true
+      - name: Unsigned device build (iphoneos Release; proves the app and widget compile for devices)
+        if: matrix.signing == 'personal'
+        run: |
+          xcodebuild -workspace ios/PockymoeDev.xcworkspace -scheme PockymoeDev -configuration Release -sdk iphoneos \
+            -destination 'generic/platform=iOS' -derivedDataPath ios/build-device \
+            CODE_SIGNING_ALLOWED=NO COMPILER_INDEX_STORE_ENABLE=NO build > ../ci-out/xcodebuild-device.log 2>&1 || status=$?
+          grep -E " error:|\*\* BUILD" ../ci-out/xcodebuild-device.log | head -40 || true
+          [ -z "${status:-}" ] || { tail -40 ../ci-out/xcodebuild-device.log; exit "$status"; }
+          APP=ios/build-device/Build/Products/Release-iphoneos/PockymoeDev.app
+          test -f "$APP/Info.plist"
+          test -f "$APP/PlugIns/PockymoeLiveActivity.appex/Info.plist"
+          lipo -info "$APP/PockymoeDev"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: native-ios-${{ matrix.configuration }}${{ matrix.signing == 'personal' && '-personal' || '' }}
+          path: ci-out/
+          if-no-files-found: warn

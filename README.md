@@ -2,6 +2,14 @@
 
 Clients for [Pockymoe](https://github.com/dufangshi/pockymoe) (formerly Remote Codex): the [desktop client for macOS and Windows](desktop/README.md), and independent Android and iOS clients for relay mode, described below.
 
+## Native app (beta)
+
+`native/` holds a separate, fully native Android and iOS client (Expo/React Native, no WebView for the product UI): see [native/README.md](native/README.md). It ships **beside** the WebView apps, not instead of them:
+
+- Android: `Pockymoe-Native-<version>-android.apk` in each client release, package `com.pockymoe.app`, same signing key and version as the WebView APK; both install side by side.
+- iOS: no release file yet (no Apple developer account). Install it on your own iPhone over a cable with a free Apple ID: [native/docs/ios-install-personal.md](native/docs/ios-install-personal.md) (no push; the rest works).
+- CI: `.github/workflows/native-ios.yml` builds the iOS app for the simulator (standard and free-Apple-ID variants) and for devices (unsigned), and launches it.
+
 The mobile clients render the live relay product in a WebView, so devices, workspaces, workspace tabs, shortcuts, recent chats, thread search, Explorer, settings and the composer stay aligned with the website. Native code owns relay selection, safe areas/keyboard layout, attachment picking, saving/sharing exports and system notifications. There is no second native thread toolbar.
 
 ## Download
@@ -10,7 +18,7 @@ Signed Android APKs are published on [GitHub Releases](https://github.com/dufang
 
 ## Releases
 
-A client release is one GitHub Release `vX.Y.Z` with exactly three files: the Android APK, the Apple silicon Mac DMG and the Windows x64 installer. It is built, verified and published by the **Client release** GitHub Actions workflow (`.github/workflows/client-release.yml`) from `main`, after `Client checks complete` passed on that commit. Use `channel=dry-run` from any branch to build and verify everything with throwaway keys. Signing keys are secrets of the protected `client-release` environment. Channels, jobs, the secrets list and how to add them are in [desktop/README.md, Release workflow](desktop/README.md#release-workflow). `scripts/release-client.sh` on the signing Mac remains as a local fallback.
+A client release is one GitHub Release `vX.Y.Z` with exactly four files: the Android APK, the Apple silicon Mac DMG, the Windows x64 installer and the native Android APK (beta). It is built, verified and published by the **Client release** GitHub Actions workflow (`.github/workflows/client-release.yml`) from `main`, after `Client checks complete` passed on that commit. Use `channel=dry-run` from any branch to build and verify everything with throwaway keys. Signing keys are secrets of the protected `client-release` environment. Channels, jobs, the secrets list and how to add them are in [desktop/README.md, Release workflow](desktop/README.md#release-workflow). `scripts/release-client.sh` on the signing Mac remains as a local fallback.
 
 ## Screens
 

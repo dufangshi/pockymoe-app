@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Three-file client release steps, plus the local Apple-silicon fallback command.
+"""Client release steps (four files), plus the local Apple-silicon fallback command.
+
+The release carries the WebView Android APK, the macOS DMG, the Windows installer and the
+native Android app (native/, package com.pockymoe.app, installed beside the WebView app and
+signed with the same key).
 
 GitHub Actions (.github/workflows/client-release.yml through client_release_ci.py)
 is the documented release path. It and this local command share every build,
@@ -102,12 +106,26 @@ def versions(version):
 
 
 def asset_names(version):
+    """The WebView APK and the two desktop installers (the desktop update metadata covers these)."""
     return [f'Pockymoe-{version}-{suffix}' for suffix in ('android.apk', 'mac-arm64.dmg', 'win-x64.exe')]
 
 
+NATIVE_PACKAGE = 'com.pockymoe.app'
+WEBVIEW_PACKAGE = 'com.remotecodex.app'
+
+
+def native_asset_name(version):
+    return f'Pockymoe-Native-{version}-android.apk'
+
+
+def release_assets(version):
+    """Every file of a release: the three of asset_names() and the native Android APK."""
+    return [*asset_names(version), native_asset_name(version)]
+
+
 def exact_output(folder, version):
-    if sorted(p.name for p in folder.iterdir()) != sorted(asset_names(version)) or any(not p.is_file() or p.is_symlink() for p in folder.iterdir()):
-        raise RuntimeError('Output must contain exactly the three named release files, nothing else')
+    if sorted(p.name for p in folder.iterdir()) != sorted(release_assets(version)) or any(not p.is_file() or p.is_symlink() for p in folder.iterdir()):
+        raise RuntimeError('Output must contain exactly the four named release files, nothing else')
 
 
 def scan(*paths):
@@ -136,16 +154,20 @@ def apk_certificate(apk):
     return sorted(set(digest.lower() for digest in digests))
 
 
-def previous_apk(work, code, validation=False):
+def previous_apk(work, code, validation=False, native=False):
+    """The latest release's WebView APK (or, with native, its native APK) for the versionCode and
+    certificate checks; None when that release has none."""
     # Failure to query GitHub is not evidence that there is no previous release.
     release = json.loads(run('gh', 'release', 'view', '--repo', REPO, '--json', 'tagName,assets', capture=True, retries=1, timeout=60))
-    assets = [asset['name'] for asset in release['assets'] if asset['name'].endswith('.apk')]
+    pattern = r'Pockymoe-Native-\d+\.\d+\.\d+-android\.apk' if native else r'Pockymoe-\d+\.\d+\.\d+-android\.apk'
+    assets = [asset['name'] for asset in release['assets'] if re.fullmatch(pattern, asset['name'])]
+    kind = 'native APK' if native else 'APK'
     if not assets:
-        print('Latest release has no APK; versionCode/certificate comparison unavailable')
+        print(f'Latest release has no {kind}; versionCode/certificate comparison unavailable')
         return None
     if len(assets) != 1:
-        raise RuntimeError('Ambiguous previous APK')
-    folder = work / 'previous'
+        raise RuntimeError(f'Ambiguous previous {kind}')
+    folder = work / ('previous-native' if native else 'previous')
     folder.mkdir()
     run('gh', 'release', 'download', release['tagName'], '--repo', REPO, '--pattern', assets[0], '--dir', folder, '--clobber', capture=True, retries=1, timeout=300)
     previous = folder / assets[0]
@@ -291,8 +313,25 @@ def verify_apk(apk, previous, work, certificate_continuity=True):
     return [apk, scan_apk]
 
 
+def build_native_apk(work, env=None):
+    """Build the native app's signed release APK (scripts/assemble-signed-native-apk.sh) and return it.
+
+    The same release key as the WebView APK (scripts/android-release-signing.sh); versions come
+    from android/app/build.gradle.kts through native/app.config.ts.
+    """
+    output = work / 'native-android'
+    run('bash', ROOT / 'scripts/assemble-signed-native-apk.sh', output, env=env, timeout=3000, retries=1, capture=env is None)
+    return output / 'pockymoe-native-android.apk'
+
+
+def verify_native_apk(apk, previous, work, certificate_continuity=True):
+    """Like verify_apk, for the native app: its own previous APK and its own scan folder."""
+    return verify_apk(apk, previous, work / 'native', certificate_continuity)
+
+
 def build(version, code, output, work, validation=False):
     previous = previous_apk(work, code, validation)
+    previous_native = previous_apk(work, code, validation, native=True)
     run(PYTHON, ROOT / 'scripts/check-production-address.py')
     env = release_env()
     build_desktop(env)
@@ -307,12 +346,14 @@ def build(version, code, output, work, validation=False):
     android_output = work / 'android'
     run('bash', ROOT / 'scripts/assemble-signed-apk.sh', android_output, capture=True)
     apk_scan = verify_apk(android_output / 'remote-codex-android.apk', previous, work)
+    native_scan = verify_native_apk(build_native_apk(work), previous_native, work)
     verify_mac_dmg(artifacts / asset_names(version)[1], work, signing)
     _, windows_scan = verify_windows_installer(artifacts / asset_names(version)[2], work)
-    scan(*apk_scan, artifacts / asset_names(version)[1], *windows_scan)
+    scan(*apk_scan, *native_scan, artifacts / asset_names(version)[1], *windows_scan)
     if list(output.iterdir()):
         raise RuntimeError('Output folder changed while building; refusing to overwrite')
     shutil.copy2(apk_scan[0], output / asset_names(version)[0])
+    shutil.copy2(native_scan[0], output / native_asset_name(version))
     for name in asset_names(version)[1:]:
         shutil.copy2(artifacts / name, output / name)
     exact_output(output, version)
@@ -390,7 +431,7 @@ def main():
     if args.publish:
         require_aggregate(REPO, sha, args.allow_unchecked_ci)
         run('gh', 'release', 'create', f'v{args.version}', '--repo', REPO, '--target', sha,
-            '--latest', '--notes-file', notes, *(output / name for name in asset_names(args.version)))
+            '--latest', '--notes-file', notes, *(output / name for name in release_assets(args.version)))
     else:
         print('Not published. Publishing requires a separate invocation with --publish --notes-file FILE.')
 

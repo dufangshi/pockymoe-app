@@ -1,0 +1,32 @@
+export const commonEn = {
+  "common.language": "Language",
+  "common.languageDescription": "Choose the interface language for this browser.",
+  "common.errorTitle": "Something went wrong",
+  "common.errorBody": "This part of the page could not be shown.",
+  "common.updatedTitle": "Pockymoe was updated",
+  "common.updatedBody": "Reload to use the new version.",
+  "common.reload": "Reload",
+  "common.whyFailed": "Why it failed",
+  "common.whyUnavailable": "Why it is unavailable",
+  "common.retry": "Retry",
+  "common.showFullText": "Show the full text",
+  "common.help": "Help",
+  "common.helpTopics": "Help topics",
+  "common.helpIntro": "What device, connection and account messages mean, and how to fix them.",
+  "common.helpDevices": "Devices and protection",
+  "common.helpDevicesSummary": "What each device status means and how to fix it.",
+  "common.helpConnection": "Connection and encryption",
+  "common.helpConnectionSummary": "The lock icon, fingerprints and offline devices.",
+  "common.helpAccount": "Account and sign-in",
+  "common.helpAccountSummary": "Unlocking, recovery codes and password prompts.",
+  "common.openApp": "Open Pockymoe",
+  "common.helpNotFound": "This help topic does not exist.",
+  "common.copied": "Copied",
+  "common.copyFailed": "Copy failed",
+  "common.copyPath": "Copy path",
+  "common.pathShowWhole": "{{path}}, tap to show the whole path",
+  "common.items": {
+    "one": "{{count}} item",
+    "other": "{{count}} items"
+  }
+} as const;

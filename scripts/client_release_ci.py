@@ -28,19 +28,22 @@ import release_client as release
 from required_aggregate import require_aggregate
 
 CHANNELS = ('dry-run', 'signed-dry-run', 'publish')
-PLATFORMS = ('android', 'mac', 'windows')  # Same order as release.asset_names().
+PLATFORMS = ('android', 'mac', 'windows', 'android-native')  # Same order as release.release_assets().
 SECRETS = {
     'android': ('CLIENT_ANDROID_KEYSTORE_BASE64', 'CLIENT_ANDROID_STORE_PASSWORD',
                 'CLIENT_ANDROID_KEY_ALIAS', 'CLIENT_ANDROID_KEY_PASSWORD'),
     'mac': ('CLIENT_MAC_SIGNING_P12_BASE64', 'CLIENT_MAC_SIGNING_P12_PASSWORD'),
     'publish': ('CLIENT_UPDATE_SIGNING_KEY_BASE64',),
 }
+# The native app is signed with the WebView app's key (same identity, other package).
+SECRETS['android-native'] = SECRETS['android']
 REQUIRED = {
     'android': ('CLIENT_ANDROID_KEYSTORE_BASE64', 'CLIENT_ANDROID_STORE_PASSWORD'),
     'mac': ('CLIENT_MAC_SIGNING_P12_BASE64', 'CLIENT_MAC_SIGNING_P12_PASSWORD'),
     'publish': ('CLIENT_UPDATE_SIGNING_KEY_BASE64',),
 }
-ALL_SECRETS = tuple(name for names in SECRETS.values() for name in names) + ('CLIENT_PRIVATE_IDENTIFIERS',)
+REQUIRED['android-native'] = REQUIRED['android']
+ALL_SECRETS = tuple(dict.fromkeys(name for names in SECRETS.values() for name in names)) + ('CLIENT_PRIVATE_IDENTIFIERS',)
 SETUP_SIGNING = release.ROOT / 'scripts/setup-client-signing.py'
 
 
@@ -57,7 +60,7 @@ def channel_gate(channel):
 
 def expected_signing(channel):
     kind = 'release' if uses_release_keys(channel) else 'throwaway'
-    return {'android': kind, 'mac': kind, 'windows': 'none'}
+    return {'android': kind, 'mac': kind, 'windows': 'none', 'android-native': kind}
 
 
 def append(variable, text):
@@ -216,12 +219,8 @@ def prepare(args):
             f'signing: {expected_signing(args.channel)["android"]} keys.\n')
 
 
-def android(args):
-    keys = take_secrets('android', args.channel)
-    code = release.versions(args.version)
-    work, out = empty_folder(args.work), empty_folder(args.out)
-    private_identifiers(work)
-    previous = release.previous_apk(work, code, validation=args.channel != 'publish')
+def android_signing_env(keys, work):
+    """The Gradle signing environment (REMOTE_CODEX_ANDROID_*) and the keystore file to delete after."""
     env = dict(os.environ)
     if keys:
         store = write_private(work / 'keys/release.keystore', decode('CLIENT_ANDROID_KEYSTORE_BASE64', keys['CLIENT_ANDROID_KEYSTORE_BASE64']))
@@ -237,6 +236,16 @@ def android(args):
                     '-validity', '2', '-dname', 'CN=Pockymoe dry run', capture=True)
         env.update(REMOTE_CODEX_ANDROID_STORE_FILE=str(store), REMOTE_CODEX_ANDROID_STORE_PASSWORD=password,
                    REMOTE_CODEX_ANDROID_KEY_ALIAS='dry-run', REMOTE_CODEX_ANDROID_KEY_PASSWORD=password)
+    return env, store
+
+
+def android(args):
+    keys = take_secrets('android', args.channel)
+    code = release.versions(args.version)
+    work, out = empty_folder(args.work), empty_folder(args.out)
+    private_identifiers(work)
+    previous = release.previous_apk(work, code, validation=args.channel != 'publish')
+    env, store = android_signing_env(keys, work)
     try:
         # Gradle downloads dependencies; one retry covers a transient network failure.
         release.run('bash', release.ROOT / 'scripts/assemble-signed-apk.sh', work / 'android', env=env,
@@ -251,6 +260,29 @@ def android(args):
     final = out / release.asset_names(args.version)[0]
     shutil.copy2(apk, final)
     write_manifest(out, 'android', args.version, final, 'release' if keys else 'throwaway',
+                   versionCode=code, certificateSha256=release.apk_certificate(final))
+
+
+def android_native(args):
+    """The native app (native/, com.pockymoe.app), signed with the WebView APK's key."""
+    keys = take_secrets('android-native', args.channel)
+    code = release.versions(args.version)
+    work, out = empty_folder(args.work), empty_folder(args.out)
+    private_identifiers(work)
+    previous = release.previous_apk(work, code, validation=args.channel != 'publish', native=True)
+    env, store = android_signing_env(keys, work)
+    try:
+        # npm and Gradle download dependencies; one retry covers a transient network failure.
+        apk = release.build_native_apk(work, env)
+    finally:
+        store.unlink()
+    package, apk_code, apk_version = apk_badging(apk)
+    if (package, apk_code, apk_version) != (release.NATIVE_PACKAGE, code, args.version):
+        raise RuntimeError('Built native APK package/versionCode/versionName differ from the source')
+    release.scan(*release.verify_native_apk(apk, previous, work, certificate_continuity=bool(keys)))
+    final = out / release.native_asset_name(args.version)
+    shutil.copy2(apk, final)
+    write_manifest(out, 'android-native', args.version, final, 'release' if keys else 'throwaway',
                    versionCode=code, certificateSha256=release.apk_certificate(final))
 
 
@@ -319,10 +351,10 @@ def windows(args):
 
 
 def collect(channel, version, inputs, folder):
-    """Copy the three job outputs into one exact folder and check them against their manifests."""
+    """Copy the four job outputs into one exact folder and check them against their manifests."""
     expected = expected_signing(channel)
     manifests = {}
-    for platform, name in zip(PLATFORMS, release.asset_names(version)):
+    for platform, name in zip(PLATFORMS, release.release_assets(version)):
         files = [path for path in inputs.rglob(name) if path.is_file()]
         records = [path for path in inputs.rglob(f'{platform}.json') if path.is_file()]
         if len(files) != 1 or len(records) != 1:
@@ -351,6 +383,12 @@ def assemble(args):
         summary(f'| {data["fileName"]} | {data["size"]:,} bytes | `{data["sha256"]}` | {data["signing"]} |')
     if release.apk_certificate(folder / release.asset_names(args.version)[0]) != manifests['android']['certificateSha256']:
         raise RuntimeError('APK certificate differs from the one its build job verified')
+    if release.apk_certificate(folder / release.native_asset_name(args.version)) != manifests['android-native']['certificateSha256']:
+        raise RuntimeError('Native APK certificate differs from the one its build job verified')
+    # One developer identity: with the release key both Android apps carry the same certificate
+    # (each dry-run job signs with its own throwaway key).
+    if uses_release_keys(args.channel) and manifests['android']['certificateSha256'] != manifests['android-native']['certificateSha256']:
+        raise RuntimeError('The WebView and native APKs are signed with different keys')
     release.scan(*sorted(folder.iterdir()))
     (out / 'manifests').mkdir()
     for platform, data in manifests.items():
@@ -360,7 +398,7 @@ def assemble(args):
     # signing happens only in the publish job, which holds the release key.
     release.write_release_notes(args.version, folder, out / 'validation-notes.md', source, production=False,
                                 validation_public_key=out / 'validation-public-key.pem')
-    print('Three release files assembled and verified; validation metadata signed and verified')
+    print('Four release files assembled and verified; validation metadata signed and verified')
 
 
 def publish(args):
@@ -374,7 +412,7 @@ def publish(args):
     private_identifiers(work)
     folder = args.bundle / 'assets'
     release.exact_output(folder, args.version)
-    for platform, name in zip(PLATFORMS, release.asset_names(args.version)):
+    for platform, name in zip(PLATFORMS, release.release_assets(args.version)):
         data = json.loads((args.bundle / 'manifests' / f'{platform}.json').read_text())
         if data['sha256'] != sha256(folder / name) or data['signing'] != expected_signing(args.channel)[platform]:
             raise RuntimeError(f'{name} differs from the assembled, verified file')
@@ -407,7 +445,7 @@ def publish(args):
     # Never retried: a partial failure must be inspected, not repeated.
     release.run('gh', 'release', 'create', f'v{args.version}', '--repo', release.REPO, '--target', sha,
                 '--latest', '--notes-file', notes,
-                *(folder / name for name in release.asset_names(args.version)), timeout=1800)
+                *(folder / name for name in release.release_assets(args.version)), timeout=1800)
     summary(f'Published https://github.com/{release.REPO}/releases/tag/v{args.version}')
 
 
@@ -417,7 +455,7 @@ def main(argv=None):
     parser.add_argument('--channel', default=os.environ.get('RELEASE_CHANNEL', 'dry-run'), choices=CHANNELS)
     commands = parser.add_subparsers(dest='command', required=True)
     commands.add_parser('prepare')
-    for name in ('android', 'mac', 'windows'):
+    for name in ('android', 'mac', 'windows', 'android-native'):
         command = commands.add_parser(name)
         command.add_argument('--work', type=Path, required=True)
         command.add_argument('--out', type=Path, required=True)
@@ -429,7 +467,7 @@ def main(argv=None):
     command.add_argument('--bundle', type=Path, required=True)
     command.add_argument('--work', type=Path, required=True)
     args = parser.parse_args(argv)
-    {'prepare': prepare, 'android': android, 'mac': mac, 'windows': windows,
+    {'prepare': prepare, 'android': android, 'mac': mac, 'windows': windows, 'android-native': android_native,
      'assemble': assemble, 'publish': publish}[args.command](args)
 
 
