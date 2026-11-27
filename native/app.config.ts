@@ -34,6 +34,8 @@ const config: ExpoConfig = {
       // The status bar follows expo-status-bar (App.tsx), not each view controller; otherwise its
       // icons stay dark on every dark theme.
       UIViewControllerBasedStatusBarAppearance: false,
+      // The account Live Activity (targets/live-activity), kept current by the relay over APNs.
+      NSSupportsLiveActivities: true,
       // Direct Supervisors: LAN names and IP addresses are local networking; Tailscale
       // MagicDNS names (*.ts.net) are the other plain-HTTP case a self-hosted Supervisor has.
       NSAppTransportSecurity: {
@@ -42,6 +44,9 @@ const config: ExpoConfig = {
         NSExceptionDomains: { 'ts.net': { NSIncludesSubdomains: true, NSExceptionAllowsInsecureHTTPLoads: true } },
       },
     },
+    // Shared with the Live Activity widget for thread titles (ActivityMetadataCache). Device builds
+    // need this app group registered for the app id in the owner's Apple account.
+    entitlements: { 'com.apple.security.application-groups': [`group.${ids.id}`] },
   },
   locales: { 'zh-Hans': './locales/zh-Hans.json' },
   android: {
@@ -76,6 +81,8 @@ const config: ExpoConfig = {
     // Status-bar icon: the >_ badge of the basket logo as a white disc (the full logo is a blob
     // at 24 dp); tinted with Classic's primary fill.
     // aps-environment: Apple's sandbox for development builds, production for preview and release.
+    // The Live Activity widget extension (targets/live-activity).
+    '@bacons/apple-targets',
     ['expo-notifications', { icon: './assets/notification-icon.png', color: '#008650', mode: variant === 'development' ? 'development' : 'production' }],
     'react-native-quick-crypto',
   ],

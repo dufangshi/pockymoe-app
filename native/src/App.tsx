@@ -4,6 +4,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { KeyCommandsRoot, useKeyCommand } from './platform/keyCommands';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { WindowControlsInsets } from './platform/windowControls';
+import { startLiveActivity } from './features/notifications/liveActivity';
 import { KeyboardProvider } from 'react-native-keyboard-controller';
 import { NavigationContainer, DefaultTheme, DarkTheme, type NavigationState } from '@react-navigation/native';
 import { StatusBar } from 'expo-status-bar';
@@ -60,10 +61,11 @@ export default function App() {
     const stopLinks = installDevLinks();
     const stopRouting = installNotificationRouting();
     const stopEvents = onAnyDeviceEvent(notifyFromEvent);
+    const stopActivity = startLiveActivity();
     // Devices and starred threads follow the account.
     const unsubscribe = accountStore.subscribe(() => { if (accountStore.get().phase === 'ready') { void refreshRelayDevices(); void refreshReferences(); void loadNotificationScope(); } syncBackgroundWatch(); });
     const timer = setInterval(() => { if (accountStore.get().phase === 'ready') void refreshRelayDevices(); void probeAllDirect(); }, 30_000);
-    return () => { unsubscribe(); clearInterval(timer); stop(); stopLinks(); stopRouting(); stopEvents(); };
+    return () => { unsubscribe(); clearInterval(timer); stop(); stopLinks(); stopRouting(); stopEvents(); stopActivity(); };
   }, []);
   useEffect(() => { if (fonts && booted) void SplashScreen.hideAsync().catch(() => undefined); }, [fonts, booted]);
   if (!fonts || !booted) return null;

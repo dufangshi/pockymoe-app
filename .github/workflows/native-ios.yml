@@ -1,7 +1,8 @@
 name: Native iOS (simulator build and launch)
 # The Expo/React Native client in native/: generate the iOS project (CNG), build it for the
-# iOS Simulator (Debug and Release, signed ad hoc with simulator keychain entitlements), and
-# check that the Release app launches and stays up. Screen-by-screen iOS testing happens on the
+# iOS Simulator (Debug and Release, signed ad hoc with simulator keychain entitlements; the app
+# and its Live Activity widget extension), run the Live Activity policy and relay fixture tests,
+# and check that the Release app launches and stays up. Screen-by-screen iOS testing happens on the
 # x86sim lab with these .app artifacts; no device signing, no release.
 on:
   push:
@@ -57,6 +58,12 @@ jobs:
         run: |
           npx tsc --noEmit
           npx vitest run
+      - name: Live Activity policy and relay fixture tests (the iOS shell's, Swift)
+        if: matrix.configuration == 'Debug'
+        run: |
+          mkdir -p ../ci-out
+          xcrun swiftc -parse-as-library targets/live-activity/ActivityPolicy.swift scripts/ci/live-activity-tests/LiveActivityTests.swift -o ../ci-out/live-activity-tests
+          ../ci-out/live-activity-tests scripts/ci/live-activity-tests/fixtures
       - name: Generate the iOS project (development variant, com.pockymoe.app.dev)
         run: npx expo prebuild --platform ios --no-install
       - name: Install pods

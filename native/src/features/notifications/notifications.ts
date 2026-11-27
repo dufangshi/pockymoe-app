@@ -117,8 +117,15 @@ async function registerApns(deviceToken?: string) {
     // Without a connection to Apple's push service (some simulators) the token never comes: give up
     // after 30 s; the next launch or token change tries again.
     const token = deviceToken ?? String((await withTimeout(Notifications.getDevicePushTokenAsync(), 30_000)).data);
+    const sentLive = liveActivityToken;
     const response = await fetch(relayUrl('relay/account/notifications/native'), { method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(apnsSubscription(token, origin, String(Constants.expoConfig?.extra?.variant ?? 'development'))) });
+      body: JSON.stringify({ ...apnsSubscription(token, origin, String(Constants.expoConfig?.extra?.variant ?? 'development')), ...(sentLive ? { liveActivityToken: sentLive } : {}) }) });
+    if (response.ok) {
+      const saved = await response.json().catch(() => null) as { id?: string } | null;
+      apnsRegistration = saved?.id ?? null;
+      // ActivityKit may rotate its token while this registration is in flight.
+      if (liveActivityToken && liveActivityToken !== sentLive) void setLiveActivityToken(liveActivityToken);
+    }
     notifyStore.set({ native: response.ok ? 'registered' : response.status === 503 ? 'unavailable' : 'failed' });
     apnsRegistered = response.ok ? `${origin}\u0000${token}` : null;
   } catch { notifyStore.set({ native: 'failed' }); apnsRegistered = null; }
@@ -131,13 +138,25 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   });
 }
 
+// The account Live Activity's push token (iOS), bound to this install's APNs registration so the
+// relay can update the activity while the app is closed (docs/thread-notifications.md).
+let apnsRegistration: string | null = null;
+let liveActivityToken: string | null = null;
+export async function setLiveActivityToken(token: string) {
+  liveActivityToken = token;
+  // Never asks for notification permission because ActivityKit issued a token.
+  if (!apnsRegistration) return;
+  await fetch(relayUrl('relay/account/notifications/native/live-activity'), { method: 'PUT', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ id: apnsRegistration, token }) }).catch(() => undefined);
+}
+
 // Registered once per relay and token; again when iOS hands out a new token.
 let apnsRegistered: string | null = null;
 let apnsTokenListener: { remove(): void } | null = null;
 function syncApns() {
   const account = accountStore.get();
   const ready = account.phase === 'ready' && !!account.origin && notifyStore.get().permission === 'granted';
-  if (!ready) { apnsRegistered = null; return; }
+  if (!ready) { apnsRegistered = null; apnsRegistration = null; if (account.phase !== 'ready') liveActivityToken = null; return; }
   apnsTokenListener ??= Notifications.addPushTokenListener(token => { if (accountStore.get().phase === 'ready') void registerApns(String(token.data)); });
   if (apnsRegistered?.startsWith(`${account.origin}\u0000`)) return;
   apnsRegistered = `${account.origin}\u0000`;

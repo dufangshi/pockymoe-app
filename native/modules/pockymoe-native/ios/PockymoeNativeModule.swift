@@ -6,7 +6,7 @@ import UIKit
 public class PockymoeNativeModule: Module {
   public func definition() -> ModuleDefinition {
     Name("PockymoeNative")
-    Events("fold")
+    Events("fold", "liveActivityToken")
 
     Function("startFoldUpdates") {
       self.sendEvent("fold", ["hingeX": NSNull(), "hingeWidth": 0, "separating": false, "halfOpened": false])
@@ -35,6 +35,32 @@ public class PockymoeNativeModule: Module {
       }
       return Double(view.safeAreaInsets.top)
     }.runOnQueue(.main)
+
+    // The account Live Activity (LiveActivityManager): the app's snapshot of its threads while it
+    // runs (JSON of ActivitySnapshot), its language for the widget's words, and the activity's push
+    // token back as the "liveActivityToken" event.
+    AsyncFunction("syncLiveActivity") { (snapshot: String, language: String) async -> Bool in
+      guard let data = snapshot.data(using: .utf8), let value = try? JSONDecoder().decode(ActivitySnapshot.self, from: data) else { return false }
+      let manager = await self.liveActivities()
+      await MainActor.run { ActivityMetadataCache.setLanguage(language) }
+      await manager.sync(value)
+      return true
+    }
+    AsyncFunction("clearLiveActivity") { () async in
+      await self.liveActivities().clear()
+    }
+    AsyncFunction("resendLiveActivityToken") { () async in
+      await self.liveActivities().resendToken()
+    }
+  }
+
+  private var liveActivityManager: LiveActivityManager?
+  @MainActor private func liveActivities() -> LiveActivityManager {
+    if let liveActivityManager { return liveActivityManager }
+    let manager = LiveActivityManager()
+    manager.onToken = { [weak self] token in self?.sendEvent("liveActivityToken", ["token": token]) }
+    liveActivityManager = manager
+    return manager
   }
 
   private static func rootView() -> UIView? {

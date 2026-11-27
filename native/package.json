@@ -54,6 +54,7 @@
     "web-streams-polyfill": "^4.5.1"
   },
   "devDependencies": {
+    "@bacons/apple-targets": "^5.0.0",
     "@types/node": "^26.6.11",
     "@types/react": "~19.3.0",
     "hash-wasm": "^4.13.0",
