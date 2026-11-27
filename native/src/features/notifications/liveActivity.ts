@@ -15,6 +15,8 @@ interface LiveActivityModule {
   addListener(event: 'liveActivityToken', listener: (e: { token: string }) => void): { remove(): void };
   syncLiveActivity?(snapshot: string, language: string): Promise<boolean>;
   clearLiveActivity?(): Promise<void>;
+  /** Diagnostics: enabled, activities, the last ActivityKit refusal. */
+  liveActivityInfo?(): Promise<Record<string, unknown>>;
 }
 const native = Platform.OS === 'ios' ? requireOptionalNativeModule<LiveActivityModule>('PockymoeNative') : null;
 
@@ -39,7 +41,9 @@ export function startLiveActivity() {
     // Unchanged snapshots are not sent again, except on returning to the foreground (it may start).
     if (snapshot + language === last && AppState.currentState !== 'active') return;
     last = snapshot + language;
-    void native.syncLiveActivity?.(snapshot, language);
+    void native.syncLiveActivity?.(snapshot, language).then(() => {
+      if (__DEV__) void native.liveActivityInfo?.().then(info => console.log('[live-activity]', JSON.stringify(info)), () => undefined);
+    }, () => undefined);
   };
   const schedule = () => { if (!timer) timer = setTimeout(sync, 1000); };
   const unsubscribe = [deviceDataStore.subscribe(schedule), accountStore.subscribe(schedule)];

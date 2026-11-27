@@ -19,6 +19,13 @@ final class LiveActivityManager {
     private var syncTask: Task<Void, Never>?
     var onToken: ((String) -> Void)?
     private var lastToken: String?
+    /// The last ActivityKit refusal, for diagnostics (Debug builds log it).
+    private(set) var lastError: String?
+
+    func info() -> [String: Any] {
+        ["enabled": ActivityAuthorizationInfo().areActivitiesEnabled, "error": lastError ?? "", "token": lastToken != nil,
+         "activities": Activity<PockymoeActivityAttributes>.activities.map { ["id": $0.id, "state": String(describing: $0.activityState)] }]
+    }
 
     func resendToken() { if let lastToken { onToken?(lastToken) } }
 
@@ -62,7 +69,10 @@ final class LiveActivityManager {
         }
         if activity == nil, ActivityPolicy.shouldStart(state, foreground: UIApplication.shared.applicationState == .active) {
             // Push-updated: the relay sends liveactivity pushes to this activity's token.
-            activity = try? Activity.request(attributes: PockymoeActivityAttributes(accountId: snapshot.accountId), content: ActivityContent(state: state, staleDate: nil), pushType: .token)
+            do {
+                activity = try Activity.request(attributes: PockymoeActivityAttributes(accountId: snapshot.accountId), content: ActivityContent(state: state, staleDate: nil), pushType: .token)
+                lastError = nil
+            } catch { lastError = String(describing: error) }
         }
         guard let activity else { return }
         if tokenTask == nil {

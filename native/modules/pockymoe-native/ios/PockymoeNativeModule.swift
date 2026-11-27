@@ -49,6 +49,9 @@ public class PockymoeNativeModule: Module {
     AsyncFunction("clearLiveActivity") { () async in
       await self.liveActivities().clear()
     }
+    AsyncFunction("liveActivityInfo") { () async -> [String: Any] in
+      await self.liveActivities().info()
+    }
     AsyncFunction("resendLiveActivityToken") { () async in
       await self.liveActivities().resendToken()
     }
