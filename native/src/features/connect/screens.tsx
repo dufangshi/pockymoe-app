@@ -20,6 +20,7 @@ import { clearLocaleOverride, hasLocaleOverride, setLocale, translate, useI18n }
 import { showMenu } from '../../design/Overlay';
 import { accountStore, restoreAccount, chooseRelay, completeChallenge, finishRegistration, probeRelay, register, signIn, signInWithRecovery } from '../../connection/account';
 import { addDirect, signInDirect } from '../../connection/devices';
+import { selectDevice } from '../../layout/selection';
 
 /** The language menu of the Web's sign-in header: system, English, 简体中文. */
 function LanguageButton() {
@@ -274,12 +275,13 @@ export function DirectConnect({ onBack, onDone }: { onBack: () => void; onDone: 
   const nameRef = useRef<ComponentRef<typeof TextInput>>(null);
   const add = async () => {
     setBusy(true); setError(null);
-    try { const r = await addDirect(url, label); if (r.needsPasscode) setNeeds(r.url); else onDone(); }
+    // The Supervisor just added is the one the reader goes to (D8).
+    try { const r = await addDirect(url, label); if (r.needsPasscode) setNeeds(r.url); else { selectDevice(`direct:${r.url}`); onDone(); } }
     catch (e) { setError(translate('native.supervisorUnreachable')); setDetail(message(e)); } finally { setBusy(false); }
   };
   const login = async () => {
     setBusy(true); setError(null);
-    try { await signInDirect(needs!, passcode); onDone(); } catch (e) { setError(message(e)); } finally { setBusy(false); }
+    try { await signInDirect(needs!, passcode); selectDevice(`direct:${needs}`); onDone(); } catch (e) { setError(message(e)); } finally { setBusy(false); }
   };
   return (
     <Frame onBack={needs ? () => setNeeds(null) : onBack}>

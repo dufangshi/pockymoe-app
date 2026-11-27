@@ -11,7 +11,7 @@ import { createStore } from '../state/store';
 import { Press } from './Press';
 import { AppText } from './AppText';
 import { Button } from './Button';
-import { Sheet, setOverlayRenderer, useModalKey, useNoSheetOpen } from './Sheet';
+import { Sheet, setOverlayRenderer, useModalKey, useModalTop, useNoSheetOpen } from './Sheet';
 import { useTheme } from './theme';
 import { haptic } from './haptics';
 import { translate } from '../i18n';
@@ -86,6 +86,9 @@ function MenuHost() {
   // A row's action, run after the menu has closed (Sheet onClosed, or the popover's unmount).
   const [after, setAfter] = useState<(() => void) | null>(null);
   const popover = !!menu?.anchor;
+  // A popover (not the sheet fallback) is a Modal layer of its own for VoiceOver (D6).
+  const fitsPopover = popover && menu!.items.length * 46 + 16 + (menu!.title ? (menu!.subtitle ? 54 : 38) : 0) <= height - insets.top - insets.bottom - 16;
+  const popoverTop = useModalTop(!!current && fitsPopover);
   // Android has no Modal onDismiss and no presentation limit: run it on the next frame there.
   useEffect(() => {
     if (Platform.OS === 'ios' || current || !after || !popover) return;
@@ -112,7 +115,7 @@ function MenuHost() {
   return (
     <Modal key={modalKey} transparent visible={!!current} onDismiss={popoverDismissed} animationType="none" onRequestClose={() => close()} statusBarTranslucent>
       <Pressable style={{ flex: 1 }} onPress={() => close()} accessibilityLabel={translate('workbench.close')} />
-      <Animated.View entering={FadeIn.duration(120)} exiting={FadeOut.duration(100)} accessibilityRole="menu"
+      <Animated.View entering={FadeIn.duration(120)} exiting={FadeOut.duration(100)} accessibilityRole="menu" accessibilityViewIsModal={popoverTop}
         style={{ position: 'absolute', top, left, width: menuWidth, padding: 6, backgroundColor: t.c.panel, borderRadius: t.radius.lg, borderWidth: 1, borderColor: t.c.borderStrong,
           shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 18, shadowOffset: { width: 0, height: 6 }, elevation: 12 }}>
         {menu.title ? (

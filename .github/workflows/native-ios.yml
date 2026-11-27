@@ -85,9 +85,15 @@ jobs:
           APP=ios/build/Build/Products/Release-iphonesimulator/PockymoeDev.app
           OUT="$PWD/../ci-out/smoke"; mkdir -p "$OUT"
           UDID=$(xcrun simctl list devices available -j | python3 -c "import json,sys; ds=[d for k,v in json.load(sys.stdin)['devices'].items() if 'iOS' in k for d in v if d['name'].startswith('iPhone')]; print(ds[-1]['udid'])")
-          xcrun simctl boot "$UDID"; xcrun simctl bootstatus "$UDID" -b
+          xcrun simctl boot "$UDID"; xcrun simctl bootstatus "$UDID" -b || true
           xcrun simctl install "$UDID" "$APP"
-          xcrun simctl launch "$UDID" com.pockymoe.app.dev
+          # A fresh runner's simulator can finish booting before SpringBoard takes launches
+          # ("denied by service delegate (SBMainWorkspace)"): retry for up to two minutes.
+          for i in 1 2 3 4 5 6 7 8; do
+            xcrun simctl launch "$UDID" com.pockymoe.app.dev && break
+            [ "$i" = 8 ] && { xcrun simctl spawn "$UDID" log show --last 5m --predicate 'eventMessage CONTAINS "com.pockymoe.app.dev"' > "$OUT/springboard.log" 2>&1 || true; exit 1; }
+            sleep 15
+          done
           sleep 25
           xcrun simctl io "$UDID" screenshot "$OUT/launch.png"
           xcrun simctl spawn "$UDID" log show --last 3m --predicate 'process == "PockymoeDev"' > "$OUT/device.log" 2>&1 || true

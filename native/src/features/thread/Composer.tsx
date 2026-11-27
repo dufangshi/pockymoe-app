@@ -28,6 +28,7 @@ import type { DeviceApi, PromptAttachment } from '../../protocol/api';
 import { effortLabel, ModelPicker, type AgentChoice, type Anchor, type ModelChoice } from './ModelPicker';
 import { clipQuote, composeQuotedPrompt, quotePlaceholder, type PromptQuote } from '../../../vendor/pockymoe/thread-ui/components/composer/promptQuotes';
 import { attachmentPlaceholder } from './placeholder';
+import { pockymoeNative } from '../../platform/native/fold';
 
 export interface QuoteDraft {
   id: string; text: string; from: 'assistant' | 'user'; turnId: string | null; itemId: string | null;
@@ -117,6 +118,8 @@ export function Composer({ draftKey, api, threadId, agent, agents, canSwitch, cw
     setDraft(merged); writeDraft(draftKey, merged);
   };
   const pickPhotos = async (camera: boolean) => {
+    // A device without a camera (simulator, some iPads and Macs) would crash in the system picker.
+    if (camera && pockymoeNative?.cameraAvailable?.() === false) { showToast(translate('native.noCamera'), 'error'); return; }
     if (camera) { const p = await ImagePicker.requestCameraPermissionsAsync(); if (!p.granted) { showToast(translate('native.cameraDenied'), 'error'); return; } }
     const result = camera
       ? await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], quality: 0.85 })

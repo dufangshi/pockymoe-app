@@ -12,6 +12,7 @@ import { MessageSquarePlus, Plus } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AppText } from '../design/AppText';
 import { Fab } from '../design/Fab';
+import { useKeyboardVisible } from '../design/useKeyboardVisible';
 import { Sheet } from '../design/Sheet';
 import { EmptyState, Loading } from '../design/States';
 import { accountStore } from '../connection/account';
@@ -40,6 +41,7 @@ export function Workbench() {
   const t = useTheme();
   const layout = useLayout();
   const insets = useSafeAreaInsets();
+  const keyboardUp = useKeyboardVisible();
   const nav = useNavigation<NativeStackNavigationProp<RootStack>>();
   const sel = selectionStore.useValue(s => s);
   const devices = devicesStore.useValue(allDevices, (a, b) => a.length === b.length && a.every((d, i) => d.key === b[i]!.key && d.online === b[i]!.online));
@@ -94,7 +96,7 @@ export function Workbench() {
   );
   const picker = (
     <Sheet visible={picking} onClose={() => setPicking(false)} title={translate('auth.devices')}>
-      <DeviceList selectedKey={deviceKey} onSelect={key => { haptic.selection(); selectDevice(key); setPicking(false); }} onAdd={() => { setPicking(false); nav.push('DirectConnect'); }}
+      <DeviceList selectedKey={deviceKey} onSelect={key => { haptic.selection(); selectDevice(key); setPicking(false); }} onAdd={() => { setPicking(false); nav.push('DirectConnect'); }} onAddRelay={accountStore.get().origin ? undefined : () => { setPicking(false); nav.push('RelayAddress'); }}
         onNewThread={key => { setPicking(false); if (key !== deviceKey) selectDevice(key); if (layout.split) selectionStore.set({ newThread: {}, threadId: null }); else nav.push('NewThread', { deviceKey: key }); }} />
     </Sheet>
   );
@@ -105,7 +107,8 @@ export function Workbench() {
       <View style={{ flex: 1, backgroundColor: t.c.bg, paddingLeft: insets.left, paddingRight: insets.right }}>
         {list}
         {/* New thread within thumb reach (one-hand layout); not before there is a workspace. */}
-        {noWorkspaces ? null : <Fab icon={Plus} label={translate('workbench.createThread')} onPress={() => newThread()} extended={!scrolledDown} bottom={insets.bottom + 18} testID="new-thread" />}
+        {/* Hidden while the keyboard is up (search): iOS shows it through the translucent keyboard (D10). */}
+        {noWorkspaces || keyboardUp ? null : <Fab icon={Plus} label={translate('workbench.createThread')} onPress={() => newThread()} extended={!scrolledDown} bottom={insets.bottom + 18} testID="new-thread" />}
         {picker}
       </View>
     );

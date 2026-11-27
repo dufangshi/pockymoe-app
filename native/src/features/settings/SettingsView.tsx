@@ -175,7 +175,12 @@ export function SettingsView({ onBack, onAddSupervisor, onSwitchRelay, onSignIn 
                     if (await confirmAsync({ title: translate('auth.logOut'), message: translate('native.signOutBody'), confirmLabel: translate('auth.logOut'), destructive: true })) await signOut();
                   }} /> : <Row title={translate('native.forgetRelay')} icon={Trash2} destructive last onPress={() => void forgetRelay()} />}
                 </Section>
-              ) : null}
+              ) : (
+                // With only direct Supervisors there is still a way to a relay account (D11).
+                <Section title={translate('native.account')} style={{ marginHorizontal: -12 }}>
+                  <Row title={translate('native.relayAccount')} subtitle={translate('native.relayAccountBody')} numberOfLines={2} icon={Globe} onPress={onSwitchRelay} chevron last testID="add-relay" />
+                </Section>
+              )}
               <Section title={translate('files.deviceManagement')} style={{ marginHorizontal: -12 }}>
                 <View style={{ paddingHorizontal: 4, paddingVertical: 4 }}>
                   {devices.map(d => <DeviceRow key={d.key} device={d} role="button" onPress={() => setDetail(d.key)} onMore={anchor => deviceMenu(d, () => setDetail(d.key), anchor)} />)}

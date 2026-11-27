@@ -27,7 +27,7 @@ export function AppBar({ title, subtitle, onBack, leading, trailing, inset = tru
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
               <View style={{ flexShrink: 1 }}>
                 <AppText variant="headline" numberOfLines={1} accessibilityRole="header" onPress={onTitlePress} suppressHighlighting>{title}</AppText>
-                {subtitle ? <AppText variant="footnote" tone="muted" numberOfLines={1}>{subtitle}</AppText> : null}
+                {subtitle ? <AppText variant="footnote" tone="soft" numberOfLines={1}>{subtitle}</AppText> : null}
               </View>
               {titleAccessory}
             </View>

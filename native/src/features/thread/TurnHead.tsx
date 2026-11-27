@@ -64,7 +64,7 @@ export function TurnHead({ turn, status, now }: { turn: ThreadTurnDto; status: S
   return (
     <View style={{ marginTop: 4, marginBottom: 2 }}>
       <Press onPress={more.length ? () => setOpen(v => !v) : undefined} feedback="none" accessibilityRole="button" accessibilityState={{ expanded: open }} accessibilityLabel={label}
-        style={{ flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 24, justifyContent: t.terminal ? 'flex-start' : 'center' }}>
+        hitSlop={{ top: 10, bottom: 10 }} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 24, justifyContent: t.terminal ? 'flex-start' : 'center' }}>
         {t.terminal ? rule(16) : rule()}
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 3 }}>
           <Dot status={status} />

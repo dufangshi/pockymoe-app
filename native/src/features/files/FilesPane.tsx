@@ -5,7 +5,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, FlatList, ScrollView, TextInput, View } from 'react-native';
 import * as Sharing from 'expo-sharing';
-import { File as FsFile, Paths } from 'expo-file-system';
+import { Directory, File as FsFile, Paths } from 'expo-file-system';
 import { Image } from 'expo-image';
 import { ChevronLeft, ChevronRight, Code2, Eye, File, FileImage, FileText, Folder, MoreHorizontal, Search, Share2 } from 'lucide-react-native';
 import type { ThreadWorkspaceFilePreviewDto, ThreadWorkspaceTreeNodeDto } from '@pockymoe/shared';
@@ -132,7 +132,10 @@ async function fetchBytes(deviceKey: string, threadId: string, base: string, pat
   return { bytes: new Uint8Array(await response.arrayBuffer()), type: response.headers.get('content-type') ?? 'application/octet-stream' };
 }
 async function cacheFile(name: string, content: string | Uint8Array) {
-  const target = new FsFile(Paths.cache, `files-${Date.now()}-${name.replace(/[^\w.-]+/g, '_')}`);
+  // The shared file keeps its own name (D18): a fresh folder per share instead of a name prefix.
+  const folder = new Directory(Paths.cache, `share-${Date.now()}`);
+  folder.create({ intermediates: true });
+  const target = new FsFile(folder, name.replace(/[/\\]+/g, '_') || 'file');
   if (target.exists) target.delete();
   target.create();
   await (target as unknown as { write(c: string | Uint8Array): Promise<void> | void }).write(content);

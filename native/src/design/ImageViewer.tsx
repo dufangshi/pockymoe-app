@@ -12,6 +12,7 @@ import { Share2, X } from 'lucide-react-native';
 import { IconButton } from './Button';
 import { AppText } from './AppText';
 import { showToast } from './Overlay';
+import { useModalTop } from './Sheet';
 import { translate } from '../i18n';
 
 const MAX_SCALE = 5;
@@ -20,6 +21,7 @@ const DOUBLE_TAP_SCALE = 2.5;
 export function ImageViewer({ uri, name, onClose }: { uri: string | null; name?: string; onClose: () => void }) {
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
+  const modalTop = useModalTop(!!uri);
   const scale = useSharedValue(1), savedScale = useSharedValue(1);
   const x = useSharedValue(0), y = useSharedValue(0), savedX = useSharedValue(0), savedY = useSharedValue(0);
   const dim = useSharedValue(0);
@@ -95,11 +97,13 @@ export function ImageViewer({ uri, name, onClose }: { uri: string | null; name?:
   return (
     <Modal transparent visible={!!uri} animationType="none" statusBarTranslucent navigationBarTranslucent onRequestClose={close}>
       <StatusBar barStyle="light-content" />
-      <GestureHandlerRootView style={{ flex: 1 }}>
+      {/* The whole viewer is the modal region (D17): on the image alone it hid Close and Share
+          from VoiceOver, and the image itself was not an element. */}
+      <GestureHandlerRootView style={{ flex: 1 }} accessibilityViewIsModal={modalTop}>
         <Animated.View style={[{ position: 'absolute', inset: 0, backgroundColor: '#000' }, backdrop]} />
         <GestureDetector gesture={gesture}>
-          <Animated.View style={[{ flex: 1 }, imageStyle]} accessibilityViewIsModal>
-            {uri ? <ExpoImage source={{ uri }} style={{ width, height }} contentFit="contain" accessibilityLabel={name} accessibilityHint={translate('native.imageZoomHint')} /> : null}
+          <Animated.View style={[{ flex: 1 }, imageStyle]}>
+            {uri ? <ExpoImage source={{ uri }} style={{ width, height }} contentFit="contain" accessible accessibilityRole="image" accessibilityLabel={name ?? translate('chat.attachmentImage')} accessibilityHint={translate('native.imageZoomHint')} /> : null}
           </Animated.View>
         </GestureDetector>
         <Animated.View style={[{ position: 'absolute', top: insets.top + 6, left: 8, right: 8, flexDirection: 'row', alignItems: 'center', gap: 8 }, backdrop]}>

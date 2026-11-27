@@ -36,6 +36,22 @@ function useLayer(active: boolean) {
   return layers.useValue(s => s.stack[s.stack.length - 1] === id);
 }
 
+// VoiceOver keeps to a view marked accessibilityViewIsModal and skips everything beside it, a
+// Modal presented above included: a Commit sheet or a menu over the Git sheet was invisible to it
+// (D6). Every Modal surface registers here and only the topmost one carries the mark.
+const modals = createStore<{ stack: number[] }>({ stack: [] });
+let modalSeq = 0;
+/** Registers a Modal surface while `active`; true while it is the topmost one. */
+export function useModalTop(active: boolean) {
+  const [id] = useState(() => ++modalSeq);
+  useEffect(() => {
+    if (!active) return;
+    modals.set(s => ({ stack: [...s.stack, id] }));
+    return () => modals.set(s => ({ stack: s.stack.filter(x => x !== id) }));
+  }, [active, id]);
+  return modals.useValue(s => s.stack[s.stack.length - 1] === id);
+}
+
 export interface SheetProps {
   visible: boolean;
   onClose: () => void;
@@ -85,6 +101,7 @@ export function Sheet({ visible, onClose, title, subtitle, children, footer, tal
   const wide = width >= WIDE_SHEET;
   const [mounted, setMounted] = useState(visible);
   const isTopLayer = useLayer(overlayLayer && mounted);
+  const modalTop = useModalTop(mounted);
   // The Modal unmounts with `mounted`; tell the owner on the next frame, when iOS has dismissed it.
   const [wasMounted, setWasMounted] = useState(mounted);
   useEffect(() => {
@@ -156,7 +173,7 @@ export function Sheet({ visible, onClose, title, subtitle, children, footer, tal
             <Pressable style={{ flex: 1 }} onPress={() => dismissable && onClose()} accessibilityRole="button" accessibilityLabel={translate('workbench.close')} />
           </Animated.View>
           <GestureDetector gesture={pan}>
-            <Animated.View testID={testID} accessibilityViewIsModal style={[{
+            <Animated.View testID={testID} accessibilityViewIsModal={modalTop} style={[{
               backgroundColor: t.c.sheet, maxHeight, width: wide ? Math.min(560, width - 48) : undefined,
               // A tall sheet takes its height but gives way to the keyboard instead of rising off the top.
               ...(tall ? { flexBasis: maxHeight, flexShrink: 1, minHeight: Math.min(maxHeight, 240) } : {}),

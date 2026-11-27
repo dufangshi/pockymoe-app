@@ -16,7 +16,7 @@ import { Button, IconButton } from '../../design/Button';
 import { CopyButton } from '../../design/Copy';
 import { ErrorMark } from '../../design/ErrorMark';
 import { Press } from '../../design/Press';
-import { Sheet, WIDE_SHEET, useModalKey } from '../../design/Sheet';
+import { Sheet, WIDE_SHEET, useModalKey, useModalTop } from '../../design/Sheet';
 import { AgentMark } from '../../design/AgentMark';
 import { useTheme } from '../../design/theme';
 import { haptic } from '../../design/haptics';
@@ -79,6 +79,7 @@ export function ModelPicker(props: ModelPickerProps) {
   const insets = useSafeAreaInsets();
   const t = useTheme();
   const modalKey = useModalKey();
+  const modalTop = useModalTop(visible && width >= WIDE_SHEET && !!anchor);
   if (!visible) return null;
   const wide = width >= WIDE_SHEET;
   if (!wide || !anchor) {
@@ -96,7 +97,7 @@ export function ModelPicker(props: ModelPickerProps) {
   return (
     <Modal key={modalKey} transparent visible animationType="fade" statusBarTranslucent onRequestClose={onClose}>
       <Pressable style={{ position: 'absolute', inset: 0 }} onPress={onClose} accessibilityRole="button" accessibilityLabel={translate('chat.modelPickerClose')} />
-      <View testID="model-picker" accessibilityViewIsModal style={{ position: 'absolute', left, top, width: w, height: Math.min(h, height - top - 12), backgroundColor: t.c.sheet,
+      <View testID="model-picker" accessibilityViewIsModal={modalTop} style={{ position: 'absolute', left, top, width: w, height: Math.min(h, height - top - 12), backgroundColor: t.c.sheet,
         borderRadius: t.terminal ? 0 : t.radius.lg, borderWidth: 1, borderColor: t.c.borderStrong, overflow: 'hidden',
         shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 24, shadowOffset: { width: 0, height: 8 }, elevation: 16 }}>
         <PickerBody {...props} />

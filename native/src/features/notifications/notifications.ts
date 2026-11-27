@@ -127,6 +127,15 @@ const turnKey = (deviceId: string, threadId: string, turnId: string) => `${devic
 export async function setTurnSubscription(deviceId: string, threadId: string, turnId: string, subscribed: boolean) {
   const key = turnKey(deviceId, threadId, turnId);
   notifyStore.set(s => ({ subscribed: { ...s.subscribed, [key]: subscribed } }));
+  // A direct Supervisor (`direct:<url>`): the subscription lives in the app, which notifies from
+  // the device socket while it runs.
+  if (deviceId.startsWith('direct:')) {
+    if (subscribed && notifyStore.get().permission !== 'granted' && !(await enableNotifications())) {
+      notifyStore.set(s => ({ subscribed: { ...s.subscribed, [key]: false } }));
+      throw new Error(translate('native.notificationsDenied'));
+    }
+    return;
+  }
   try {
     await relayFetchJson(`relay/account/notifications/turns/${encodeURIComponent(deviceId)}/${encodeURIComponent(threadId)}/${encodeURIComponent(turnId)}`,
       { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ subscribed }) });

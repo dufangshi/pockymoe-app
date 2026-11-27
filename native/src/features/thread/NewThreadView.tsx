@@ -154,7 +154,8 @@ export function NewThreadView({ deviceKey, workspaceId: initialWorkspace, onBack
   const option = options?.find(o => o.model === model.model);
   const label = (text: string) => <AppText variant="footnote" tone="muted" style={{ fontSize: 13, marginBottom: 8 }}>{text}</AppText>;
   const select = (text: string, onPress: () => void, a11y: string, testID?: string, middle = false) => (
-    <Press onPress={onPress} feedback="dim" accessibilityRole="button" accessibilityLabel={a11y} testID={testID}
+    // The choice is read with its current value ("Workspace, notes"), not only its name (D7b).
+    <Press onPress={onPress} feedback="dim" accessibilityRole="button" accessibilityLabel={a11y} accessibilityValue={{ text }} testID={testID}
       style={{ flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 44, paddingHorizontal: 11, borderRadius: t.terminal ? 0 : 8, borderWidth: 1, borderColor: t.c.borderStrong, backgroundColor: t.c.bg }}>
       <AppText variant="subhead" numberOfLines={1} ellipsizeMode={middle ? 'middle' : 'tail'} style={{ flex: 1, fontSize: 14 }}>{text}</AppText>
       <ChevronDown size={16} color={t.c.fgMuted} />

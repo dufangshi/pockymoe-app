@@ -57,6 +57,9 @@ class PockymoeNativeModule : Module() {
       if (Config.relay(context) != null) Config.saveNames(context, names)
       null
     }
+    Function("cameraAvailable") {
+      appContext.reactContext?.packageManager?.hasSystemFeature(android.content.pm.PackageManager.FEATURE_CAMERA_ANY) ?: true
+    }
     Function("stopThreadWatch") {
       val context = appContext.reactContext ?: return@Function null
       ThreadWatchService.stop(context)

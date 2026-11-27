@@ -46,8 +46,8 @@ export function IconButton({ icon: Icon, label, onPress, size = 20, tone = 'soft
   const color = { fg: t.c.fg, soft: t.c.fgSoft, muted: t.c.fgMuted, primary: t.c.primary, danger: t.c.failed, onPrimary: t.c.primaryFg, onImage: '#ffffff' }[tone];
   return (
     <Press testID={testID} onPress={onPress} onLongPress={onLongPress} disabled={disabled} feedback="dim" accessibilityRole="button" accessibilityLabel={label}
-      accessibilityState={{ disabled: !!disabled, selected: !!active }} hitSlop={4}
-      style={[{ minWidth: 40, minHeight: 40, width: Math.round(40 * Math.min(scale, 1.15)), height: Math.round(40 * Math.min(scale, 1.15)), borderRadius: t.radius.md, alignItems: 'center', justifyContent: 'center', backgroundColor: active ? t.c.hover : 'transparent' }, style]}>
+      accessibilityState={{ disabled: !!disabled, selected: !!active }} hitSlop={2}
+      style={[{ minWidth: 44, minHeight: 44, width: Math.round(44 * Math.min(scale, 1.15)), height: Math.round(44 * Math.min(scale, 1.15)), borderRadius: t.radius.md, alignItems: 'center', justifyContent: 'center', backgroundColor: active ? t.c.hover : 'transparent' }, style]}>
       <Icon size={Math.round(size * scale)} color={color} strokeWidth={t.terminal ? 1.75 : 2} />
       {badge ? <View style={{ position: 'absolute', top: 4, right: 4 }} pointerEvents="none">{badge}</View> : null}
     </Press>

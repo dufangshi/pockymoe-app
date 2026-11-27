@@ -2,7 +2,7 @@
 // turn's operations, narration and answers, changed files and failures. What opens by
 // itself follows the owner's rules: command output never; a working turn keeps its latest
 // work open; a finished turn folds into its work line.
-import { memo, useEffect, useState, type ComponentType } from 'react';
+import { memo, useEffect, useMemo, useState, type ComponentType } from 'react';
 import { ActivityIndicator, LayoutAnimation, ScrollView, View } from 'react-native';
 import type { LucideProps } from 'lucide-react-native';
 import { Bot, Brain, ChevronDown, ChevronRight, FileText, FilePen, Pencil, Globe, ListChecks, Search, SquareTerminal, Wrench, X, Sparkles, Image as ImageIcon, Webhook, Bell, Check, Lightbulb, BellRing, Info } from 'lucide-react-native';
@@ -19,7 +19,7 @@ import { useTheme, type Theme } from '../../design/theme';
 import { showMenu, showToast } from '../../design/Overlay';
 import { Image as ExpoImage } from 'expo-image';
 import { ImageViewer } from '../../design/ImageViewer';
-import { Copy as CopyIcon, Quote as QuoteIcon, CircleAlert, ChevronUp, File as FileIcon } from 'lucide-react-native';
+import { Copy as CopyIcon, Quote as QuoteIcon, CircleAlert, ChevronUp, File as FileIcon, ImageOff } from 'lucide-react-native';
 import { parseQuotedPrompt, type PromptQuote } from '../../../vendor/pockymoe/thread-ui/components/composer/promptQuotes';
 import { fileBadge, fileFamily, shortFileName } from '../../../vendor/pockymoe/thread-ui/components/attachments/attachmentFiles';
 import { mixColor, withAlpha } from '../../design/contrast';
@@ -34,6 +34,8 @@ import { agentKeyOf, themeAgentName } from '../../../vendor/pockymoe/thread-ui/c
 import { formatDurationSeconds } from '../../../vendor/pockymoe/thread-ui/components/timeline/durationFormatting';
 import { entryItems, foldReply, hiddenAmount, itemStatus, promptAttachments, promptPreviewEnd, type Section, type TurnView } from './model';
 import type { LocalPrompt } from '../../state/threadDetail';
+import { DiffViewer } from '../diff/DiffViewer';
+import { parsePatch } from '../diff/model';
 
 export interface TurnActions {
   quote(item: ThreadHistoryItemDto, turnId: string, from: 'assistant' | 'user'): void;
@@ -175,16 +177,25 @@ function AttachmentTile({ path, photo = false, actions, localUri }: { path: stri
   const t = useTheme();
   const name = path.split('/').pop() ?? path;
   const [uri, setUri] = useState<string | null>(localUri ?? null);
+  const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
   const [viewing, setViewing] = useState(false);
-  useEffect(() => { if (!photo || localUri) return; let live = true; actions.loadImage(path).then(u => { if (live) setUri(u); }, () => undefined); return () => { live = false; }; }, [path, photo, actions, localUri]);
+  // A photo that cannot be loaded says so and loads again on a tap, instead of spinning (D16).
+  useEffect(() => {
+    if (!photo || localUri) return;
+    let live = true; setFailed(false);
+    actions.loadImage(path).then(u => { if (live) setUri(u); }, () => { if (live) setFailed(true); });
+    return () => { live = false; };
+  }, [path, photo, actions, localUri, attempt]);
   const family = fileFamily(name, photo ? 'photo' : 'file');
   const badge = fileBadge(name);
   return (
     <>
-      <Press onPress={photo ? () => uri && setViewing(true) : () => showToast(path, 'info')} feedback="dim" accessibilityRole={photo ? 'imagebutton' : 'button'} accessibilityLabel={name}
+      <Press onPress={photo ? () => (failed ? setAttempt(n => n + 1) : uri && setViewing(true)) : () => showToast(path, 'info')} feedback="dim" accessibilityRole={photo ? 'imagebutton' : 'button'}
+        accessibilityLabel={failed ? `${name}, ${translate('native.imageFailed')}` : name} accessibilityHint={failed ? translate('common.retry') : undefined}
         style={{ width: 78, height: 66, margin: 3, paddingTop: 5, paddingHorizontal: 5, paddingBottom: 4, gap: 3, alignItems: 'center', borderWidth: 1, borderColor: t.c.border, borderRadius: t.terminal ? 0 : 10, backgroundColor: t.c.surface }}>
         <View style={{ width: '100%', height: 40, alignItems: 'center', justifyContent: 'center', borderRadius: t.terminal ? 0 : 6, overflow: 'hidden' }}>
-          {photo ? (uri ? <ExpoImage source={{ uri }} style={{ width: '100%', height: '100%' }} contentFit="cover" /> : <ActivityIndicator size="small" color={t.c.fgMuted} />) : (
+          {photo ? (uri ? <ExpoImage source={{ uri }} style={{ width: '100%', height: '100%' }} contentFit="cover" /> : failed ? <ImageOff size={22} color={t.c.fgMuted} /> : <ActivityIndicator size="small" color={t.c.fgMuted} />) : (
             <View style={{ width: 28, height: 34 }}>
               <FileIcon size={34} strokeWidth={1.3} color={t.c.fgMuted} style={{ position: 'absolute', left: -3 }} />
               {badge ? <View style={{ position: 'absolute', bottom: 4, alignSelf: 'center', paddingHorizontal: 3, borderRadius: 3, backgroundColor: FILE_FAMILY_COLOR[family] ?? FILE_FAMILY_COLOR.other }}>
@@ -218,12 +229,22 @@ function OutputSheet({ item, onClose, actions }: { item: ThreadHistoryItemDto | 
     return () => { live = false; };
   }, [item, actions]);
   const t = useTheme();
+  // A file change's detail is a patch: show it in the Git panel's coloured diff viewer (D9).
+  const patch = useMemo(() => {
+    if (!text || item?.kind !== 'fileChange' || !text.includes('@@')) return null;
+    const parsed = parsePatch(text);
+    return parsed.files.length ? parsed : null;
+  }, [text, item?.kind]);
   return (
     <Sheet visible={!!item} onClose={onClose} title={item ? itemTitle(item) : ''} subtitle={item?.status ?? null} tall scroll={false}>
       <View style={{ flex: 1, paddingHorizontal: 12 }}>
         {text === null && !error ? <ActivityIndicator style={{ marginTop: 24 }} color={t.c.primary} /> : null}
         {error ? <AppText tone="danger">{error}</AppText> : null}
-        {text !== null ? (
+        {text !== null && patch ? (
+          <View style={{ flex: 1, borderRadius: t.radius.md, borderWidth: 1, borderColor: t.c.border, overflow: 'hidden' }}>
+            <DiffViewer patch={text} parsed={patch} single={patch.files.length === 1} hideFileHeading={patch.files.length === 1} copyValue={text} />
+          </View>
+        ) : text !== null ? (
           <View style={{ flex: 1, backgroundColor: t.c.code, borderRadius: t.radius.md, borderWidth: 1, borderColor: t.c.border }}>
             <View style={{ alignItems: 'flex-end' }}><CopyButton value={text} /></View>
             <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: 10, paddingBottom: 16 }}>
@@ -532,8 +553,11 @@ function WorkLine({ view, open, canOpen, onToggle, onFiles, durationMs, loading,
         {loading ? <ActivityIndicator size="small" color={t.c.fgMuted} /> : null}
       </Press>
       {edits ? (
-        <AppText variant="caption" tone="soft" onPress={onFiles} accessibilityRole="button" accessibilityLabel={translate('chat.logEdits', { count: edits })}
-          style={{ fontSize: 12, textDecorationLine: 'underline', textDecorationStyle: 'dotted', paddingVertical: 6 }}>{`±${edits}`}</AppText>
+        // A 44 pt target around the small "±N" (D14).
+        <Press onPress={onFiles} feedback="dim" accessibilityRole="button" accessibilityLabel={translate('chat.logEdits', { count: edits })}
+          hitSlop={{ top: 12, bottom: 12, left: 10, right: 10 }} style={{ minHeight: 28, justifyContent: 'center', paddingHorizontal: 4 }}>
+          <AppText variant="caption" tone="soft" style={{ fontSize: 12, textDecorationLine: 'underline', textDecorationStyle: 'dotted' }}>{`±${edits}`}</AppText>
+        </Press>
       ) : null}
       {!plain ? <Rule color={withAlpha(t.terminal ? (t.mode === 'dark' ? '#5b6560' : '#6a6a65') : t.c.fgMuted, 0.45)} dashed style={{ flex: 1, minWidth: 16 }} /> : null}
     </View>

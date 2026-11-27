@@ -8,8 +8,8 @@ import { translate } from '../../i18n';
 import { notifyStore, setTurnSubscription } from './notifications';
 
 export function TurnBell({ deviceKey, threadId, turnId }: { deviceKey: string; threadId: string; turnId: string }) {
-
-  const deviceId = deviceKey.startsWith('relay:') ? deviceKey.slice(6) : null;
+  // A direct Supervisor has no relay account to hold the subscription: the app keeps it (Q3).
+  const deviceId = deviceKey.startsWith('relay:') ? deviceKey.slice(6) : deviceKey;
   const scope = notifyStore.useValue(s => s.scope);
   const on = notifyStore.useValue(s => !!deviceId && !!s.subscribed[`${deviceId}/${threadId}/${turnId}`]);
   if (!deviceId || scope !== 'subscribed') return null;

@@ -229,7 +229,7 @@ export function ThreadList({ deviceKey, selectedThreadId, onOpen, onNewThread, o
     const titleColor = quiet ? t.c.fgSoft : t.c.fg;
     return (
       <Press onPress={() => onOpen(th.id)} onLongPress={() => threadMenu(th, item.workspace)} testID={`thread-${th.id}`}
-        accessibilityRole="button" accessibilityState={{ selected }} accessibilityLabel={[th.title, navigationStatusLabel(status), draft ? `${translate('native.draft')}: ${draft}` : subtitle, children ? translate('native.agentThreadCount', { count: children }) : null, starred ? translate('workbench.shortcuts') : null].filter(Boolean).join(', ')}
+        accessibilityRole="button" accessibilityState={{ selected }} accessibilityLabel={[th.title, navigationStatusLabel(status), draft ? `${translate('native.draft')}: ${draft}` : subtitle, children ? translate('native.agentThreadCount', { count: children }) : null, starred ? translate('native.starred') : null].filter(Boolean).join(', ')}
         style={{ flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 52, paddingVertical: 5, paddingLeft: 18, paddingRight: 12, marginHorizontal: 6, borderRadius: t.radius.md,
           backgroundColor: selected ? t.c.accentSoft : 'transparent' }}>
         {/* As the Web packs: Classic shows only the mark; Plum Pocket its round avatar and

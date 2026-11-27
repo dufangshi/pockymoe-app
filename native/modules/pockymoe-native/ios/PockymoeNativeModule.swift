@@ -1,4 +1,5 @@
 import ExpoModulesCore
+import UIKit
 
 /// iPhones and iPads do not fold. The module answers the same API as Android so the
 /// workspace shell needs no platform branch: no hinge, never separating.
@@ -17,5 +18,11 @@ public class PockymoeNativeModule: Module {
     Function("startThreadWatch") { (_: String, _: String, _: String, _: [String: String]) -> Bool in false }
     Function("stopThreadWatch") {}
     Function("rememberThreadNames") { (_: [String: String]) in }
+
+    // Simulators, and iPads or Macs without a camera: presenting the camera picker there aborts
+    // the app (UIImagePickerController rejects an unavailable source type).
+    Function("cameraAvailable") { () -> Bool in
+      UIImagePickerController.isSourceTypeAvailable(.camera)
+    }
   }
 }

@@ -54,7 +54,7 @@ export function ThreadDock({ deviceKey, threadId, onInspector, onSwitch, onMore 
         {segment(MessageSquare, translate('workbench.chat'), true, () => undefined)}
         {segment(FolderOpen, translate('native.files'), false, () => onInspector('files'))}
       </View>
-      <Press onPress={onMore ?? (() => onInspector('git'))} feedback="dim" accessibilityRole="button" accessibilityLabel={translate('native.more')}
+      <Press onPress={onMore ?? (() => onInspector('git'))} feedback="dim" accessibilityRole="button" accessibilityLabel={translate('native.threadActions')}
         style={{ width: 44, height: 44, alignItems: 'center', justifyContent: 'center', borderRadius: 13 }}>
         <MoreHorizontal size={20} color={t.plum ? '#f6e9d2' : t.c.fgSoft} />
       </Press>

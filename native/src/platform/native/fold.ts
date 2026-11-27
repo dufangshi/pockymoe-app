@@ -9,6 +9,8 @@ interface PockymoeNative {
   startThreadWatch?(relay: string, token: string, scheme: string, texts: Record<string, string>): boolean;
   stopThreadWatch?(): void;
   rememberThreadNames?(names: Record<string, string>): void;
+  /** False on simulators and devices without a camera (iOS aborts on an unavailable camera). */
+  cameraAvailable?(): boolean;
 }
 export const pockymoeNative = requireOptionalNativeModule<PockymoeNative>('PockymoeNative');
 const native = pockymoeNative;

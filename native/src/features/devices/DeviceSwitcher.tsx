@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, type ComponentRef, type ReactNode } from 'react';
 import { View } from 'react-native';
 import { ArrowRight, Check, Folder, List, Lock, Plus, Laptop, Cloud, Info, MoreHorizontal, RefreshCw, Trash2, Copy as CopyIcon } from 'lucide-react-native';
+import { Globe as GlobeIcon } from 'lucide-react-native';
 import { IconButton } from '../../design/Button';
 import { confirmAsync, showMenu, type Anchor } from '../../design/Overlay';
 import { AppText } from '../../design/AppText';
@@ -127,7 +128,7 @@ export function groupDevices(devices: DeviceEntry[]) {
   return { groups, titled: groups.length > 1 };
 }
 
-export function DeviceList({ selectedKey, onSelect, onAdd, onPasscode, onNewThread }: { selectedKey: string | null; onSelect: (key: string) => void; onAdd: () => void; onPasscode?: (url: string) => void; onNewThread?: (key: string) => void }) {
+export function DeviceList({ selectedKey, onSelect, onAdd, onAddRelay, onPasscode, onNewThread }: { selectedKey: string | null; onSelect: (key: string) => void; onAdd: () => void; /** Shown while no relay account is set up (D11). */ onAddRelay?: () => void; onPasscode?: (url: string) => void; onNewThread?: (key: string) => void }) {
   const t = useTheme();
   const devices = devicesStore.useValue(allDevices, (a, b) => a.length === b.length && a.every((d, i) => d === b[i]));
   const [detail, setDetail] = useState<string | null>(null);
@@ -150,6 +151,12 @@ export function DeviceList({ selectedKey, onSelect, onAdd, onPasscode, onNewThre
         <View style={{ width: 34, alignItems: 'center' }}><Plus size={18} color={t.c.accentStrong} /></View>
         <AppText variant="callout" tone="accent">{translate('native.addSupervisor')}</AppText>
       </Press>
+      {onAddRelay ? (
+        <Press onPress={onAddRelay} accessibilityRole="button" testID="add-relay" style={{ flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 50, paddingHorizontal: 10, borderRadius: t.radius.md }}>
+          <View style={{ width: 34, alignItems: 'center' }}><GlobeIcon size={18} color={t.c.accentStrong} /></View>
+          <AppText variant="callout" tone="accent">{translate('native.relayAccount')}</AppText>
+        </Press>
+      ) : null}
       <DeviceDetail deviceKey={detail} onClose={() => setDetail(null)} selected={detail === selectedKey} onOpen={onSelect} onPasscode={onPasscode} />
     </View>
   );
