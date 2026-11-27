@@ -38,7 +38,16 @@ appId: com.pockymoe.app.dev
     visible: "Search models"
     timeout: 20000
 - takeScreenshot: ${OUT}05-picker
-- tapOn: "Close"
+# Phones close the sheet; the tablet popover has no Close and closes on a tap outside it.
+- tapOn:
+    text: "Close"
+    optional: true
+- runFlow:
+    when:
+      visible: "Search models"
+    commands:
+      - tapOn:
+          point: "50%,8%"
 - hideKeyboard:
     optional: true
 # Phones go back to the list; tablets show it beside the thread.
