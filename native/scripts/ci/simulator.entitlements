@@ -3,9 +3,11 @@
 <!-- Simulator-only entitlements for the CI build (Xcode signs ad hoc and embeds them as the
      simulated entitlements): without an application identifier and keychain group every
      Keychain call fails with -34018, and the app keeps its account keys in the Keychain.
-     Not used for device builds. -->
+     aps-environment keeps what expo-notifications sets (the build replaces that file), so the
+     app can ask for an APNs token. Not used for device builds. -->
 <plist version="1.0"><dict>
 <key>application-identifier</key><string>SIMULATOR0.com.pockymoe.app.dev</string>
 <key>keychain-access-groups</key><array><string>SIMULATOR0.com.pockymoe.app.dev</string></array>
+<key>aps-environment</key><string>development</string>
 <key>get-task-allow</key><true/>
 </dict></plist>

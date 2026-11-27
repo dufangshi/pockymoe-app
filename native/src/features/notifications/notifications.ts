@@ -19,6 +19,7 @@ import { selectionStore } from '../../layout/selection';
 import Constants from 'expo-constants';
 import * as Linking from 'expo-linking';
 import { pockymoeNative } from '../../platform/native/fold';
+import { apnsSubscription, noticeFields, noticeTarget } from './apns';
 import { relaySessionToken } from '../../platform/relaySession';
 
 export type Scope = 'subscribed' | 'all' | 'selected';
@@ -34,7 +35,13 @@ export const notifyStore = createStore<NotifyState>({ permission: 'unknown', sco
 export const visibleThread = { key: null as string | null };
 
 Notifications.setNotificationHandler({
-  handleNotification: async () => ({ shouldShowBanner: true, shouldShowList: true, shouldPlaySound: false, shouldSetBadge: false }),
+  // While the app is open its device sockets post their own notices (which skip the thread on
+  // screen), so a relay APNs push arriving then is not shown a second time.
+  handleNotification: async notification => {
+    const remote = (notification.request.trigger as { type?: string } | null)?.type === 'push';
+    const show = !(remote && AppState.currentState === 'active');
+    return { shouldShowBanner: show, shouldShowList: show, shouldPlaySound: false, shouldSetBadge: false };
+  },
 });
 
 const relayFetchJson = async <T,>(path: string, init?: RequestInit) => {
@@ -48,7 +55,6 @@ export async function enableNotifications() {
   const current = await Notifications.getPermissionsAsync();
   const result = current.granted ? current : await Notifications.requestPermissionsAsync();
   notifyStore.set({ permission: result.granted ? 'granted' : 'denied' });
-  if (result.granted && Platform.OS === 'ios' && accountStore.get().phase === 'ready') await registerApns();
   syncBackgroundWatch();
   return result.granted;
 }
@@ -62,6 +68,7 @@ export function syncBackgroundWatch() {
   const account = accountStore.get();
   // Signed out: notices that name threads go too (both platforms).
   if (account.phase === 'signedOut' || account.phase === 'none') void Notifications.dismissAllNotificationsAsync().catch(() => undefined);
+  if (Platform.OS === 'ios') { syncApns(); return; }
   if (Platform.OS !== 'android' || !pockymoeNative?.startThreadWatch) return;
   const token = relaySessionToken();
   if (account.phase === 'ready' && account.origin && token && notifyStore.get().permission === 'granted') {
@@ -98,13 +105,34 @@ deviceDataStore.subscribe(() => {
   namesTimer = setTimeout(() => { namesTimer = null; rememberNames(); }, 3000);
 });
 
-async function registerApns() {
+/**
+ * iOS: registers this install's APNs token with the signed-in relay (docs/thread-notifications.md,
+ * relay apns.rs). The relay sends with its POCKYMOE_APNS_TOPIC (app kind "ios"); a development
+ * build's token belongs to Apple's sandbox. 503: the relay has no APNs keys or topic.
+ */
+async function registerApns(deviceToken?: string) {
+  const origin = accountStore.get().origin;
+  if (!origin) return;
   try {
-    const token = await Notifications.getDevicePushTokenAsync();
+    const token = deviceToken ?? String((await Notifications.getDevicePushTokenAsync()).data);
     const response = await fetch(relayUrl('relay/account/notifications/native'), { method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ deviceToken: String(token.data), sandbox: __DEV__, appKind: 'ios' }) });
+      body: JSON.stringify(apnsSubscription(token, origin, String(Constants.expoConfig?.extra?.variant ?? 'development'))) });
     notifyStore.set({ native: response.ok ? 'registered' : response.status === 503 ? 'unavailable' : 'failed' });
+    apnsRegistered = response.ok ? `${origin}\u0000${token}` : null;
   } catch { notifyStore.set({ native: 'failed' }); }
+}
+
+// Registered once per relay and token; again when iOS hands out a new token.
+let apnsRegistered: string | null = null;
+let apnsTokenListener: { remove(): void } | null = null;
+function syncApns() {
+  const account = accountStore.get();
+  const ready = account.phase === 'ready' && !!account.origin && notifyStore.get().permission === 'granted';
+  if (!ready) { apnsRegistered = null; return; }
+  apnsTokenListener ??= Notifications.addPushTokenListener(token => { if (accountStore.get().phase === 'ready') void registerApns(String(token.data)); });
+  if (apnsRegistered?.startsWith(`${account.origin}\u0000`)) return;
+  apnsRegistered = `${account.origin}\u0000`;
+  void registerApns();
 }
 
 export async function loadNotificationScope() {
@@ -156,7 +184,8 @@ export function notifyFromEvent(deviceKey: string, event: ThreadEventEnvelope) {
   const key = `${deviceKey}::${event.threadId}`;
   if (AppState.currentState === 'active' && visibleThread.key === key) return;
   // In the background, Android's watch service posts relay notices; avoid doubles.
-  if (Platform.OS === 'android' && AppState.currentState !== 'active' && notifyStore.get().native === 'registered' && deviceKey.startsWith('relay:')) return;
+  // (iOS: the relay's APNs push does the same.)
+  if (AppState.currentState !== 'active' && notifyStore.get().native === 'registered' && deviceKey.startsWith('relay:')) return;
   const deviceId = deviceKey.startsWith('relay:') ? deviceKey.slice(6) : deviceKey;
   const turnId = 'turnId' in event.payload ? String(event.payload.turnId) : event.type === 'thread.request.created' ? event.payload.request.turnId ?? '' : '';
   const scope = notifyStore.get().scope;
@@ -182,14 +211,16 @@ export function notifyFromEvent(deviceKey: string, event: ThreadEventEnvelope) {
 
 /** A tapped notification opens its thread. */
 export function installNotificationRouting() {
-  const open = (data: unknown) => {
-    const { deviceKey, threadId } = (data ?? {}) as { deviceKey?: string; threadId?: string };
-    if (!deviceKey || !threadId || !navigationRef.isReady()) return;
+  // A tap that launched the app arrives before navigation is ready: retry for a few seconds.
+  const open = (target: { deviceKey: string; threadId: string } | null, tries = 40) => {
+    if (!target) return;
+    if (!navigationRef.isReady()) { if (tries > 0) setTimeout(() => open(target, tries - 1), 250); return; }
+    const { deviceKey, threadId } = target;
     selectionStore.set({ deviceKey });
     navigationRef.navigate('Thread', { deviceKey, threadId });
   };
-  void Notifications.getLastNotificationResponseAsync().then(r => r && open(r.notification.request.content.data));
-  const sub = Notifications.addNotificationResponseReceivedListener(r => open(r.notification.request.content.data));
+  void Notifications.getLastNotificationResponseAsync().then(r => r && open(noticeTarget(noticeFields(r.notification.request.trigger, r.notification.request.content.data))));
+  const sub = Notifications.addNotificationResponseReceivedListener(r => open(noticeTarget(noticeFields(r.notification.request.trigger, r.notification.request.content.data))));
   // Background watch notices open `<scheme>://thread/<device>/<thread>`.
   const openUrl = (url: string | null) => {
     if (!url) return;

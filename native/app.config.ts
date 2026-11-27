@@ -75,7 +75,8 @@ const config: ExpoConfig = {
     ['expo-image-picker', { cameraPermission: 'Take a photo to attach to a prompt.', microphonePermission: false }],
     // Status-bar icon: the >_ badge of the basket logo as a white disc (the full logo is a blob
     // at 24 dp); tinted with Classic's primary fill.
-    ['expo-notifications', { icon: './assets/notification-icon.png', color: '#008650' }],
+    // aps-environment: Apple's sandbox for development builds, production for preview and release.
+    ['expo-notifications', { icon: './assets/notification-icon.png', color: '#008650', mode: variant === 'development' ? 'development' : 'production' }],
     'react-native-quick-crypto',
   ],
   experiments: { reactCompiler: true },
