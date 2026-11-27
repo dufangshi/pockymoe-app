@@ -52,6 +52,17 @@ final class LiveActivityManager {
         Task { for value in old { await value.end(nil, dismissalPolicy: .immediate) } }
     }
 
+    /// CI's Live Activity check: launched with `-PockymoeActivityFixture` the app shows sample
+    /// threads (a running one, one waiting) so the simulator's lock screen and Dynamic Island
+    /// can be captured. Never used otherwise.
+    func showFixture() async {
+        let iso = ISO8601DateFormatter()
+        func item(_ id: String, _ title: String, _ state: String, _ seconds: Double) -> ActivityItem {
+            .init(key: "fixture:\(id)", deviceId: "fixture", deviceName: "Studio Linux", workspaceLabel: "notes", threadId: id, title: title, state: state, since: iso.string(from: Date(timeIntervalSinceNow: -seconds)))
+        }
+        await sync(.init(accountId: "fixture", items: [item("1", "Fix the login flow", "running", 134), item("2", "Explain the relay", "needsInput", 40)]))
+    }
+
     private func apply(_ snapshot: ActivitySnapshot, generation: UUID) async {
         guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
         ActivityMetadataCache.save(snapshot)

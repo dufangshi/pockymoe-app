@@ -8,6 +8,15 @@ public class PockymoeNativeModule: Module {
     Name("PockymoeNative")
     Events("fold", "liveActivityToken")
 
+    OnCreate {
+      guard ProcessInfo.processInfo.arguments.contains("-PockymoeActivityFixture") else { return }
+      Task { @MainActor in
+        // The activity starts only from the foreground app.
+        try? await Task.sleep(nanoseconds: 4_000_000_000)
+        await self.liveActivities().showFixture()
+      }
+    }
+
     Function("startFoldUpdates") {
       self.sendEvent("fold", ["hingeX": NSNull(), "hingeWidth": 0, "separating": false, "halfOpened": false])
     }
