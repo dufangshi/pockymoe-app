@@ -1,8 +1,10 @@
 // A model's reasoning levels as one compact slider (the Web's EffortSlider, shared UI bab9756,
 // owner's variant A): "Effort · high" on the left, then a 3 pt track inset by half a thumb so the
 // thumb's centre sits on each level's tick. Discrete steps; the label follows the finger and the
-// level is applied when the drag ends. Plum Pocket fills with its level colours on a gradient
-// from lavender; Terminal draws square blocks and a square thumb.
+// level is applied when the drag ends. The level's colour (shared UI b251204) rings the thumb and
+// inks its name, and the fill passes through every level's colour up to it; light pages darken
+// the scale. Plum Pocket fills with its level colours on a gradient from lavender; Terminal draws
+// square blocks, each in its level's colour, and a square thumb.
 import { useEffect, useRef, useState } from 'react';
 import { Animated, Easing, PanResponder, View, type LayoutChangeEvent } from 'react-native';
 import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
@@ -13,7 +15,7 @@ import { haptic } from '../../design/haptics';
 import { useTheme } from '../../design/theme';
 import { translate } from '../../i18n';
 import { effortLabel } from './effort';
-import { effortColor, effortIndexAt, effortStopX, orderedEfforts, plumEffortColor } from './effortModel';
+import { effortColor, effortIndexAt, effortSliderColors, effortStopX, orderedEfforts } from './effortModel';
 
 const THUMB = 14;
 const TRACK = 3;
@@ -79,8 +81,8 @@ export function EffortSlider({ efforts, value, defaultEffort, disabled, onChange
 
   if (!count) return null;
   const level = options[shown]!.reasoningEffort;
-  const accent = t.plum ? plumEffortColor(level, shown, count) : t.c.primary;
-  const ring = t.plum ? accent : t.c.primary;
+  const colors = effortSliderColors(options, shown, { plum: t.plum, dark: t.mode === 'dark' });
+  const ring = colors.accent;
   const trackBg = t.plum ? withAlpha('#d9c2a0', 0.55) : withAlpha(t.c.fg, 0.14);
   const tickBg = withAlpha(t.c.fg, 0.32);
   const tickOnFill = withAlpha(t.c.panel, 0.75);
@@ -92,7 +94,7 @@ export function EffortSlider({ efforts, value, defaultEffort, disabled, onChange
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: ROW, opacity: disabled ? 0.5 : 1 }}>
       <AppText variant="caption" tone="muted" numberOfLines={1} style={{ minWidth: 118, fontSize: 12 }}>
-        {translate('chat.effort')}<AppText variant="caption" weight="semibold" style={{ fontSize: 12 }}>{` · ${effortLabel(level)}`}</AppText>
+        {translate('chat.effort')}<AppText variant="caption" weight="semibold" color={colors.ink} style={{ fontSize: 12 }}>{` · ${effortLabel(level)}`}</AppText>
       </AppText>
       <View onLayout={onLayout} {...responder.panHandlers} style={{ flex: 1, height: ROW, justifyContent: 'center' }}
         accessible accessibilityRole="adjustable" accessibilityLabel={translate('chat.effort')} accessibilityValue={{ text: effortLabel(options[selected]!.reasoningEffort) }}
@@ -101,17 +103,21 @@ export function EffortSlider({ efforts, value, defaultEffort, disabled, onChange
         {width ? (t.terminal ? (
           // Terminal: n-1 square blocks between the ticks, filled up to the thumb.
           <View pointerEvents="none" style={{ flexDirection: 'row', gap: 2, marginHorizontal: inset, height: 8 }}>
-            {options.slice(1).map((_, i) => <View key={i} style={{ flex: 1, backgroundColor: i < shown ? t.c.primary : withAlpha(t.c.fg, 0.14) }} />)}
+            {options.slice(1).map((option, i) => <View key={i} style={{ flex: 1, backgroundColor: i < shown ? effortColor(option.reasoningEffort, i + 1, count) : withAlpha(t.c.fg, 0.14) }} />)}
           </View>
         ) : (
           <View pointerEvents="none" style={{ marginHorizontal: inset, height: TRACK, borderRadius: TRACK, backgroundColor: trackBg }}>
-            <Animated.View style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: fillWidth, borderRadius: TRACK, overflow: 'hidden', backgroundColor: t.plum ? undefined : accent }}>
-              {t.plum ? (
-                <Svg width="100%" height={TRACK}>
-                  <Defs><LinearGradient id="fill" x1="0" y1="0" x2="1" y2="0"><Stop offset="0" stopColor="#9479cf" /><Stop offset="1" stopColor={accent} /></LinearGradient></Defs>
-                  <Rect x="0" y="0" width="100%" height={TRACK} fill="url(#fill)" />
-                </Svg>
-              ) : null}
+            <Animated.View style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: fillWidth, borderRadius: TRACK, overflow: 'hidden' }}>
+              {/* The gradient spans the filled part at the chosen level (an SVG does not follow its
+                  animated container's width); the container clips it while it moves. */}
+              <Svg width={Math.max(1, effortStopX(shown, count, width, thumbSize) - inset)} height={TRACK}>
+                <Defs>
+                  <LinearGradient id="fill" x1="0" y1="0" x2="1" y2="0">
+                    {colors.fill.map((color, i) => <Stop key={i} offset={String(i / (colors.fill.length - 1))} stopColor={color} />)}
+                  </LinearGradient>
+                </Defs>
+                <Rect x="0" y="0" width="100%" height={TRACK} fill="url(#fill)" />
+              </Svg>
             </Animated.View>
             {options.map((_, i) => (
               <View key={i} style={{ position: 'absolute', top: 0, left: effortStopX(i, count, width, thumbSize) - inset - 1.5, width: 3, height: 3, borderRadius: 1.5,

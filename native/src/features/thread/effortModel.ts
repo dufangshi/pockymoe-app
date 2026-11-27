@@ -36,3 +36,32 @@ export function effortIndexAt(x: number, count: number, width: number, thumb: nu
   const span = Math.max(1, width - thumb);
   return Math.max(0, Math.min(count - 1, Math.round(((x - thumb / 2) / span) * (count - 1))));
 }
+
+/**
+ * The slider's colours for the level at `index` (the Web's composer-model-picker.css, shared UI
+ * b251204 "Effort slider takes the level's colour"): the accent (thumb ring), the level name's ink
+ * and the fill's stops through every level up to it, so the slider warms as the level rises.
+ * Light pages darken the scale for contrast. Plum Pocket keeps its own scale and fill.
+ */
+export function effortSliderColors(options: { reasoningEffort: string }[], index: number, { plum, dark }: { plum: boolean; dark: boolean }) {
+  const count = options.length;
+  const level = options[index]?.reasoningEffort;
+  if (plum) {
+    const color = plumEffortColor(level, index, count);
+    return { accent: color, ink: dark ? mix(color, '#fff6ea', 0.4) : mix(color, '#1f0f26', 0.45), fill: ['#9479cf', color] };
+  }
+  const color = effortColor(level, index, count);
+  const stops = options.slice(0, index + 1).map((option, at) => effortColor(option.reasoningEffort, at, count));
+  return {
+    accent: dark ? color : mix(color, '#000000', 0.18),
+    ink: dark ? color : mix(color, '#000000', 0.32),
+    fill: stops.length > 1 ? stops : [color, color],
+  };
+}
+
+/** `amount` of the way from a to b, in sRGB (#rrggbb). */
+function mix(a: string, b: string, amount: number) {
+  const parse = (hex: string) => [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16));
+  const [x, y] = [parse(a), parse(b)];
+  return `#${x.map((v, i) => Math.round(v + (y[i]! - v) * amount).toString(16).padStart(2, '0')).join('')}`;
+}
