@@ -37,6 +37,12 @@ const iosBundleId = process.env.POCKYMOE_IOS_BUNDLE_ID?.trim() || ids.id;
 const iosTeamId = process.env.POCKYMOE_IOS_TEAM_ID?.trim() || undefined;
 const iosPush = iosSigning !== 'personal';
 
+// Android ABIs: release builds for phones only (arm64-v8a; Android phones of the last years are
+// 64-bit ARM); development and preview builds also run on x86_64 emulators and 32-bit ARM.
+// POCKYMOE_ANDROID_ABIS (comma-separated) overrides, e.g. to try a release build on an emulator.
+const androidAbis = process.env.POCKYMOE_ANDROID_ABIS?.split(',').map((abi: string) => abi.trim()).filter(Boolean)
+  ?? (variant === 'production' ? ['arm64-v8a'] : ['arm64-v8a', 'armeabi-v7a', 'x86_64']);
+
 const config: ExpoConfig = {
   name: ids.name,
   slug: 'pockymoe-native',
@@ -95,8 +101,14 @@ const config: ExpoConfig = {
   },
   plugins: [
     ['expo-build-properties', {
-      // No 32-bit x86: no phone uses it; arm64 and armeabi-v7a phones, x86_64 emulators and Chromebooks.
-      android: { usesCleartextTraffic: true, minSdkVersion: 26, buildArchs: ['arm64-v8a', 'armeabi-v7a', 'x86_64'] },
+      android: {
+        usesCleartextTraffic: true, minSdkVersion: 26, buildArchs: androidAbis,
+        // Release APKs: R8 removes unused code and resources, and native libraries are stored
+        // compressed (a smaller download; Android extracts them at install).
+        enableMinifyInReleaseBuilds: true,
+        enableShrinkResourcesInReleaseBuilds: true,
+        useLegacyPackaging: true,
+      },
       ios: { deploymentTarget: '17.0' },
     }],
     ['expo-splash-screen', { image: './assets/splash-icon.png', imageWidth: 160, backgroundColor: '#e0e4e0',

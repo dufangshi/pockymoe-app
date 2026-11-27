@@ -78,6 +78,10 @@ A debug build looks for Metro at `10.0.2.2:8081`; with `adb reverse`, set the ap
 
 `npm run android:release` builds a standalone APK with the bundle inside (debug-signed).
 
+A `production` release build carries arm64-v8a only and runs R8 with resource shrinking
+(about 31 MB); development and preview builds also carry armeabi-v7a and x86_64. To try a
+production release on an x86_64 emulator, set `POCKYMOE_ANDROID_ABIS=x86_64` for prebuild.
+
 Variants (`APP_VARIANT` when running prebuild):
 
 | `APP_VARIANT` | App id / bundle id | Name | URL scheme |
@@ -88,10 +92,9 @@ Variants (`APP_VARIANT` when running prebuild):
 
 The WebView shell is `com.remotecodex.app` and owns `pockymoe://` (its relay sign-in
 callback), so the native schemes stay apart. Notification channels (`threads`,
-`pockymoe-watch`) belong to each app id. Release signing is not wired here yet: the shell
-signs with its own keystore (`REMOTE_CODEX_ANDROID_*`, alias `remote-codex-release`); the
-native app should get its own upload key (suggested alias `pockymoe-app-release`), since a
-new app id starts a new Play listing. iOS push needs the relay's APNs topic for
+`pockymoe-watch`) belong to each app id. Release builds are signed with the shell's
+release key (`plugins/withReleaseSigning.js`, `REMOTE_CODEX_ANDROID_*` or `CLIENT_ANDROID_*`;
+`scripts/assemble-signed-native-apk.sh` builds the client release's native APK). iOS push needs the relay's APNs topic for
 `com.pockymoe.app` (the relay has one topic per app kind, `POCKYMOE_APNS_TOPIC` is the shell's).
 
 iOS without a Mac: `.github/workflows/native-ios.yml` (GitHub Actions `macos-26`, newest Xcode;

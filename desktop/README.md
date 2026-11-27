@@ -221,7 +221,8 @@ Public releases contain exactly four files:
 - `Pockymoe-<version>-mac-arm64.dmg` (Apple silicon only, dedicated non-personal Pockymoe signature)
 - `Pockymoe-<version>-win-x64.exe` (x64 NSIS only)
 - `Pockymoe-Native-<version>-android.apk` (the native app `com.pockymoe.app` from `native/`, beta;
-  same key and same version as the WebView APK, installs beside it)
+  64-bit ARM phones only, R8 and resource shrinking; same key and same version as the WebView APK,
+  installs beside it)
 
 The native iOS app has no release file (no Apple developer account yet; see
 `native/docs/ios-install-personal.md`).
