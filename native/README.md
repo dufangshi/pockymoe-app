@@ -100,8 +100,7 @@ and on demand. It generates the project (`expo prebuild --platform ios`), builds
 Release for the iOS Simulator, signed ad hoc by Xcode with the simulator keychain entitlements
 (`scripts/ci/simulator.entitlements`, embedded as simulated entitlements; without them the
 Keychain refuses every call), and checks that the Release app launches and stays up. The .app
-files are the run's artifacts, plus a copy with the entitlements in the signature for simulators
-that read them only there; screens are tested on the x86sim lab with them. `.maestro/screens.yaml` walks the main screens
+files are the run's artifacts; screens are tested on the x86sim lab with them. `.maestro/screens.yaml` walks the main screens
 (`maestro test -e OUT=… -e URL=http://localhost:<port> .maestro/screens.yaml`) against a
 Supervisor seeded by `scripts/ci/seed-local.mjs`.
 

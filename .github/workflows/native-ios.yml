@@ -69,7 +69,8 @@ jobs:
           # target ad hoc with the simulator entitlements, as Xcode's "Sign to Run Locally" does:
           # Xcode puts application-identifier and keychain-access-groups into the binary's
           # simulated-entitlements section. Putting them into the ad-hoc signature itself makes
-          # the host refuse to spawn the app (POSIX 162, run 45977634252).
+          # the host refuse to spawn the app (POSIX 162, run 45977634252). The x86sim lab reads the
+          # simulated entitlements too.
           cp scripts/ci/simulator.entitlements ios/PockymoeDev/PockymoeDev.entitlements
           xcodebuild -workspace ios/PockymoeDev.xcworkspace -scheme PockymoeDev \
             -configuration ${{ matrix.configuration }} -sdk iphonesimulator \
@@ -83,12 +84,6 @@ jobs:
           echo "signature entitlements:"; codesign -d --entitlements - "$APP" 2>&1 | head -20
           echo "simulated entitlements:"; strings "$APP/PockymoeDev" | grep -A1 -E "keychain-access-groups|application-identifier" | head -8 || true
           ditto -c -k --keepParent "$APP" ../ci-out/PockymoeDev-${{ matrix.configuration }}.app.zip
-          # A copy with the entitlements in the signature as well, for simulators that read them
-          # only from there (the x86sim lab); the smoke test reports whether Apple's accepts it.
-          mkdir -p ../ci-out/signed && ditto "$APP" ../ci-out/signed/PockymoeDev.app
-          codesign --force --sign - --entitlements scripts/ci/simulator.entitlements --generate-entitlement-der ../ci-out/signed/PockymoeDev.app
-          (cd ../ci-out/signed && ditto -c -k --keepParent PockymoeDev.app ../PockymoeDev-${{ matrix.configuration }}-signature-entitlements.app.zip)
-          rm -rf ../ci-out/signed
       - name: Launch smoke test on an iPhone simulator
         if: matrix.configuration == 'Release'
         run: |
@@ -111,12 +106,6 @@ jobs:
             if grep -q -- "-34018" "$OUT/$2-device.log"; then echo "$2: Keychain entitlement errors"; grep -m3 -- "-34018" "$OUT/$2-device.log"; return 1; fi
             echo "$2: launched and running"
           }
-          # Informational: the copy with entitlements in the signature.
-          ditto -x -k ../ci-out/PockymoeDev-Release-signature-entitlements.app.zip "$OUT/signed"
-          launch "$OUT/signed/PockymoeDev.app" signature-entitlements || echo "::warning::the signature-entitlements copy does not run on Apple's simulator"
-          xcrun simctl terminate "$UDID" com.pockymoe.app.dev 2>/dev/null || true
-          xcrun simctl uninstall "$UDID" com.pockymoe.app.dev; rm -rf "$OUT/signed"
-          # Required: the app as Xcode signed it.
           launch "$APP" launch || { xcrun simctl spawn "$UDID" log show --last 5m --predicate 'eventMessage CONTAINS "com.pockymoe.app.dev"' > "$OUT/springboard.log" 2>&1 || true; exit 1; }
       - uses: actions/upload-artifact@v4
         if: always()
