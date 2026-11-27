@@ -1,0 +1,18 @@
+{
+  "platforms": [
+    "android",
+    "apple"
+  ],
+  "android": {
+    "modules": [
+      "expo.modules.pockymoenative.PockymoeNativeModule",
+      "expo.modules.pockymoenative.PockymoeKeyCommandsModule"
+    ]
+  },
+  "apple": {
+    "modules": [
+      "PockymoeNativeModule",
+      "PockymoeKeyCommandsModule"
+    ]
+  }
+}

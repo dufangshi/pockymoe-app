@@ -1,0 +1,120 @@
+name: Native iOS (simulator build and screenshots)
+# The Expo/React Native client in native/: generate the iOS project (CNG), build it for the
+# iOS Simulator, and drive the main screens against a local fake-runtime Supervisor (the
+# released v0.14.1 darwin-arm64 binary) on an iPhone and an iPad, light and dark. No signing,
+# no release: the .app, screenshots and logs are artifacts.
+on:
+  push:
+    branches: [feat/native-mobile]
+    paths:
+      - 'native/**'
+      - '.github/workflows/native-ios.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+env:
+  HOMEBREW_NO_AUTO_UPDATE: '1'
+  EXPO_NO_TELEMETRY: '1'
+  EXPO_NO_GIT_STATUS: '1'
+  CI: '1'
+concurrency:
+  group: native-ios-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  build:
+    name: ${{ matrix.configuration }} build${{ matrix.configuration == 'Release' && ', screenshots' || '' }}
+    runs-on: macos-15
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        configuration: [Debug, Release]
+    defaults:
+      run:
+        working-directory: native
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: native/package-lock.json
+      - name: Pick the newest stable Xcode
+        run: |
+          ls -d /Applications/Xcode*.app
+          XCODE=$(ls -d /Applications/Xcode_*.app | grep -v -i beta | sort -V | tail -1)
+          sudo xcode-select -s "$XCODE"
+          xcodebuild -version
+          xcrun simctl list runtimes
+      - name: Install dependencies
+        run: npm ci
+      - name: Typecheck and unit tests
+        run: |
+          npx tsc --noEmit
+          npx vitest run
+      - name: Generate the iOS project (development variant, com.pockymoe.app.dev)
+        run: npx expo prebuild --platform ios --no-install
+      - name: Install pods
+        working-directory: native/ios
+        run: pod install
+      - name: Build for the iOS Simulator
+        run: |
+          set -o pipefail
+          mkdir -p ../ci-out
+          xcodebuild -workspace ios/PockymoeDev.xcworkspace -scheme PockymoeDev \
+            -configuration ${{ matrix.configuration }} -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' -derivedDataPath ios/build \
+            CODE_SIGNING_ALLOWED=NO COMPILER_INDEX_STORE_ENABLE=NO build 2>&1 | tee ../ci-out/xcodebuild.log | grep -E "error:|warning: .*deprecated|BUILD (SUCCEEDED|FAILED)|\*\* " || true
+          test -d ios/build/Build/Products/${{ matrix.configuration }}-iphonesimulator/PockymoeDev.app
+          ditto -c -k --keepParent ios/build/Build/Products/${{ matrix.configuration }}-iphonesimulator/PockymoeDev.app ../ci-out/PockymoeDev-${{ matrix.configuration }}.app.zip
+      - name: Start a local fake-runtime Supervisor (v0.14.1) and seed it
+        if: matrix.configuration == 'Release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          LAB="$RUNNER_TEMP/lab"; mkdir -p "$LAB/home" "$LAB/ws"
+          gh release download v0.14.1 --repo dufangshi/pockymoe --pattern remote-codex-darwin-arm64 --dir "$LAB"
+          chmod +x "$LAB/remote-codex-darwin-arm64"
+          SECRET=$(openssl rand -hex 32)
+          env -i HOME="$LAB/home" USER="$USER" LANG=C.UTF-8 PATH=/usr/bin:/bin:/usr/sbin:/sbin HOST=127.0.0.1 RUST_LOG=info \
+            POCKYMOE_E2E_FAKE_RUNTIME=1 POCKYMOE_MODE=local PORT=45900 \
+            POCKYMOE_ADMIN_USERNAME=ci-admin POCKYMOE_ADMIN_PASSWORD="$SECRET" POCKYMOE_SESSION_SECRET="$SECRET" \
+            POCKYMOE_DATABASE_PATH="$LAB/db.sqlite" DATABASE_URL="$LAB/db.sqlite" \
+            POCKYMOE_WORKSPACE_ROOT="$LAB/ws" WORKSPACE_ROOT="$LAB/ws" \
+            "$LAB/remote-codex-darwin-arm64" supervisor > ../ci-out/supervisor.log 2>&1 &
+          for _ in $(seq 60); do curl -sf http://127.0.0.1:45900/healthz >/dev/null && break; sleep 1; done
+          curl -sf http://127.0.0.1:45900/healthz
+          node scripts/ci/seed-local.mjs http://127.0.0.1:45900 "$LAB/ws/notes" | tee ../ci-out/seed.json
+      - name: Install Maestro
+        if: matrix.configuration == 'Release'
+        run: |
+          curl -fsSL "https://get.maestro.mobile.dev" | bash
+          echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
+      - name: Screenshots on iPhone and iPad, light and dark
+        if: matrix.configuration == 'Release'
+        run: |
+          APP=ios/build/Build/Products/Release-iphonesimulator/PockymoeDev.app
+          OUT="$PWD/../ci-out/screens"; mkdir -p "$OUT"
+          pick() { xcrun simctl list devices available -j | python3 -c "import json,sys; ds=[d for k,v in json.load(sys.stdin)['devices'].items() if 'iOS' in k for d in v if d['name'].startswith('$1')]; print(ds[-1]['udid'])"; }
+          status=0
+          for kind in iPhone iPad; do
+            UDID=$(pick $kind); echo "$kind $UDID"
+            xcrun simctl boot "$UDID"; xcrun simctl bootstatus "$UDID" -b
+            xcrun simctl install "$UDID" "$APP"
+            for mode in light dark; do
+              xcrun simctl ui "$UDID" appearance $mode
+              xcrun simctl terminate "$UDID" com.pockymoe.app.dev || true
+              maestro --device "$UDID" test -e OUT="$OUT/$kind-$mode-" .maestro/screens.yaml --debug-output "$OUT/maestro-$kind-$mode" || status=1
+              xcrun simctl io "$UDID" screenshot "$OUT/$kind-$mode-zz-last.png" || true
+            done
+            xcrun simctl spawn "$UDID" log show --last 15m --predicate 'process == "PockymoeDev"' > "$OUT/$kind-device.log" 2>&1 || true
+            xcrun simctl shutdown "$UDID"
+          done
+          ls -la "$OUT"
+          exit $status
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: native-ios-${{ matrix.configuration }}
+          path: ci-out/
+          if-no-files-found: warn

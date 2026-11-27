@@ -8,6 +8,7 @@ Mobile:
 
 - Keep the native shell aligned with `apps/supervisor-web` in remoteCodex: same route stack, back targets, labels, and theme tokens.
 - Thread conversation stays in a WebView of the relay-hosted thread page. Do not reimplement timeline/composer natively.
+- 2026-11-26: the owner asked for a separate native Android/iOS client in `native/` (Expo/React Native, see `native/ARCHITECTURE.md`); the WebView-only rule above applies to `android/` and `ios/`, not to `native/`. Its app id is `com.pockymoe.app` (`.dev`/`.preview` for those builds); the shells keep `com.remotecodex.app`, so both install side by side.
 - Relay mode only. The first screen collects the relay origin; after that, auth is `/relay/auth/*`.
 - JSON field names are camelCase.
 - After Android or iOS changes, run the matching simulator E2E, not a web Playwright suite.

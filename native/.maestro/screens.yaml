@@ -1,0 +1,64 @@
+# Main screens of the native client for the iOS CI screenshots. The app talks to a local
+# fake-runtime Supervisor (see .github/workflows/native-ios.yml). Run with -e OUT=<dir prefix>.
+# The connect steps run only on a fresh install; a second run (dark mode) starts signed in.
+appId: com.pockymoe.app.dev
+---
+- launchApp
+- extendedWaitUntil:
+    visible: "This network.*"
+    timeout: 90000
+    optional: true
+- runFlow:
+    when:
+      visible: "This network.*"
+    commands:
+      - takeScreenshot: ${OUT}01-connect
+      - tapOn: "This network.*"
+      - tapOn:
+          id: "direct-url"
+      - inputText: "http://localhost:45900"
+      - tapOn:
+          id: "direct-connect"
+- extendedWaitUntil:
+    visible: "notes.*"
+    timeout: 60000
+- takeScreenshot: ${OUT}02-threads
+- tapOn: "Split prompt.*"
+- extendedWaitUntil:
+    visible: "Worked for.*"
+    timeout: 30000
+- takeScreenshot: ${OUT}03-thread
+- tapOn: "Message"
+- takeScreenshot: ${OUT}04-composer
+- tapOn:
+    id: "model-key"
+- extendedWaitUntil:
+    visible: "Search models"
+    timeout: 20000
+- takeScreenshot: ${OUT}05-picker
+- tapOn: "Close"
+- hideKeyboard
+- tapOn: "Reply with.*"
+- extendedWaitUntil:
+    visible: "Release notes"
+    timeout: 20000
+    optional: true
+- takeScreenshot: ${OUT}06-answer
+- tapOn:
+    id: "back"
+    optional: true
+- tapOn:
+    id: "new-thread"
+    optional: true
+- extendedWaitUntil:
+    visible: "New Thread"
+    timeout: 20000
+    optional: true
+- takeScreenshot: ${OUT}07-newthread
+- tapOn:
+    text: "Cancel"
+    optional: true
+- tapOn:
+    text: "Settings"
+    optional: true
+- takeScreenshot: ${OUT}08-settings

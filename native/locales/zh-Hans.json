@@ -1,0 +1,7 @@
+{
+  "ios": {
+    "NSCameraUsageDescription": "拍一张照片附到提示里。",
+    "NSPhotoLibraryUsageDescription": "把照片附到提示里。",
+    "NSLocalNetworkUsageDescription": "连接你网络里的 Pockymoe Supervisor。"
+  }
+}

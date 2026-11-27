@@ -1,0 +1,18 @@
+{
+  "extends": "expo/tsconfig.base",
+  "compilerOptions": {
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "resolveJsonModule": true,
+    "paths": {
+      "@pockymoe/shared": ["./vendor/pockymoe/runtime/packages/shared/src/index.ts"],
+      "@pockymoe/thread-ui/i18n": ["./src/i18n/index.ts"],
+      "@pockymoe/web/*": ["./vendor/pockymoe/runtime/apps/supervisor-web/src/lib/*"],
+      "@pockymoe/web-git/*": ["./vendor/pockymoe/runtime/apps/supervisor-web/src/components/git/*"],
+      "hash-wasm": ["./src/platform/web/hashWasm.ts"]
+    },
+    "types": ["node"]
+  },
+  "include": ["src", "test", "index.ts", "app.config.ts", "src/types/*.d.ts"],
+  "exclude": ["node_modules", "android", "ios", "vendor"]
+}
