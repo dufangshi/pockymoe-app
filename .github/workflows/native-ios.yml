@@ -1,8 +1,8 @@
-name: Native iOS (simulator build and screenshots)
+name: Native iOS (simulator build and launch)
 # The Expo/React Native client in native/: generate the iOS project (CNG), build it for the
-# iOS Simulator, and drive the main screens against a local fake-runtime Supervisor (the
-# released v0.14.1 darwin-arm64 binary) on an iPhone and an iPad, light and dark. No signing,
-# no release: the .app, screenshots and logs are artifacts.
+# iOS Simulator (Debug and Release, signed ad hoc with simulator keychain entitlements), and
+# check that the Release app launches and stays up. Screen-by-screen iOS testing happens on the
+# x86sim lab with these .app artifacts; no device signing, no release.
 on:
   push:
     branches: [feat/native-mobile]
@@ -25,7 +25,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   build:
-    name: ${{ matrix.configuration }} build${{ matrix.configuration == 'Release' && ', screenshots' || '' }}
+    name: ${{ matrix.configuration }} build${{ matrix.configuration == 'Release' && ', launch' || '' }}
     runs-on: macos-26
     timeout-minutes: 90
     strategy:
@@ -72,54 +72,29 @@ jobs:
           grep -E " error:|\*\* BUILD" ../ci-out/xcodebuild.log | head -40 || true
           [ -z "${status:-}" ] || { tail -40 ../ci-out/xcodebuild.log; exit "$status"; }
           test -f ios/build/Build/Products/${{ matrix.configuration }}-iphonesimulator/PockymoeDev.app/Info.plist
-          ditto -c -k --keepParent ios/build/Build/Products/${{ matrix.configuration }}-iphonesimulator/PockymoeDev.app ../ci-out/PockymoeDev-${{ matrix.configuration }}.app.zip
-      - name: Start a local fake-runtime Supervisor (v0.14.1) and seed it
-        if: matrix.configuration == 'Release'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          LAB="$RUNNER_TEMP/lab"; mkdir -p "$LAB/home" "$LAB/ws"
-          gh release download v0.14.1 --repo dufangshi/pockymoe --pattern remote-codex-darwin-arm64 --dir "$LAB"
-          chmod +x "$LAB/remote-codex-darwin-arm64"
-          SECRET=$(openssl rand -hex 32)
-          env -i HOME="$LAB/home" USER="$USER" LANG=C.UTF-8 PATH=/usr/bin:/bin:/usr/sbin:/sbin HOST=127.0.0.1 RUST_LOG=info \
-            POCKYMOE_E2E_FAKE_RUNTIME=1 POCKYMOE_MODE=local PORT=45900 \
-            POCKYMOE_ADMIN_USERNAME=ci-admin POCKYMOE_ADMIN_PASSWORD="$SECRET" POCKYMOE_SESSION_SECRET="$SECRET" \
-            POCKYMOE_DATABASE_PATH="$LAB/db.sqlite" DATABASE_URL="$LAB/db.sqlite" \
-            POCKYMOE_WORKSPACE_ROOT="$LAB/ws" WORKSPACE_ROOT="$LAB/ws" \
-            "$LAB/remote-codex-darwin-arm64" supervisor > ../ci-out/supervisor.log 2>&1 &
-          for _ in $(seq 60); do curl -sf http://127.0.0.1:45900/healthz >/dev/null && break; sleep 1; done
-          curl -sf http://127.0.0.1:45900/healthz
-          node scripts/ci/seed-local.mjs http://127.0.0.1:45900 "$LAB/ws/notes" | tee ../ci-out/seed.json
-      - name: Install Maestro
-        if: matrix.configuration == 'Release'
-        run: |
-          curl -fsSL "https://get.maestro.mobile.dev" | bash
-          echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
-      - name: Screenshots on iPhone and iPad, light and dark
+          # D1: an unsigned simulator app has no entitlements, so the Keychain refuses it (-34018).
+          # Sign it ad hoc with the simulator keychain entitlements, as "Sign to Run Locally" does.
+          APP=ios/build/Build/Products/${{ matrix.configuration }}-iphonesimulator/PockymoeDev.app
+          codesign --force --deep --sign - "$APP"
+          codesign --force --sign - --entitlements scripts/ci/simulator.entitlements --generate-entitlement-der "$APP"
+          codesign -d --entitlements - "$APP" | head -20
+          ditto -c -k --keepParent "$APP" ../ci-out/PockymoeDev-${{ matrix.configuration }}.app.zip
+      - name: Launch smoke test on an iPhone simulator
         if: matrix.configuration == 'Release'
         run: |
           APP=ios/build/Build/Products/Release-iphonesimulator/PockymoeDev.app
-          OUT="$PWD/../ci-out/screens"; mkdir -p "$OUT"
-          pick() { xcrun simctl list devices available -j | python3 -c "import json,sys; ds=[d for k,v in json.load(sys.stdin)['devices'].items() if 'iOS' in k for d in v if d['name'].startswith('$1')]; print(ds[-1]['udid'])"; }
-          status=0
-          for kind in iPhone iPad; do
-            UDID=$(pick $kind); echo "$kind $UDID"
-            xcrun simctl boot "$UDID"; xcrun simctl bootstatus "$UDID" -b
-            xcrun simctl install "$UDID" "$APP"
-            for mode in light dark; do
-              xcrun simctl ui "$UDID" appearance $mode
-              xcrun simctl terminate "$UDID" com.pockymoe.app.dev || true
-              maestro --device "$UDID" test --test-output-dir "$OUT/maestro" -e OUT="$kind-$mode-" -e URL=http://localhost:45900 .maestro/screens.yaml || status=1
-              xcrun simctl io "$UDID" screenshot "$OUT/$kind-$mode-zz-last.png" || true
-            done
-            xcrun simctl spawn "$UDID" log show --last 15m --predicate 'process == "PockymoeDev"' > "$OUT/$kind-device.log" 2>&1 || true
-            xcrun simctl shutdown "$UDID"
-          done
-          # Every screenshot in one folder, named <device>-<mode>-<step>.png.
-          find "$OUT/maestro" -path '*takeScreenshot*' -name '*.png' -exec cp {} "$OUT/" \;
-          ls -la "$OUT"
-          exit $status
+          OUT="$PWD/../ci-out/smoke"; mkdir -p "$OUT"
+          UDID=$(xcrun simctl list devices available -j | python3 -c "import json,sys; ds=[d for k,v in json.load(sys.stdin)['devices'].items() if 'iOS' in k for d in v if d['name'].startswith('iPhone')]; print(ds[-1]['udid'])")
+          xcrun simctl boot "$UDID"; xcrun simctl bootstatus "$UDID" -b
+          xcrun simctl install "$UDID" "$APP"
+          xcrun simctl launch "$UDID" com.pockymoe.app.dev
+          sleep 25
+          xcrun simctl io "$UDID" screenshot "$OUT/launch.png"
+          xcrun simctl spawn "$UDID" log show --last 3m --predicate 'process == "PockymoeDev"' > "$OUT/device.log" 2>&1 || true
+          # Still running after 25 s, and no Keychain entitlement errors (-34018).
+          xcrun simctl spawn "$UDID" launchctl list | grep -q "com.pockymoe.app.dev" || { echo "the app is not running"; exit 1; }
+          if grep -q -- "-34018" "$OUT/device.log"; then echo "Keychain entitlement errors"; grep -m3 -- "-34018" "$OUT/device.log"; exit 1; fi
+          echo "launched and running"
       - uses: actions/upload-artifact@v4
         if: always()
         with:

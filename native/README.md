@@ -94,6 +94,16 @@ native app should get its own upload key (suggested alias `pockymoe-app-release`
 new app id starts a new Play listing. iOS push needs the relay's APNs topic for
 `com.pockymoe.app` (the relay has one topic per app kind, `POCKYMOE_APNS_TOPIC` is the shell's).
 
+iOS without a Mac: `.github/workflows/native-ios.yml` (GitHub Actions `macos-26`, newest Xcode;
+Expo SDK 58 needs Xcode 26.4 or later) runs on pushes to `feat/native-mobile` under `native/`
+and on demand. It generates the project (`expo prebuild --platform ios`), builds Debug and
+Release for the iOS Simulator, signs them ad hoc with simulator keychain entitlements
+(`scripts/ci/simulator.entitlements`; without them the Keychain refuses every call), and checks
+that the Release app launches and stays up. The .app files are the run's artifacts; screens are
+tested on the x86sim lab with them. `.maestro/screens.yaml` walks the main screens
+(`maestro test -e OUT=… -e URL=http://localhost:<port> .maestro/screens.yaml`) against a
+Supervisor seeded by `scripts/ci/seed-local.mjs`.
+
 iOS needs a Mac: `npm run ios:prebuild`, then `pod install` and build `ios/PockymoeDev.xcworkspace`
 (`ios/Pockymoe.xcworkspace` for `APP_VARIANT=production`).
 

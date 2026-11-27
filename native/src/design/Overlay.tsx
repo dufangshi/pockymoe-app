@@ -1,7 +1,7 @@
 // App-wide overlays: the object menu, confirmations and toasts. One host renders them
 // above everything (§4: secondary windows render at the root, never inside a row).
 import { useEffect, useState, type ComponentType } from 'react';
-import { Modal, Pressable, useWindowDimensions, View, AccessibilityInfo } from 'react-native';
+import { Modal, Platform, Pressable, useWindowDimensions, View, AccessibilityInfo } from 'react-native';
 import Animated, { FadeIn, FadeOut, SlideInDown, SlideOutDown } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Clipboard from 'expo-clipboard';
@@ -11,7 +11,7 @@ import { createStore } from '../state/store';
 import { Press } from './Press';
 import { AppText } from './AppText';
 import { Button } from './Button';
-import { Sheet, useModalKey } from './Sheet';
+import { Sheet, setOverlayRenderer, useModalKey, useNoSheetOpen } from './Sheet';
 import { useTheme } from './theme';
 import { haptic } from './haptics';
 import { translate } from '../i18n';
@@ -42,7 +42,7 @@ export function showToast(text: string, tone: Toast['tone'] = 'info') {
   setTimeout(() => overlay.set(s => ({ toasts: s.toasts.filter(x => x.id !== toast.id) })), tone === 'error' ? 5000 : 2600);
 }
 
-function MenuRow({ item, onDone }: { item: MenuItem; onDone: () => void }) {
+function MenuRow({ item, onDone }: { item: MenuItem; onDone: (after?: () => void) => void }) {
   const t = useTheme();
   const [state, setState] = useState<'idle' | 'copied' | 'failed'>('idle');
   const Icon = state === 'copied' ? Check : state === 'failed' ? AlertTriangle : item.icon;
@@ -53,11 +53,14 @@ function MenuRow({ item, onDone }: { item: MenuItem; onDone: () => void }) {
       catch { setState('failed'); }
       return;
     }
-    onDone();
-    await item.onPress?.();
+    // The action runs once the menu's window is gone: on iOS a picker, sheet or confirmation it
+    // presents while the menu is still dismissing never shows.
+    onDone(item.onPress ? () => void item.onPress?.() : undefined);
   };
   return (
-    <Press onPress={() => void run()} disabled={item.disabled} accessibilityRole="menuitem" accessibilityLabel={item.label}
+    <Press onPress={() => void run()} disabled={item.disabled}
+      // "menuitem" has no trait on iOS: VoiceOver would read the row as plain text, not a button.
+      accessibilityRole={Platform.OS === 'ios' ? 'button' : 'menuitem'} accessibilityLabel={item.label}
       accessibilityState={{ disabled: !!item.disabled, checked: item.checked }}
       style={{ flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 46, paddingHorizontal: 14, borderRadius: t.radius.sm }}>
       {Icon ? <Icon size={18} color={color} /> : <View style={{ width: 18 }} />}
@@ -80,23 +83,35 @@ function MenuHost() {
   const [last, setLast] = useState<MenuRequest | null>(current);
   useEffect(() => { if (current) setLast(current); }, [current]);
   const menu = current ?? last;
+  // A row's action, run after the menu has closed (Sheet onClosed, or the popover's unmount).
+  const [after, setAfter] = useState<(() => void) | null>(null);
+  const popover = !!menu?.anchor;
+  // Android has no Modal onDismiss and no presentation limit: run it on the next frame there.
+  useEffect(() => {
+    if (Platform.OS === 'ios' || current || !after || !popover) return;
+    const id = requestAnimationFrame(() => { const fn = after; setAfter(null); fn(); });
+    return () => cancelAnimationFrame(id);
+  }, [current, after, popover]);
+  const popoverDismissed = () => { if (after) { const fn = after; setAfter(null); fn(); } };
   if (!menu) return null;
-  const close = () => closeMenu();
+  const close = (fn?: () => void) => { if (fn) setAfter(() => fn); closeMenu(); };
+  const sheetClosed = () => { if (after) { const fn = after; setAfter(null); fn(); } };
   const rows = menu.items.map((item, i) => <MenuRow key={`${i}:${item.label}`} item={item} onDone={close} />);
   // A menu opened from a button is a popover anchored to it at every width, as on the Web
   // phone; one without an anchor (a long press) or too tall for the window rises as a sheet.
   const menuWidth = Math.min(280, width - 16);
   const estimated = menu.items.length * 46 + 16 + (menu.title ? (menu.subtitle ? 54 : 38) : 0);
   if (!menu.anchor || estimated > height - insets.top - insets.bottom - 16) {
-    return <Sheet visible={!!current} onClose={close} title={menu.title} subtitle={menu.subtitle}><View style={{ marginHorizontal: -6 }}>{rows}</View></Sheet>;
+    return <Sheet visible={!!current} onClose={() => close()} onClosed={sheetClosed} overlayLayer={false} title={menu.title} subtitle={menu.subtitle}><View style={{ marginHorizontal: -6 }}>{rows}</View></Sheet>;
   }
-  if (!current) return null;
+  // iOS: keep the popover's Modal mounted, hidden, until UIKit reports it dismissed (onDismiss).
+  if (!current && !(Platform.OS === 'ios' && after)) return null;
   const below = menu.anchor.y + menu.anchor.height + 6;
   const top = below + estimated < height - insets.bottom - 8 ? below : Math.max(insets.top + 8, menu.anchor.y - estimated - 6);
   const left = Math.min(Math.max(8, menu.anchor.x + menu.anchor.width - menuWidth), width - menuWidth - 8);
   return (
-    <Modal key={modalKey} transparent visible animationType="none" onRequestClose={close} statusBarTranslucent>
-      <Pressable style={{ flex: 1 }} onPress={close} accessibilityLabel={translate('workbench.close')} />
+    <Modal key={modalKey} transparent visible={!!current} onDismiss={popoverDismissed} animationType="none" onRequestClose={() => close()} statusBarTranslucent>
+      <Pressable style={{ flex: 1 }} onPress={() => close()} accessibilityLabel={translate('workbench.close')} />
       <Animated.View entering={FadeIn.duration(120)} exiting={FadeOut.duration(100)} accessibilityRole="menu"
         style={{ position: 'absolute', top, left, width: menuWidth, padding: 6, backgroundColor: t.c.panel, borderRadius: t.radius.lg, borderWidth: 1, borderColor: t.c.borderStrong,
           shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 18, shadowOffset: { width: 0, height: 6 }, elevation: 12 }}>
@@ -118,7 +133,7 @@ function ConfirmHost() {
   if (!confirm) return null;
   const finish = (ok: boolean) => { overlay.set({ confirm: null }); confirm.resolve(ok); };
   return (
-    <Sheet visible onClose={() => finish(false)} title={confirm.title}
+    <Sheet visible overlayLayer={false} onClose={() => finish(false)} title={confirm.title}
       footer={<>
         <Button label={confirm.cancelLabel ?? translate('workbench.cancel')} onPress={() => finish(false)} style={{ flex: 1, maxWidth: 200 }} />
         <Button label={confirm.confirmLabel} kind={confirm.destructive ? 'danger' : 'primary'} onPress={() => { if (confirm.destructive) haptic.warning(); finish(true); }} style={{ flex: 1, maxWidth: 200 }} testID="confirm-ok" />
@@ -146,7 +161,10 @@ function ToastHost() {
   );
 }
 
+const Hosts = () => <><MenuHost /><ConfirmHost /><ToastHost /></>;
+setOverlayRenderer(() => <Hosts />);
 export function OverlayHost() {
   useEffect(() => () => { overlay.set({ menu: null, confirm: null }); }, []);
-  return <><MenuHost /><ConfirmHost /><ToastHost /></>;
+  // With a Sheet open, the topmost Sheet renders the overlays inside its Modal (Sheet.tsx).
+  return useNoSheetOpen() ? <Hosts /> : null;
 }

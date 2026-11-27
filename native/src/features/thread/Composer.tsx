@@ -2,7 +2,7 @@
 // harness, and Send / Stop / queue. The draft survives navigation and restarts; a list
 // row shows "Draft: …" while one exists (§4: unsaved input is visible).
 import { useEffect, useRef, useState, type ComponentRef } from 'react';
-import { ActivityIndicator, ScrollView, TextInput, View } from 'react-native';
+import { ActivityIndicator, ScrollView, TextInput, useWindowDimensions, View } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import { Image } from 'expo-image';
@@ -38,6 +38,8 @@ interface Draft { text: string; attachments: PromptAttachment[]; quotes: QuoteDr
 const DRAFT_PREFIX = 'pockymoe-native.draft:';
 /** Drafts by thread key; text is persisted, attachments live in memory like the Web. */
 export const draftStore = createStore<Record<string, Draft>>({});
+const FIELD_MAX_SCALE = 1.6;
+
 export function readDraft(key: string): Draft {
   return draftStore.get()[key] ?? { text: prefs.get(DRAFT_PREFIX + key) ?? '', attachments: [], quotes: [] };
 }
@@ -94,6 +96,11 @@ export function Composer({ draftKey, api, threadId, agent, agents, canSwitch, cw
   const [sending, setSending] = useState(false);
   const [viewing, setViewing] = useState<PromptAttachment | null>(null);
   const input = useRef<ComponentRef<typeof TextInput>>(null);
+  // One line of the field at the user's text size (Dynamic Type), capped like the field's own font
+  // scaling: a fixed 24 pt clipped the text, and RN's multiline field misplaces very tall lines.
+  const { fontScale } = useWindowDimensions();
+  const scale = Math.min(Math.max(1, fontScale), FIELD_MAX_SCALE);
+  const line = Math.round(24 * scale);
   useEffect(() => { setDraft(readDraft(draftKey)); }, [draftKey]);
   useEffect(() => draftStore.subscribe(() => { const next = draftStore.get()[draftKey]; if (next) setDraft(next); }), [draftKey]);
   const update = (next: Partial<Draft>) => { const merged = { ...draft, ...next }; setDraft(merged); writeDraft(draftKey, merged); };
@@ -228,8 +235,10 @@ export function Composer({ draftKey, api, threadId, agent, agents, canSwitch, cw
           <TextInput ref={input} value={text} onChangeText={v => update({ text: v })} multiline autoFocus={autoFocus}
             onFocus={() => setExpanded(true)} onBlur={() => { if (!readDraft(draftKey).text.trim() && !draft.attachments.length && !draft.quotes.length) setExpanded(false); }}
             placeholder={placeholder ?? (running ? translate('chat.queueNextPrompt') : translate('chat.typeMessage'))} placeholderTextColor={t.c.fgMuted}
-            accessibilityLabel={translate('native.prompt')} selectionColor={t.c.primary} textAlignVertical="top" scrollEnabled={expanded} testID="composer-input"
-            style={{ flex: 1, minHeight: 24, maxHeight: expanded ? 240 : 24, padding: 0, color: t.c.fg, fontFamily: t.terminal ? t.font.mono : t.font.regular, fontSize: t.terminal ? 13 : 16, lineHeight: 24 }} />
+            maxFontSizeMultiplier={FIELD_MAX_SCALE} accessibilityLabel={translate('native.prompt')} selectionColor={t.c.primary} textAlignVertical="top" scrollEnabled={expanded} testID="composer-input"
+            style={{ flex: 1, minHeight: line, maxHeight: expanded ? Math.max(240, line * 4) : line, padding: 0, color: t.c.fg, fontFamily: t.terminal ? t.font.mono : t.font.regular, fontSize: t.terminal ? 13 : 16,
+              // iOS puts a line height taller than the font's own above the text: only pin it at 1x.
+              lineHeight: scale > 1 ? undefined : 24 }} />
           {!expanded && lines > 1 ? <View style={{ paddingHorizontal: 6, paddingVertical: 1, borderRadius: 999, backgroundColor: t.c.hover }}><AppText variant="caption" style={{ fontSize: 11 }}>{`+${lines - 1}`}</AppText></View> : null}
           {!expanded ? <>{stopKey}{sendKey}</> : null}
         </View>

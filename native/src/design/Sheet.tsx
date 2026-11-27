@@ -2,6 +2,7 @@
 // a scrim, a grabber, a title and a 40 pt ×; on wide windows they are centered dialogs.
 // The content scrolls vertically only; actions sit at the bottom, Cancel first.
 import { useEffect, useState, type ReactNode } from 'react';
+import { createStore } from '../state/store';
 import { BackHandler, Modal, Pressable, ScrollView, useWindowDimensions, View, type StyleProp, type ViewStyle } from 'react-native';
 import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
 import Animated, { Easing, runOnJS, useAnimatedStyle, useSharedValue, withSpring, withTiming } from 'react-native-reanimated';
@@ -14,6 +15,26 @@ import { useTheme } from './theme';
 import { translate } from '../i18n';
 
 export const WIDE_SHEET = 640;
+
+// iOS presents one view controller at a time from a presenter, and an RN Modal presents from the
+// root controller: a menu, confirmation or toast rendered at the root cannot show while a Sheet is
+// up. Each open Sheet is a layer; the topmost one renders the app-wide overlays inside its own
+// Modal (a nested Modal presents from that Sheet), the root renders them only with no Sheet open.
+const layers = createStore<{ stack: number[] }>({ stack: [] });
+let layerSeq = 0;
+let renderOverlays: (() => ReactNode) | null = null;
+/** Overlay.tsx registers its hosts here (no import cycle). */
+export function setOverlayRenderer(render: () => ReactNode) { renderOverlays = render; }
+export function useNoSheetOpen() { return layers.useValue(s => s.stack.length === 0); }
+function useLayer(active: boolean) {
+  const [id] = useState(() => ++layerSeq);
+  useEffect(() => {
+    if (!active) return;
+    layers.set(s => ({ stack: [...s.stack, id] }));
+    return () => layers.set(s => ({ stack: s.stack.filter(x => x !== id) }));
+  }, [active, id]);
+  return layers.useValue(s => s.stack[s.stack.length - 1] === id);
+}
 
 export interface SheetProps {
   visible: boolean;
@@ -33,6 +54,10 @@ export interface SheetProps {
   contentStyle?: StyleProp<ViewStyle>;
   /** false when the content draws its own header (the inspector): only the grabber stays. */
   header?: boolean;
+  /** Called once the sheet's window is gone (after the closing animation). */
+  onClosed?: () => void;
+  /** false for the overlays' own sheets (menu, confirmation): they never host other overlays. */
+  overlayLayer?: boolean;
 }
 
 /**
@@ -52,13 +77,24 @@ export function useModalKey() {
   return key;
 }
 
-export function Sheet({ visible, onClose, title, subtitle, children, footer, tall, fraction, scroll = true, dismissable = true, testID, contentStyle, header: showHeader = true }: SheetProps) {
+export function Sheet({ visible, onClose, title, subtitle, children, footer, tall, fraction, scroll = true, dismissable = true, testID, contentStyle, header: showHeader = true, onClosed, overlayLayer = true }: SheetProps) {
   const t = useTheme();
   const modalKey = useModalKey();
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const wide = width >= WIDE_SHEET;
   const [mounted, setMounted] = useState(visible);
+  const isTopLayer = useLayer(overlayLayer && mounted);
+  // The Modal unmounts with `mounted`; tell the owner on the next frame, when iOS has dismissed it.
+  const [wasMounted, setWasMounted] = useState(mounted);
+  useEffect(() => {
+    if (mounted) { setWasMounted(true); return; }
+    if (!wasMounted) return;
+    setWasMounted(false);
+    const id = requestAnimationFrame(() => onClosed?.());
+    return () => cancelAnimationFrame(id);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mounted]);
   const offset = useSharedValue(height);
   const fade = useSharedValue(0);
 
@@ -137,6 +173,7 @@ export function Sheet({ visible, onClose, title, subtitle, children, footer, tal
           </GestureDetector>
         </KeyboardAvoidingView>
       </GestureHandlerRootView>
+      {isTopLayer && renderOverlays ? <View pointerEvents="box-none" style={{ position: 'absolute', inset: 0 }}>{renderOverlays()}</View> : null}
     </Modal>
   );
 }

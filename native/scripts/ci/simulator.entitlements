@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Simulator-only entitlements for the CI build (ad hoc signature): without an application
+     identifier and keychain group every Keychain call fails with -34018, and the app keeps its
+     account keys in the Keychain. Not used for device builds. -->
+<plist version="1.0"><dict>
+<key>application-identifier</key><string>SIMULATOR0.com.pockymoe.app.dev</string>
+<key>com.apple.developer.team-identifier</key><string>SIMULATOR0</string>
+<key>keychain-access-groups</key><array><string>SIMULATOR0.com.pockymoe.app.dev</string></array>
+<key>get-task-allow</key><true/>
+</dict></plist>

@@ -101,7 +101,8 @@ export function Workbench() {
 
   if (!layout.split) {
     return (
-      <View style={{ flex: 1, backgroundColor: t.c.bg }}>
+      // A phone on its side: keep the list clear of the Dynamic Island / notch (zero when upright).
+      <View style={{ flex: 1, backgroundColor: t.c.bg, paddingLeft: insets.left, paddingRight: insets.right }}>
         {list}
         {/* New thread within thumb reach (one-hand layout); not before there is a workspace. */}
         {noWorkspaces ? null : <Fab icon={Plus} label={translate('workbench.createThread')} onPress={() => newThread()} extended={!scrolledDown} bottom={insets.bottom + 18} testID="new-thread" />}

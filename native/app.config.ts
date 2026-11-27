@@ -31,6 +31,9 @@ const config: ExpoConfig = {
       NSPhotoLibraryUsageDescription: 'Attach photos to a prompt.',
       NSLocalNetworkUsageDescription: 'Connect to a Pockymoe Supervisor on your network.',
       ITSAppUsesNonExemptEncryption: false,
+      // The status bar follows expo-status-bar (App.tsx), not each view controller; otherwise its
+      // icons stay dark on every dark theme.
+      UIViewControllerBasedStatusBarAppearance: false,
       // Direct Supervisors: LAN names and IP addresses are local networking; Tailscale
       // MagicDNS names (*.ts.net) are the other plain-HTTP case a self-hosted Supervisor has.
       NSAppTransportSecurity: {
