@@ -27,7 +27,9 @@ export async function useRelay(origin: string | null) {
 }
 export async function clearRelaySession() { await setToken(null); }
 
-export function installRelayFetch(tokens: TokenStore) {
+let clearCookies: ((url: string) => Promise<void>) | undefined;
+export function installRelayFetch(tokens: TokenStore, cookies?: { clear?(url: string): Promise<void> }) {
+  clearCookies = cookies?.clear;
   store = tokens;
   const raw = globalThis.fetch.bind(globalThis);
   const relayFetch: typeof fetch = async (input, init) => {
@@ -40,8 +42,12 @@ export function installRelayFetch(tokens: TokenStore) {
     const headers = new Headers(request.headers);
     if (token && !headers.has('authorization')) headers.set('authorization', `Bearer ${token}`);
     const body = ['GET', 'HEAD'].includes(request.method) ? undefined : await request.arrayBuffer();
-    // The second-factor step is bound to a short-lived HttpOnly cookie that login sets.
-    const credentials = url.pathname === '/relay/auth/challenge' || url.pathname === '/relay/auth/login' ? 'include' : 'omit';
+    // A fresh sign-in starts without the relay's old cookies: the relay refuses a cookie-carrying
+    // request without a bearer or Origin, and iOS kept a stale session cookie after sign-out (D23).
+    if (request.method === 'POST' && /^\/relay\/auth\/(login|register|recover)$/.test(url.pathname)) await clearCookies?.(relayOrigin).catch(() => undefined);
+    // The second-factor step is bound to a short-lived HttpOnly cookie that login sets; logout's
+    // reply clears the session cookie, so it must reach the cookie store too.
+    const credentials = ['/relay/auth/challenge', '/relay/auth/login', '/relay/auth/logout'].includes(url.pathname) ? 'include' : 'omit';
     const response = await raw(request.url, { method: request.method, headers, credentials,
       signal: request.signal, ...(body && body.byteLength ? { body } : body ? { body: '' } : {}) });
     if (__DEV__) console.log('[relay]', request.method, url.pathname, response.status, token ? 'bearer' : 'anon', response.status >= 400 ? await response.clone().text().then(t => t.slice(0, 200)).catch(() => '') : '');

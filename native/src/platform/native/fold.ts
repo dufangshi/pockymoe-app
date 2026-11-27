@@ -13,6 +13,8 @@ interface PockymoeNative {
   cameraAvailable?(): boolean;
   /** iOS: the top of the safe area below iPadOS window controls (windowed apps), in points. */
   windowControlsTop?(): Promise<number>;
+  /** Deletes this app's HTTP cookies for a URL (the relay's, before a fresh sign-in). */
+  clearCookies?(url: string): Promise<void>;
 }
 export const pockymoeNative = requireOptionalNativeModule<PockymoeNative>('PockymoeNative');
 const native = pockymoeNative;

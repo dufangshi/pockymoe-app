@@ -34,6 +34,15 @@ public class PockymoeNativeModule: Module {
       UIImagePickerController.isSourceTypeAvailable(.camera)
     }
 
+    // The relay's cookies in the shared URL session storage: the native client authenticates with a
+    // bearer token, and a stale session cookie (kept after a sign-out whose reply did not reach the
+    // store) makes the relay refuse the next cookie-carrying sign-in (D23).
+    AsyncFunction("clearCookies") { (url: String) in
+      guard let target = URL(string: url) else { return }
+      let storage = HTTPCookieStorage.shared
+      for cookie in storage.cookies(for: target) ?? [] { storage.deleteCookie(cookie) }
+    }
+
     // iPadOS 26+ windowed apps: the window controls (close/minimise/resize) sit in the top-leading
     // corner over the app, outside the plain safe area. The safe area adapted vertically to that
     // corner starts below them; the app pads its top by it so headers stay clear (D21).

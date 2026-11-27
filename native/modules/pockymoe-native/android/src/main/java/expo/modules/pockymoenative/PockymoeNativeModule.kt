@@ -60,6 +60,15 @@ class PockymoeNativeModule : Module() {
     Function("cameraAvailable") {
       appContext.reactContext?.packageManager?.hasSystemFeature(android.content.pm.PackageManager.FEATURE_CAMERA_ANY) ?: true
     }
+    // The relay's cookies for this app's HTTP stack (React Native's cookie handler is backed by
+    // CookieManager): a stale session cookie makes the relay refuse cookie-carrying sign-ins.
+    AsyncFunction("clearCookies") { url: String ->
+      val manager = android.webkit.CookieManager.getInstance()
+      manager.getCookie(url)?.split(";")?.map { it.trim().substringBefore("=") }?.filter { it.isNotEmpty() }?.forEach {
+        manager.setCookie(url, "$it=; Max-Age=0; Path=/")
+      }
+      manager.flush()
+    }
     Function("stopThreadWatch") {
       val context = appContext.reactContext ?: return@Function null
       ThreadWatchService.stop(context)
