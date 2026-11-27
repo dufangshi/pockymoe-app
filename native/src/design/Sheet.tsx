@@ -195,8 +195,12 @@ export function Sheet({ visible, onClose, title, subtitle, children, footer, tal
       ? <ScrollView style={tall ? { flex: 1 } : { flexGrow: 0 }} contentContainerStyle={[{ paddingHorizontal: 16, paddingBottom: 12 }, contentStyle]} keyboardShouldPersistTaps="handled" showsHorizontalScrollIndicator={false}>{children}</ScrollView>
       : <View style={[{ flexShrink: 1, flexGrow: tall ? 1 : 0 }, contentStyle]}>{children}</View>;
 
-    return (
-      <View pointerEvents="box-none" style={{ position: 'absolute', inset: 0 }}>
+    // A sheet covered by another layer (a nested sheet, a menu, a confirmation, the image viewer)
+    // leaves the accessibility tree until it is on top again: VoiceOver's modal mark only hides
+    // siblings, and the portal's layers are cousins of this body (D6).
+    return (<>
+      <View pointerEvents="box-none" style={{ position: 'absolute', inset: 0 }}
+        accessibilityElementsHidden={!modalTop} importantForAccessibility={modalTop ? 'auto' : 'no-hide-descendants'}>
         <KeyboardAvoidingView behavior="padding" style={{ flex: 1, justifyContent: wide ? 'center' : 'flex-end', alignItems: wide ? 'center' : 'stretch', paddingTop: wide ? 0 : insets.top + 8 }}>
           <Animated.View style={[{ position: 'absolute', inset: 0, backgroundColor: t.c.scrim }, scrimStyle]}>
             <Pressable style={{ flex: 1 }} onPress={() => dismissable && onClose()} accessibilityRole="button" accessibilityLabel={translate('workbench.close')} />
@@ -218,9 +222,9 @@ export function Sheet({ visible, onClose, title, subtitle, children, footer, tal
             </Animated.View>
           </GestureDetector>
         </KeyboardAvoidingView>
-        {nested && isTopLayer && renderOverlays ? <View pointerEvents="box-none" style={{ position: 'absolute', inset: 0 }}>{renderOverlays()}</View> : null}
       </View>
-    );
+      {nested && isTopLayer && renderOverlays ? <View pointerEvents="box-none" style={{ position: 'absolute', inset: 0 }}>{renderOverlays()}</View> : null}
+    </>);
   };
   const content = mounted ? renderContent() : null;
   usePortal(nested ? outer : null, portalId, nested ? content : null);
